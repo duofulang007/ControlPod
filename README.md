@@ -21,7 +21,7 @@
 ## 快速开始
 
 ```powershell
-git clone https://github.com/duofulang007/-.git apex-console
+git clone https://github.com/duofulang007/apex-console.git apex-console
 cd apex-console
 
 # 创建后端虚拟环境并安装依赖
