@@ -74,7 +74,9 @@ class ModuleRegistry:
         if not isinstance(actions_raw, dict) or not isinstance(actions_raw.get("run"), dict):
             raise ValueError(f"{path}: 缺少 actions.run")
         module_dir = path.parent.resolve()
-        project_root = Path(self._required_text(data, "projectRoot", path)).resolve()
+        project_root_raw = self._required_text(data, "projectRoot", path)
+        console_root = str(self.root.parent.parent.resolve())
+        project_root = Path(project_root_raw.replace("{console_root}", console_root)).resolve()
         actions: dict[str, ModuleAction] = {}
         for action_name, action_raw in actions_raw.items():
             if not isinstance(action_name, str) or not ID_RE.fullmatch(action_name):

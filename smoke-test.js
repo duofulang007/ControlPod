@@ -1769,11 +1769,11 @@ try {
   check(agentsMd.includes('术语') && agentsMd.includes('硬约束') && agentsMd.includes('ALL_PASS')
     && agentsMd.includes('已删除的模块'),
     '交接说明书 AGENTS.md 就位（术语 / 硬约束 / 验证方式 / 已删模块清单齐全）');
-  /* 根目录瘦身护栏：只新增 backend 目录，不把日志 / 截图 / 备份丢在根目录 */
-  const dirFiles = require('fs').readdirSync(__dirname).sort();
-  const expectedFiles = ['AGENTS.md', 'app.js', 'backend', 'index.html', 'smoke-test.js', 'styles.css'];
+  /* 根目录瘦身护栏：只保留源码、Git 元数据和唯一启动入口。 */
+  const dirFiles = require('fs').readdirSync(__dirname).filter(name=>name!=='.git').sort();
+  const expectedFiles = ['.gitattributes', '.gitignore', '00-启动 APEX 总控台.lnk', 'AGENTS.md', 'README.md', 'app.js', 'backend', 'index.html', 'smoke-test.js', 'styles.css'].sort();
   check(JSON.stringify(dirFiles) === JSON.stringify(expectedFiles),
-    '根目录只增加 backend（实际：' + dirFiles.join(', ') + '）');
+    '根目录只保留源码、Git 配置和唯一启动入口（实际：' + dirFiles.join(', ') + '）');
   const n0 = T.DATA.notes.length;
   T.S.notes.unshift({id:'nX', title:'t', tag:'日常', pinned:false, time:'刚刚', body:'b', proj:T.DATA.projects[0].name});
   check(T.S.notes.length === n0 + 1, '新建项目记录会追加到底层记录（' + (n0 + 1) + ' 条）');
@@ -2224,11 +2224,13 @@ try {
   }, false);
   check(failed31.includes('运行失败') && !failed31.includes('badge b-blue">运行中'),
     '真实启动失败时状态徽标显示失败，不再误报运行中');
-  check(launcher31.includes('def invoke_transition(') && launcher31.includes('def execute_action(')
-    && launcher31.includes('transition("stop", "stopped", log_path)')
-    && launcher31.includes('transition("start", "running", log_path)')
-    && launcher31.includes('uvicorn') && launcher31.includes('BACKEND_PORT = 8000'),
-    'APEX 模块复用常驻核心服务，重启严格执行先关闭再启动');
+  const worker31 = fs31.readFileSync(path.join(__dirname, 'backend/apex_worker.py'), 'utf8');
+  check(launcher31.includes('WORKER_PORT = 8766') && launcher31.includes('def ensure_worker(')
+    && launcher31.includes('def execute_action(') && launcher31.includes('/actions/{action}')
+    && worker31.includes('get_service') && worker31.includes('ApexOneClickService') === false
+    && worker31.includes('service.adopt_running_environment()')
+    && worker31.includes('host="127.0.0.1"') && worker31.includes('port=8766'),
+    'APEX 模块复用内置常驻工作进程，重启严格执行先关闭再启动');
   check(!fs31.existsSync(path.join(__dirname, 'backend/modules/apex-launcher/adapter.py')),
     '短命适配器已移除，不再伪造跨进程关闭状态');
   check(!launcher31.includes('5173') && !launcher31.includes('frontend'),

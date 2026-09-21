@@ -16,12 +16,17 @@ function Assert-NativeSuccess([string]$Step) {
 }
 
 if (-not $Python) {
-    $projectWord = [string]::Concat([char]0x9879, [char]0x76EE)
-    $Python = "D:\Py$projectWord\APEX\backend\.venv\Scripts\python.exe"
+    $launcher = Get-Command py -ErrorAction SilentlyContinue
+    if ($launcher) {
+        $candidate = & $launcher.Source -3.12 -c "import sys; print(sys.executable)" 2>$null
+        if ($LASTEXITCODE -eq 0 -and $candidate) {
+            $Python = $candidate.Trim()
+        }
+    }
 }
 
 if (-not (Test-Path -LiteralPath $Python)) {
-    throw "Python 3.12 was not found: $Python"
+    throw "Python 3.12 was not found. Install Python 3.12 or pass its executable with -Python."
 }
 
 if (-not (Test-Path -LiteralPath $venvPython)) {
