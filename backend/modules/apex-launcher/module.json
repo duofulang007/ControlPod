@@ -1,0 +1,58 @@
+{
+  "schemaVersion": 1,
+  "id": "apex-launcher",
+  "projectId": "apex",
+  "name": "APEX 一键启动",
+  "version": "1.0.0",
+  "projectRoot": "D:\\Py项目\\APEX",
+  "requiresAdmin": true,
+  "singleInstance": true,
+  "timeoutSeconds": 240,
+  "actions": {
+    "run": {
+      "program": "{project_root}\\backend\\.venv\\Scripts\\python.exe",
+      "cwd": "{module_dir}",
+      "args": [
+        "{module_dir}\\runner.py",
+        "--action",
+        "run",
+        "--apex-root",
+        "{project_root}",
+        "--result-path",
+        "{result_path}",
+        "--log-path",
+        "{log_path}"
+      ]
+    },
+    "stop": {
+      "program": "{project_root}\\backend\\.venv\\Scripts\\python.exe",
+      "cwd": "{module_dir}",
+      "args": [
+        "{module_dir}\\runner.py",
+        "--action",
+        "stop",
+        "--apex-root",
+        "{project_root}",
+        "--result-path",
+        "{result_path}",
+        "--log-path",
+        "{log_path}"
+      ]
+    },
+    "restart": {
+      "program": "{project_root}\\backend\\.venv\\Scripts\\python.exe",
+      "cwd": "{module_dir}",
+      "args": [
+        "{module_dir}\\runner.py",
+        "--action",
+        "restart",
+        "--apex-root",
+        "{project_root}",
+        "--result-path",
+        "{result_path}",
+        "--log-path",
+        "{log_path}"
+      ]
+    }
+  }
+}

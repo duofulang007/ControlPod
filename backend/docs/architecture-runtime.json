@@ -1,0 +1,178 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "APEX 总控台 · 运行时架构",
+    "locale": "zh-CN",
+    "output": "architecture-runtime.html",
+    "quality_profile": "showcase",
+    "views": [
+      {
+        "id": "main-path",
+        "label": "主调用路径",
+        "focus": ["spa", "api", "db"],
+        "note": "前端同源请求后端，后端读写本机 SQLite。"
+      },
+      {
+        "id": "execution",
+        "label": "运行项目",
+        "focus": ["registry", "runner", "apex", "win"],
+        "note": "运行项目＝后端起子进程，用 APEX 自带解释器执行模块。"
+      },
+      {
+        "id": "boundaries",
+        "label": "信任边界",
+        "focus": ["spa", "store", "api", "obsidian"],
+        "note": "浏览器沙箱、本机回环服务、外部程序三层权限各不相同。"
+      }
+    ]
+  },
+  "components": [
+    {
+      "id": "launcher",
+      "type": "backend",
+      "label": "一键启动器",
+      "sublabel": "console_launcher.py",
+      "tag": "源码指纹 + 健康检查",
+      "pos": [300, 12],
+      "size": [180, 72]
+    },
+    {
+      "id": "spa",
+      "type": "frontend",
+      "label": "单页前端",
+      "sublabel": "index.html · app.js",
+      "tag": "原生 JS · 零构建",
+      "pos": [300, 120],
+      "size": [180, 78]
+    },
+    {
+      "id": "store",
+      "type": "database",
+      "label": "浏览器本机存储",
+      "sublabel": "localStorage",
+      "tag": "仅 Obsidian 配置",
+      "pos": [300, 280],
+      "size": [180, 68]
+    },
+    {
+      "id": "obsidian",
+      "type": "external",
+      "label": "Obsidian 本机仓库",
+      "sublabel": "obsidian:// 协议",
+      "pos": [80, 280],
+      "size": [180, 68]
+    },
+    {
+      "id": "api",
+      "type": "backend",
+      "label": "FastAPI 后端服务",
+      "sublabel": "app/main.py",
+      "tag": "127.0.0.1:8765 · 同源",
+      "pos": [640, 120],
+      "size": [200, 78]
+    },
+    {
+      "id": "registry",
+      "type": "backend",
+      "label": "执行模块注册表",
+      "sublabel": "ModuleRegistry",
+      "tag": "扫描 module.json",
+      "pos": [940, 300],
+      "size": [190, 68]
+    },
+    {
+      "id": "runner",
+      "type": "backend",
+      "label": "执行模块运行器",
+      "sublabel": "ModuleRunner",
+      "tag": "子进程 + 超时",
+      "pos": [640, 368],
+      "size": [200, 68]
+    },
+    {
+      "id": "db",
+      "type": "database",
+      "label": "SQLite 持久层",
+      "sublabel": "apex-console.db",
+      "tag": "user_version 迁移",
+      "pos": [940, 120],
+      "size": [190, 78]
+    },
+    {
+      "id": "apex",
+      "type": "external",
+      "label": "APEX Automation",
+      "sublabel": "外部项目",
+      "tag": "自带 Python 3.12",
+      "pos": [645, 512],
+      "size": [190, 78]
+    },
+    {
+      "id": "win",
+      "type": "external",
+      "label": "Windows 系统能力",
+      "sublabel": "默认程序 · 提权 · 进程",
+      "pos": [1080, 512],
+      "size": [190, 72]
+    }
+  ],
+  "boundaries": [
+    {
+      "kind": "security-group",
+      "label": "浏览器沙箱 · 无本机文件权限",
+      "wraps": ["spa", "store"]
+    },
+    {
+      "kind": "security-group",
+      "label": "本机后端进程 · 仅监听 127.0.0.1:8765",
+      "wraps": ["api", "db", "registry", "runner"]
+    },
+    {
+      "kind": "region",
+      "label": "外部程序 · 受 Windows 用户权限约束",
+      "wraps": ["apex", "win"]
+    }
+  ],
+  "connections": [
+    { "id": "launcher-to-api", "from": "launcher", "to": "api", "label": "启动服务", "fromSide": "right", "toSide": "top" },
+    { "id": "frontend-to-api", "from": "spa", "to": "api", "label": "同源 fetch /api", "variant": "emphasis" },
+    { "id": "api-to-db", "from": "api", "to": "db", "label": "SQL 读写" },
+    { "id": "api-to-registry", "from": "api", "to": "registry", "label": "加载模块清单", "variant": "dashed" },
+    { "id": "api-to-runner", "from": "api", "to": "runner", "label": "运行 / 关闭 / 重启", "labelDy": 24 },
+    { "id": "frontend-to-store", "from": "spa", "to": "store", "label": "存 Obsidian 配置", "variant": "dashed", "labelDy": 24 },
+    { "id": "frontend-to-obsidian", "from": "spa", "to": "obsidian", "label": "obsidian:// 写主页", "variant": "security" },
+    { "id": "runner-to-apex", "from": "runner", "to": "apex", "label": "用 APEX 自带解释器执行模块", "variant": "security", "labelDy": 24 },
+    { "id": "runner-to-win", "from": "runner", "to": "win", "label": "网页模块交系统打开", "variant": "dashed" }
+  ],
+  "cards": [
+    {
+      "dot": "orange",
+      "title": "主调用路径",
+      "items": [
+        "前端只有一条 apiRequest()，走同源 /api（39 个端点）",
+        "写操作一律以后端成功返回为准，失败不改本地列表",
+        "后端同源下发 index.html / app.js / styles.css（no-store）",
+        "桌面快捷方式＝启动服务 + 打开 http://127.0.0.1:8765"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "持久化分工",
+      "items": [
+        "项目 / 任务 / 记录 / 应用 / 模块 / 运行记录 → SQLite",
+        "浏览器只留 Obsidian 连接配置（localStorage）",
+        "库版本由 PRAGMA user_version 管理，版本过高拒绝启动"
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "边界与失败纪律",
+      "items": [
+        "后端只监听 127.0.0.1，不暴露到局域网",
+        "APEX 模块需管理员权限，经 UAC 提权执行",
+        "执行失败不回退为假成功；删数据先预演再二次确认"
+      ]
+    }
+  ]
+}
