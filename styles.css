@@ -72,9 +72,26 @@ textarea,
   --pg-sm:12px;
   --gap:16px;
   --pad:18px;
+  --ctl-h:40px;          /* 顶栏圆形控件直径：图标按钮 / 语音 / 窗口置顶共用同一尺寸 */
+  --topbar-pin-ico:16px;
 
-  /* 总控台「最近打开的应用」磁贴：4 列 × 2 行铺满卡片，图标尺寸跟着放大让磁贴不显空 */
-  --home-tile-ico:42px;
+  /* 项目仪表盘：首页仅呈现项目状态、活动和推进，不重复应用入口；所有密度与热力图尺寸集中在这里。 */
+  --dash-card-pad:18px;
+  --dash-gap:14px;
+  --dash-side-min:320px;
+  --dash-kicker:11px;
+  --dash-title:28px;
+  --dash-desc:12.5px;
+  --dash-stat:24px;
+  --dash-stat-label:10.5px;
+  --dash-heat-cell:11px;
+  --dash-heat-gap:4px;
+  --dash-heat-label:10px;
+  --dash-heat-0:var(--tile);
+  --dash-heat-1:rgba(14,138,60,.20);
+  --dash-heat-2:rgba(14,138,60,.42);
+  --dash-heat-3:rgba(14,138,60,.68);
+  --dash-heat-4:var(--green);
 
   /* Obsidian 项目资料中枢：尺寸与动效集中在令牌，组件规则不硬写数值 */
   --ease-out:cubic-bezier(.23,1,.32,1);
@@ -159,6 +176,12 @@ textarea,
 
   --sh:0 8px 24px rgba(0,0,0,.34);
   --sh-lg:0 18px 44px rgba(0,0,0,.5);
+
+  --dash-heat-0:var(--tile);
+  --dash-heat-1:rgba(74,222,128,.18);
+  --dash-heat-2:rgba(74,222,128,.38);
+  --dash-heat-3:rgba(74,222,128,.62);
+  --dash-heat-4:var(--green);
 
   --bg:
     radial-gradient(1200px 680px at 6% -8%, #2A2029 0%, rgba(42,32,41,0) 60%),
@@ -290,13 +313,20 @@ input,select{font:inherit;color:inherit}
 [data-theme="dark"] .pill{border-color:var(--line)}
 .pill:hover{border-color:var(--brand-line)}
 .pill:active{transform:scale(.97)}
+/* 纯图标按钮：与相邻 .icon-btn 同尺寸同形，不再承载文字标签。
+   覆盖 .pill 的横向内边距，避免撑出多余宽度。 */
+.pill.window-topmost{padding:0;width:var(--ctl-h);height:var(--ctl-h);border-radius:50%;
+  display:grid;place-items:center;flex:0 0 auto}
+.pill.window-topmost svg{width:var(--topbar-pin-ico);height:var(--topbar-pin-ico)}
+.pill.window-topmost.on{background:var(--brand-soft);border-color:var(--brand-line);color:var(--brand)}
+.pill.window-topmost:disabled{opacity:.55;cursor:not-allowed}
 
 /* 图标组：默认按内容排布，但允许收缩 + 内部换行 —— 窄窗口下这组固定直径按钮会把
    .main 的最小内容宽顶到 400px 以上（内容被裁切）。项目禁止宽度断点，改用可换行收缩 */
 .icon-btns{display:flex;align-items:center;gap:8px;flex:0 1 auto;flex-wrap:wrap;
   justify-content:flex-end;min-width:0}
 .icon-btn{
-  width:40px;height:40px;border-radius:50%;background:var(--card);
+  width:var(--ctl-h);height:var(--ctl-h);border-radius:50%;background:var(--card);
   border:1px solid rgba(255,255,255,.9);backdrop-filter:var(--blur);
   -webkit-backdrop-filter:var(--blur);
   display:grid;place-items:center;position:relative;
@@ -407,9 +437,6 @@ button:focus-visible,input:focus-visible,.row:focus-visible,.tab:focus-visible{
   background-image:linear-gradient(135deg,#23242B 0%,#1E1F26 62%,#1B1C22 100%);
   border-color:var(--line);
 }
-.hero-top{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
-.hero-top .hero-meta{flex:1;min-width:0}
-.hero-top .hero-actions{margin-left:auto}
 .hero-main{flex:1;min-width:0;min-height:0;display:flex;flex-direction:column;justify-content:space-between;gap:14px}
 .hero-meta{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
 .chip{
@@ -422,60 +449,61 @@ button:focus-visible,input:focus-visible,.row:focus-visible,.tab:focus-visible{
 [data-theme="dark"] .chip.soft{background:rgba(255,255,255,.07)}
 .hero-title{font-family:Inter,sans-serif;font-size:28px;font-weight:700;letter-spacing:-.6px;line-height:1.12}
 .hero-actions{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
-.hero-side{
-  flex:0 0 auto;width:100%;display:flex;flex-direction:row;gap:8px;
-  background:none;border:none;border-radius:0;padding:0;
-  backdrop-filter:none;-webkit-backdrop-filter:none;
-}
-[data-theme="dark"] .hero-side{background:none;border:none}
-.hero-side .side-label{margin-bottom:2px;width:100%}
-.hero-side .proj-row{
-  flex:1;min-width:0;display:flex;flex-direction:row;align-items:center;gap:8px;
-  padding:10px 12px;border-radius:12px;
-  background:rgba(255,255,255,.62);border:1px solid rgba(255,255,255,.9);
-  transition:background .16s ease,border-color .16s ease,transform .16s ease;
-}
-.hero-side .proj-row:hover{transform:translateY(-1px);border-color:var(--brand-line)}
-.hero-side .proj-row.on{border-color:var(--brand-line);background:var(--brand-soft)}
-.hero-side .proj-row .p-name{font-size:12.5px}
-.proj-row{
-  display:flex;align-items:center;gap:10px;padding:8px 9px;border-radius:12px;
-  font-size:13px;text-align:left;width:100%;
-  transition:background .14s ease;
-}
-.proj-row:hover{background:var(--card-strong)}
-.proj-row.on{background:var(--card-strong)}
-.proj-row .p-name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:500}
-.proj-row .p-cur{width:16px;height:16px;display:block;flex:0 0 16px}
-.proj-row.on{border:1px solid var(--brand-line);background:var(--brand-soft)}
-.hero-progress{display:flex;align-items:center;gap:12px}
-.hero-progress b{font-family:Inter,sans-serif;font-size:13px;font-weight:700}
+.hero-project-facts{display:flex;align-items:center;gap:var(--dash-gap);flex-wrap:wrap;font-size:var(--dash-desc);color:var(--ink-2)}
+.hero-project-facts span{display:inline-flex;align-items:center;gap:calc(var(--dash-gap) / 3)}
 
-/* ---------- 总控台网格：项目主卡 + 应用 / 活动，单屏、有主次 ---------- */
+/* ---------- 项目仪表盘：当前项目、按项目总览、活跃度与最近活动，单屏、有主次 ---------- */
 .home-grid{
   flex:1;min-height:0;
   display:grid;
-  /* 列宽按内容量分配：应用卡占 2 列（磁贴要铺开），活动卡给到 1.3fr
-     —— 活动行的固定件（图标 28 + 项目名 + 时间 62 + 内边距与间距 54）约 232px，
-     低于 ~360px 卡片宽时标题会被挤成一个字，所以这里把余量留给它。 */
-  grid-template-columns:minmax(0,1fr) minmax(0,1fr) minmax(0,1.3fr);
-  /* hero 给 .66fr：它的内容只需要约 185px，多出来的高度全变成行间空白 */
-  grid-template-rows:minmax(196px,.66fr) minmax(0,1fr);
-  grid-template-areas:"hero hero hero" "quick quick acts";
+  grid-template-columns:minmax(0,1.38fr) minmax(var(--dash-side-min),.92fr);
+  grid-template-rows:minmax(0,1.06fr) minmax(0,.94fr);
+  grid-template-areas:"overview heat" "projects activity";
   gap:var(--gap);
 }
-.home-grid .hero{grid-area:hero}
-.home-grid .launch-card{grid-area:quick}
-.home-grid .acts-card{grid-area:acts}
-.home-grid .hero-title{font-size:30px}
+.dashboard-overview{grid-area:overview;display:grid;grid-template-columns:minmax(0,1.12fr) minmax(0,.88fr);gap:var(--dash-gap);padding:var(--dash-card-pad);background-image:linear-gradient(135deg,var(--card-strong),var(--card));}
+.dashboard-heat{grid-area:heat}
+.dashboard-projects{grid-area:projects}
+.dashboard-activity{grid-area:activity}
 .home-grid .card{min-height:0;overflow:hidden}
 .home-grid .card-head{flex:0 0 auto}
-.home-grid .list{min-height:0;overflow:hidden auto;flex:1;justify-content:space-evenly}
-/* 磁贴铺满卡片：沿用 .apps 默认的 4 列，正好 8 个铺成 2 行 —— 3 列会被拉成宽扁块，
-   再把网格限宽居中就又回到「内容缩成孤岛」。行高 1fr 让两行平分卡片高度。 */
-.home-grid .apps{flex:1;grid-template-rows:repeat(2,minmax(0,1fr))}
-.home-grid .apps .app-tile{justify-content:center}
-.home-grid .apps .app-tile .ico{width:var(--home-tile-ico);height:var(--home-tile-ico)}
+.dashboard-overview-main{min-width:0;display:flex;flex-direction:column;justify-content:space-between;gap:var(--dash-gap)}
+.dashboard-kicker{margin:0 0 calc(var(--dash-gap) / 3);font-size:var(--dash-kicker);font-weight:600;letter-spacing:.08em;color:var(--ink-3)}
+.dashboard-overview h2{margin:0;font-size:var(--dash-title);line-height:1.15;letter-spacing:-.04em}
+.dashboard-desc{margin:calc(var(--dash-gap) / 2) 0 0;color:var(--ink-2);font-size:var(--dash-desc);line-height:1.6}
+.dashboard-context{display:flex;align-items:center;gap:var(--dash-gap);flex-wrap:wrap;font-size:var(--dash-desc);color:var(--ink-2)}
+.dashboard-context span{display:inline-flex;align-items:baseline;gap:calc(var(--dash-gap) / 3)}
+.dashboard-context b{font-size:var(--dash-stat);font-weight:650;line-height:1;color:var(--ink)}
+.dashboard-actions{display:flex;align-items:center;gap:calc(var(--dash-gap) / 2);flex-wrap:wrap}
+.dashboard-kpis{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:var(--dash-gap)}
+.dashboard-kpis>div{display:flex;flex-direction:column;justify-content:center;gap:calc(var(--dash-gap) / 5);padding:var(--dash-gap);border:1px solid var(--line-2);border-radius:var(--r-inner);background:var(--tile-2)}
+.dashboard-kpis span,.dashboard-kpis small{font-size:var(--dash-stat-label);color:var(--ink-3)}
+.dashboard-kpis strong{font-size:var(--dash-stat);font-weight:650;line-height:1;color:var(--ink)}
+.heat-wrap{display:flex;flex:1;min-height:0;flex-direction:column;justify-content:center;gap:var(--dash-gap)}
+.heat-months{display:grid;grid-template-columns:repeat(3,1fr);margin-left:calc(var(--dash-heat-cell) + var(--dash-gap));font-size:var(--dash-heat-label);color:var(--ink-4)}
+.heat-body{display:flex;align-items:stretch;gap:calc(var(--dash-gap) / 2)}
+.heat-days{display:grid;grid-template-rows:repeat(7,var(--dash-heat-cell));gap:var(--dash-heat-gap);width:var(--dash-heat-cell);font-size:var(--dash-heat-label);line-height:var(--dash-heat-cell);color:var(--ink-4);text-align:center}
+.heat-grid{display:grid;grid-template-columns:repeat(12,var(--dash-heat-cell));grid-template-rows:repeat(7,var(--dash-heat-cell));grid-auto-flow:column;gap:var(--dash-heat-gap);justify-content:space-between;flex:1;min-width:0}
+.heat-cell,.heat-legend i{display:block;width:var(--dash-heat-cell);height:var(--dash-heat-cell);border-radius:calc(var(--r-sm) / 2);background:var(--dash-heat-0)}
+.heat-cell.h1,.heat-legend .h1{background:var(--dash-heat-1)}
+.heat-cell.h2,.heat-legend .h2{background:var(--dash-heat-2)}
+.heat-cell.h3,.heat-legend .h3{background:var(--dash-heat-3)}
+.heat-cell.h4,.heat-legend .h4{background:var(--dash-heat-4)}
+.heat-foot{display:flex;justify-content:space-between;align-items:center;gap:var(--dash-gap);font-size:var(--dash-heat-label);color:var(--ink-4)}
+.heat-legend{display:flex;align-items:center;gap:calc(var(--dash-heat-gap) / 1.4);white-space:nowrap}
+.heat-legend i{width:calc(var(--dash-heat-cell) * .76);height:calc(var(--dash-heat-cell) * .76)}
+.dashboard-project-list,.dashboard-activity-list{display:flex;flex:1;min-height:0;flex-direction:column;gap:calc(var(--dash-gap) / 2)}
+.dashboard-project-row{display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;gap:var(--dash-gap);width:100%;padding:calc(var(--dash-gap) / 1.35);border-radius:var(--r-inner);text-align:left;background:var(--tile-2);border:1px solid transparent;transition:background var(--motion-press) var(--ease-out),border-color var(--motion-press) var(--ease-out),transform var(--motion-press) var(--ease-out)}
+.dashboard-project-row:hover{background:var(--hover);border-color:var(--brand-line);transform:translateY(calc(var(--dash-gap) / -10))}
+.dashboard-project-row.on{background:var(--brand-soft);border-color:var(--brand-line)}
+.dashboard-project-name{display:flex;min-width:0;flex-direction:column;font-size:var(--dash-desc);font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.dashboard-project-name small{margin-top:calc(var(--dash-gap) / 6);font-size:var(--dash-stat-label);font-weight:400;color:var(--ink-3)}
+.dashboard-project-go{width:var(--dash-heat-cell);height:var(--dash-heat-cell);color:var(--ink-3)}
+.dashboard-project-go svg{display:block;width:100%;height:100%}
+.dashboard-activity .row{padding:calc(var(--dash-gap) / 1.35);min-height:0}
+.dashboard-activity .r-title{display:flex;min-width:0;flex-direction:column;gap:calc(var(--dash-gap) / 6)}
+.dashboard-activity .r-title small{font-size:var(--dash-stat-label);font-weight:400;color:var(--ink-3)}
+.dashboard-period{font-size:var(--dash-stat-label);color:var(--ink-3);white-space:nowrap}
 
 /* ---------- 专注视图：主卡高度恒定，展开内容在次级区滚动 ---------- */
 .focus-layout{flex:1;min-height:0;display:flex;flex-direction:column;gap:var(--gap)}
@@ -496,11 +524,10 @@ button:focus-visible,input:focus-visible,.row:focus-visible,.tab:focus-visible{
 
 /* ---------- 玻璃质感开关（设置页 · 真实生效） ---------- */
 .no-blur .card,.no-blur .sidebar,.no-blur .collapse-row,
-.no-blur .drawer,.no-blur .palette,.no-blur .hero-side{
+.no-blur .drawer,.no-blur .palette{
   backdrop-filter:none !important;-webkit-backdrop-filter:none !important;
 }
 .no-blur .card,.no-blur .collapse-row{background:#FFFFFF}
-.no-blur .hero-side .proj-row{background:#F1F3F7;border-color:var(--line-2)}
 .no-blur .hero{background-image:linear-gradient(135deg,#FFFFFF 0%,#F4F6FA 62%,#EDF1F7 100%)}
 [data-theme="dark"] .no-blur .card,
 [data-theme="dark"] .no-blur .collapse-row{background:#23242B}
@@ -965,12 +992,9 @@ svg{display:block}
 /* 流程说明并进「当前流程」行后，作为次级注释换行显示，避免再占一行高度 */
 .ov-flow-note{display:block;margin-top:3px;font-size:11px;font-weight:400;
   color:var(--ink-4);line-height:1.5}
-/* 卡 1 · 完成度：推到卡底，与另两卡的收口线对齐 */
-.ov-prog{display:flex;align-items:center;gap:9px;margin-top:auto;padding-top:12px;
-  border-top:1px solid var(--line-2)}
-.ov-prog-k{font-size:11.5px;color:var(--ink-4);white-space:nowrap}
-.ov-prog .track{flex:1}
-.ov-prog b{font-family:Inter,sans-serif;font-size:12.5px;font-weight:600;min-width:34px;text-align:right}
+.ov-summary{display:flex;justify-content:space-between;align-items:center;gap:9px;margin-top:auto;padding-top:12px;
+  border-top:1px solid var(--line-2);font-size:11.5px;color:var(--ink-4)}
+.ov-summary b{font-size:11.5px;font-weight:600;color:var(--ink-2);text-align:right}
 /* 卡 2 · 模块构成 / 启用明细 */
 .ov-block{display:flex;flex-direction:column;gap:7px}
 .ov-block-t{font-size:10.5px;font-weight:600;color:var(--ink-4);letter-spacing:.04em}

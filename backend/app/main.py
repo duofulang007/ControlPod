@@ -19,6 +19,8 @@ from .execution_service import ExecutionService
 from .module_registry import ModuleRegistry
 from .module_runner import ModuleRunner
 from .repositories.project_repository import ProjectRepository
+from .startup_manager import StartupRegistrationError, WindowsStartupManager
+from .window_manager import ConsoleWindowError, ConsoleWindowManager
 from .services.project_service import (
     BasicInfoValidationError,
     NoteNotFoundError,
@@ -113,6 +115,14 @@ class ProjectExecutionRequest(BaseModel):
     action: Literal["run", "stop", "restart"] = "run"
 
 
+class StartupSettingWrite(BaseModel):
+    enabled: bool
+
+
+class WindowTopmostWrite(BaseModel):
+    enabled: bool
+
+
 def normalized_web_url(value: str) -> str:
     url = value.strip()
     parsed = urlsplit(url)
@@ -138,6 +148,8 @@ def create_app(
     application_scanner: Callable[[], list[dict[str, str]]] | None = None,
     application_opener: Callable[[str], None] | None = None,
     application_icon_reader: Callable[[str], bytes | None] | None = None,
+    startup_manager: WindowsStartupManager | None = None,
+    window_manager: ConsoleWindowManager | None = None,
 ) -> FastAPI:
     db = Database(db_path or config.DB_PATH)
     db.init()
@@ -146,6 +158,8 @@ def create_app(
     scan_local_applications = application_scanner or scan_windows_applications
     open_local_application = application_opener or open_windows_application
     read_application_icon = application_icon_reader or extract_windows_icon_png
+    local_startup_manager = startup_manager or WindowsStartupManager()
+    local_window_manager = window_manager or ConsoleWindowManager()
 
     def local_application_rows() -> list[dict[str, str]]:
         rows = scan_local_applications()
@@ -287,6 +301,34 @@ def create_app(
     @app.get("/api/health")
     def health() -> dict:
         return {"status": "ok", "service": "apex-console", "version": "0.1.0"}
+
+    @app.get("/api/settings/startup")
+    def startup_status() -> dict:
+        try:
+            return local_startup_manager.status()
+        except StartupRegistrationError as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+    @app.put("/api/settings/startup")
+    def update_startup_setting(payload: StartupSettingWrite) -> dict:
+        try:
+            return local_startup_manager.set_enabled(payload.enabled)
+        except StartupRegistrationError as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+    @app.get("/api/window")
+    def console_window_status() -> dict:
+        try:
+            return local_window_manager.status()
+        except ConsoleWindowError as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+    @app.put("/api/window/topmost")
+    def update_console_window_topmost(payload: WindowTopmostWrite) -> dict:
+        try:
+            return local_window_manager.set_topmost(payload.enabled)
+        except ConsoleWindowError as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
 
     @app.get("/api/bootstrap")
     def bootstrap() -> dict:

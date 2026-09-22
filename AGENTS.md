@@ -51,6 +51,7 @@ backend/.venv/Scripts/python.exe -m pytest backend/tests -q
 ```
 
 - 桌面唯一入口是「APEX 总控台」快捷方式，目标为 `backend/.venv/Scripts/pythonw.exe backend/console_launcher.py`。入口会对源码内容生成指纹：服务未启动时启动；服务已启动且源码未变化时只打开网站；源码变化时只结束通过 `/api/health` 确认的 `apex-console` 监听进程，重启成功后再打开网站。后端子进程必须带 `CREATE_NO_WINDOW`，前端优先用 Edge / Chrome 的 `--app=` 模式打开独立无地址栏窗口；找不到受支持浏览器时才回退默认浏览器。端口属于未知程序时必须失败关闭，不得结束未知进程。
+- `--app` 固定窗口用的 `--user-data-dir` 是**浏览器的完整 profile**，浏览器会把自身组件与 AI 模型下载进去（单个 ONNX 就近 170 MB），实测能把 `backend/data/` 撑到 460 MB+。因此 `console_launcher.prune_profile()` 会在拉起窗口前清掉 `APP_WINDOW_PROFILE_JUNK` 列出的缓存与组件目录（ProvenanceData / component_crx_cache / GrShaderCache / Default/Cache 等），**只保留 Default 主体**，窗口尺寸与位置记忆不受影响；文件被占用时静默跳过。需要单独清理而不启动服务时跑 `python backend/console_launcher.py --clean-profile`（建议先关掉控制台窗口，否则 msedge 会锁住部分文件）。
 
 - **末行必须是 `ALL_PASS`**，否则算改动失败。
 - 输出格式：逐条 `OK   <一句话>` / `WARN <一句话>`，末尾 `FAIL_COUNT=n`；`n=0` 时打印 `ALL_PASS`。
@@ -191,6 +192,10 @@ backend/.venv/Scripts/python.exe -m pytest backend/tests -q
 14. **真实 APEX 模块不要改回长 PowerShell 启动器**：旧入口曾被 Microsoft Defender 识别为 `HackTool:PowerShell/ApexToolkit.A`，脚本在参数解析前就被 AMSI 拦截，表现为 `ScriptContainedMaliciousContent`。当前 `backend/modules/apex-launcher/runner.py` 由 APEX 自己的 Python 3.12 虚拟环境执行，并通过 Windows `runas` 请求管理员权限；`module.json` 不含 PowerShell 或执行策略绕过。不要用关闭防护、加白名单或改回脚本来规避。`ModuleRunner` 的程序路径也必须像参数一样展开 `{project_root}` 等占位符。
 15. **总控台一键入口只结束已验证的监听进程，不要改回 `taskkill /T`**：虚拟环境解释器会有父子进程，`taskkill /T` 为遍历整棵进程树可能在实际机器上报“拒绝访问”，即使目标监听进程本身可安全结束。当前 `console_launcher.py` 先用健康检查确认服务身份，再对 `8765` 的监听 PID 使用最小 `PROCESS_TERMINATE` 权限；普通权限无法取得结束句柄时才申请 UAC。源码未变化时不重启，避免打开网站就中断正在执行的项目。
 16. **自管滚动不要捕获按钮的指针**：应用列表的惯性滚动容器若在 `pointerdown` 时对按钮调用 `setPointerCapture`，鼠标点击会被吞掉，表现为键盘 Enter 可用、鼠标无反应。交互控件必须先经 `appScrollDragBlocked()` 排除；只有列表空白和非操作区域进入拖动。
+17. **无人值守的模块绝不能停在交互输入上**：Windows 上 `getpass` 会绕过 stdin 重定向直接读控制台，即使子进程用 `stdin=DEVNULL` 启动，`getpass.getpass()` 仍会**永久挂住**（`console_launcher` 与 `ModuleRunner` 都用 `CREATE_NO_WINDOW`，现场表现为项目卡在「运行中」）。副作用是 `subprocess.run` 不带 `timeout` 时父进程一起挂死。因此 `backend/modules/runner-lab/runner.py` 必须给导入器传 `--no-prompt` 并设置 `IMPORT_TIMEOUT_SECONDS`；任何新增的交互式脚本在被模块调用前都要先加同类开关。
+18. **项目名来自 manifest，不要再写死**：`module_runner.sync_registry()` 原先对任何 manifest 都插入项目名「APEX 启动」。现在读 `projectName` / `projectDescription`（未声明时回落到原文案，见 `module_registry.DEFAULT_PROJECT_*`）。新增模块必须在 `module.json` 里显式声明这两个字段，否则会继承「APEX 一键启动」的文案。
+19. **`{console_root}` 在动作参数里也能用了（曾经不能）**：占位符以前只在 `projectRoot` 被替换，`actions.*.program` / `args` 里写它会在运行时抛 `模块参数包含未知占位符`，现场表现是「点一下模块就失败，日志里一行 ValueError」（`data/console-service.err.log` 里留过多次）。现在可用占位符统一由 `ModuleRunner._run_values()` 产出：`{module_dir}` `{project_root}` `{console_root}` `{run_dir}` `{result_path}` `{log_path}`；`{console_root}` 与 `ModuleRegistry.console_root` 同源。**跨项目模块（如 `runner-lab`）引用 console 自己的虚拟环境时必须写 `{console_root}`，不要写绝对路径**。回归由 `tests/test_module_project_metadata.py::test_action_placeholders_expand_to_an_existing_interpreter` 兜住。
+20. **模块要开窗口就用 `pythonw.exe` + `DETACHED_PROCESS`，不要等窗口关闭**：`runner-lab` 模块的 `run` 动作改为打开导入窗口（拖压缩包 + 输密码）。`ModuleRunner` 会尽量用 `CREATE_NO_WINDOW` 起子进程，所以窗口进程必须由 `runner.py` 自己用 `pythonw.exe` + `DETACHED_PROCESS` 拉起来，否则会跟着一起来一个黑框，且调用方退出时被连带回收。pid 记在 `%TEMP%\runner-lab\import-gui.pid`（`tempfile.gettempdir()`，仓库之外；2026-09-23 前记在 `D:\RunningData\import-gui.pid`，该目录已撤销、导入投放目录收敛进 runner-lab 项目内），`stop` / `restart` 靠它精确结束窗口；不要换成按镜像名 `taskkill /IM pythonw.exe`。无界面导入路径仍然保留（不带 `--gui` 即走它），供自动化调用。
 
 ---
 

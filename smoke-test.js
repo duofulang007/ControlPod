@@ -269,6 +269,12 @@ try {
   const detailControls = T.projectRunControlsHTML(real, false);
   check([cardControls, detailControls].every(x=>x.includes('关闭项目') && x.includes('重启项目') && !x.includes('运行项目')),
     '真实项目启动后：项目卡与详情页头同时显示「关闭项目 + 重启项目」');
+  T.S.running = {wfId:'apex', action:'run', status:'running'};
+  const busyControls = [T.projectRunControlsHTML(real, true), T.projectRunControlsHTML(real, false)];
+  check(busyControls.every(x=>x.includes('data-act="stopProject"') && x.includes('data-act="restartProject"')
+    && !/data-act="(?:stopProject|restartProject)"[^>]*disabled/.test(x)),
+    '真实项目运行中：关闭和重启仍可点击，以便强制接管当前执行');
+  T.S.running = null;
   check(!T.projRunHTML(real, null, false).includes('data-act="stopProject"'),
     '运行流程卡不再单独放关闭按钮，项目操作只保留在两处统一位置');
   T.S.projectRuntime.apex = 'stopped';
@@ -310,7 +316,7 @@ try {
   T.S.projConfirm = '';
   check(!T.viewProjects().includes('modal-mask'), '未点删除时不渲染确认弹窗');
   const tmpl = { id:'tpm', name:'临时父项目', st:'正常', stCls:'pst-ok', parent:null, desc:'临时',
-    progress:0, files:0, commits:0, tags:[], updated:'刚刚', ico:'focus', color:'#2563EB',
+    files:0, commits:0, tags:[], updated:'刚刚', ico:'focus', color:'#2563EB',
     flowName:'默认流程', flowDesc:'', last:'—', runs:0, steps:[] };
   T.DATA.projects.push(tmpl, Object.assign({}, tmpl, { id:'tkd', name:'临时子项目', parent:'tpm' }));
   T.S.projConfirm = 'tpm';
@@ -895,8 +901,8 @@ try {
   T.S.wf = w1.id; T.S.wfEdit = null;
   const view = T.viewWorkflows(false);
   check(view.includes('ov-name') && view.includes(w1.name) && view.includes(w1.desc)
-     && ['创建时间','最近运行','最近更新','开发完成度'].every(k => view.includes(k)),
-    '概览区 · 项目信息卡：身份（名称 / 描述 / 技术栈）+ 时间线 + 完成度');
+     && ['创建时间','最近运行','最近更新','工作概况'].every(k => view.includes(k)),
+    '概览区 · 项目信息卡：身份（名称 / 描述 / 技术栈）+ 时间线 + 工作概况');
   check(['项目能力','项目统计','当前流程','模块构成','启用明细','文件数量','历史运行次数']
      .every(k => view.includes(k)) && view.includes('ov-flow-note') && view.includes(w1.flowDesc),
     '概览区三卡内容齐全：能力（流程 / 构成 / 明细）+ 统计（文件 / 运行）');
@@ -956,8 +962,8 @@ try {
   check(plain.includes('data-act="openProjEdit"') && plain.includes('ov-edit-btn')
         && !plain.includes('<input') && !plain.includes('<textarea'),
     '身份卡非编辑态：有编辑入口、不渲染表单控件');
-  check(plain.includes('ov-name') && plain.includes('ov-sub') && plain.includes('ov-prog'),
-    '身份卡非编辑态：身份 / 描述 / 完成度仍在（功能未改动）');
+  check(plain.includes('ov-name') && plain.includes('ov-sub') && plain.includes('ov-summary'),
+    '身份卡非编辑态：身份 / 描述 / 工作概况仍在（功能未改动）');
 
   /* 编辑态：整卡换成表单 */
   T.S.projEdit = w1.id;
@@ -976,7 +982,7 @@ try {
   check(editOv.includes('>' + w1.name.length + '/' + T.PE_LIMIT.name + '<')
         && editOv.includes('>' + w1.desc.length + '/' + T.PE_LIMIT.body + '<'),
     '打开时字数统计与当前内容一致（初始不是 0）');
-  check(!editOv.includes('开发完成度'), '编辑态整卡替换：不残留只读时间线 / 完成度');
+  check(!editOv.includes('工作概况'), '编辑态整卡替换：不残留只读时间线 / 工作概况');
 
   /* 校验：空值给出明确提示，且提示文案非空 */
   check(T.projEditCheck('', 'x').ok === false && T.projEditCheck('', 'x').err.name.length > 0,
@@ -1305,12 +1311,12 @@ try {
   check(confirmHtml.includes('modal') && confirmHtml.includes('预演') && confirmHtml.includes('确认剔除') && confirmHtml.includes('不会删除其安装目录'),
     '剔除走二次确认弹窗（含预演说明）');
   T.S.confirmRemove = '';
-  /* 首页：最近打开的应用（按最近启动排序，固定 8 个 —— 正好铺满 4 列 × 2 行） */
+  /* 首页：项目仪表盘只保留项目数据，不重复应用页入口。 */
   const home = T.viewHome();
-  check(home.includes('最近打开的应用') && !home.includes('快捷启动'),
-    '首页推荐列表为「最近打开的应用」');
-  const tiles = (home.match(/class="app-tile"/g) || []).length;
-  check(tiles === 8, '首页最近打开固定 8 个（实际 ' + tiles + '）');
+  check(home.includes('项目仪表盘') && home.includes('项目活跃度') && !home.includes('最近打开的应用'),
+    '首页改为项目仪表盘，不再重复应用入口');
+  const projectRows = (home.match(/class="dashboard-project-row/g) || []).length;
+  check(projectRows === T.DATA.projects.length, '仪表盘按项目呈现总览行（实际 ' + projectRows + '）');
   /* 中文输入法：三个搜索框（应用 / 扫描添加 / 模块）都有 composition 门控 + 防抖（源码级断言） */
   const src = require('fs').readFileSync(path.join(__dirname, 'app.js'), 'utf8');
   check(src.includes("addEventListener('compositionstart'") && src.includes('imeState[e.target.id] || e.isComposing')
@@ -1433,11 +1439,11 @@ try {
   T.S.addStep='form'; T.S.addPick=''; T.S.scanQuery='';
 } catch (e) { console.log('FAIL 添加应用/快捷菜单 → ' + e.message); fail++; }
 
-/* 16. 首页不再平铺列表 */
+/* 16. 首页不再平铺应用或全局条目 */
 try {
   const home = T.viewHome();
-  check(home.includes('class="apps"') && !home.includes('slice(0,11)'), '首页快捷启动收敛为常用若干 + 全部入口');
-  check(home.includes('展开其余'), '首页最近活动默认收起并可展开');
+  check(home.includes('dashboard-project-list') && !home.includes('class="apps"'), '首页项目总览替代重复的应用快捷启动');
+  check(home.includes('dashboard-activity-list') && !home.includes('展开其余'), '首页最近活动以紧凑项目追踪呈现，不再留展开空白');
 } catch (e) { console.log('FAIL 首页密度 → ' + e.message); fail++; }
 
 /* 17. 生产源码不再附带假应用 */
@@ -1449,7 +1455,16 @@ try {
 
 /* 18. Obsidian：设置连接 + 项目绑定 + 打开 / 新建 / 单向更新（不伪造同步） */
 try {
+  T.S.startupEnabled = true; T.S.startupLoading = false; T.S.startupUpdating = false; T.S.startupError = '';
   const settings = T.viewSettings();
+  const startupSrc = fs.readFileSync(path.join(__dirname, 'app.js'), 'utf8');
+  check(settings.includes('开机自启动') && settings.includes('Windows 启动项')
+    && settings.includes('class="switch on"') && !settings.includes('开机自启动已开启'),
+    '开机自启动显示后端读回状态，不再只展示前端假成功提示');
+  check(startupSrc.includes("apiRequest('/settings/startup')")
+    && startupSrc.includes("apiRequest('/settings/startup', {method:'PUT'")
+    && startupSrc.includes('updateStartupSetting(S.startupEnabled !== true)'),
+    '开机自启动开关读取并更新真实后端启动项，不再只切换 CSS 类');
   check(settings.includes('Obsidian 连接') && settings.includes('打开、新建与单向更新项目主页'),
     '设置页说明当前只提供 URI 打开、新建与单向更新');
   check(settings.includes('本机保存'), '设置页明确 Obsidian 配置会保存在当前浏览器本机');
@@ -1555,8 +1570,8 @@ try {
     && note.includes('## 项目任务') && note.includes('## 项目记录'),
     '项目主页内容带稳定项目 id 与任务 / 记录结构');
   check(note.includes('完善自动化脚本的异常处理') && note.includes('APEX 架构备忘')
-    && note.includes('状态：') && note.includes('完成度：'),
-    '项目主页汇总当前状态、任务和项目记录');
+    && note.includes('状态：') && !note.includes('完成度：'),
+    '项目主页汇总当前状态、任务和项目记录，不写项目完成百分比');
   check(note.includes('[返回 APEX 控制台当前项目](')
     && note.includes('#/workflows/apex?focus=obsidian'),
     '项目主页写入返回当前项目的稳定链接');
@@ -1603,6 +1618,7 @@ try {
   T.S.obsidian = oldObs;
   T.S.obsidianHubOpen = ''; T.S.obsidianBindEdit = ''; T.S.obsidianUpdateArm = '';
   T.S.obsidianUnbindArm = ''; T.S.obsidianReturnFocus = '';
+  T.S.startupEnabled = null;
   delete storageData[T.OBSIDIAN_STORE_KEY];
   delete ctx.__stubVals;
 
@@ -1634,7 +1650,7 @@ try {
 /* 18d. 各模块副标题不再含说明句，只剩状态数字 */
 try {
   const cases = [
-    {p:'viewHome',     must: ['正在做','任务与项目记录统一在项目内管理'], mustNot: ['其中','今天到期','次级模块收起']},
+    {p:'viewHome',     must: ['项目仪表盘','集中查看项目状态、待办概况与近期活跃'], mustNot: ['正在做','工作流','次级模块收起']},
     {p:'viewApps',     must: ['<h1>应用</h1>'], mustNot: ['按使用频率排序','其余默认收起','最常用的','上方为最近打开的应用']},
     {p:'viewProjects', must: ['个项目 ·', '点任意卡片进入详情'], mustNot: ['全部在一屏内可选','选中后立即在下方展开']},
     {p:'viewWorkflows',must: ['执行模块启用'], mustNot: ['个 · 当前选中']}
@@ -1697,21 +1713,22 @@ try {
   T.S.wf = 'apex';
 } catch (e) { console.log('FAIL 项目化迁移 → ' + e.message); fail++; }
 
-/* 18. 总控台单屏 bento 网格：只保留项目主卡、最近打开与最近活动 */
+/* 18. 总控台单屏 bento 网格：项目仪表盘只呈现当前项目、项目总览、活跃度与最近活动 */
 try {
   const home = T.viewHome();
   check(home.includes('home-grid'), '总控台使用单屏网格布局（home-grid）');
   const cards = (home.match(/<section class="card/g) || []).length;
-  check(cards === 3, '总控台只保留 3 张主卡：继续工作 / 最近打开 / 最近活动');
-  check(home.includes('launch-card') && home.includes('acts-card')
-    && !home.includes('todo-card') && !home.includes('notes-card'),
-    '总控台已移除待办卡与笔记卡');
-  check(home.indexOf('最近打开') > 0 && home.indexOf('最近活动') > home.indexOf('最近打开'),
-    '最近打开与最近活动不再沉底（网格内并列）');
+  check(cards === 4, '总控台保留 4 张项目仪表盘卡：当前项目 / 活跃度 / 项目总览 / 最近活动');
+  check(home.includes('dashboard-overview') && home.includes('dashboard-heat')
+    && home.includes('dashboard-projects') && home.includes('dashboard-activity')
+    && !home.includes('launch-card') && !home.includes('todo-card') && !home.includes('notes-card'),
+    '仪表盘不再重复应用、待办或笔记入口');
+  check(home.includes('近 12 周 · 按日聚合') && (home.match(/class="heat-cell/g) || []).length === 84,
+    '活跃图固定展示近 12 周共 84 个按日格子');
   check(!home.includes('hero-metrics') && !home.includes('CPU '), 'Hero 系统指标行已删除（极简）');
   check(!home.includes('data-act="actFilter"'), '最近活动卡筛选 tabs 已精简');
-  check(!home.includes('tile-use'), '最近打开使用次数已精简');
-  check(home.includes('任务与项目记录统一在项目内管理'), '总控台明确内容统一收进项目');
+  check(!home.includes('tile-use'), '仪表盘不展示无关的应用使用次数');
+  check(home.includes('每个项目独立管理'), '总控台明确以项目为管理单元');
 } catch (e) { console.log('FAIL 总控台网格 → ' + e.message); fail++; }
 
 /* 22. 独立待办 / 笔记模块已整体删除：内容只在项目里管理 */
@@ -1769,9 +1786,11 @@ try {
   check(agentsMd.includes('术语') && agentsMd.includes('硬约束') && agentsMd.includes('ALL_PASS')
     && agentsMd.includes('已删除的模块'),
     '交接说明书 AGENTS.md 就位（术语 / 硬约束 / 验证方式 / 已删模块清单齐全）');
-  /* 根目录瘦身护栏：只保留源码、Git 元数据和唯一启动入口。 */
-  const dirFiles = require('fs').readdirSync(__dirname).filter(name=>name!=='.git').sort();
-  const expectedFiles = ['.gitattributes', '.gitignore', '00-启动 APEX 总控台.lnk', 'AGENTS.md', 'README.md', 'app.js', 'backend', 'index.html', 'smoke-test.js', 'styles.css'].sort();
+  /* 根目录瘦身护栏：只保留源码、Git 元数据和唯一启动入口。
+     `.git` 与 `.workbuddy` 都是工具自己写的元数据目录，不是产物，一并排除；
+     不排除的话 WorkBuddy 一旦在根目录生成 .workbuddy/ 就会让这条断言无端测挂。 */
+  const dirFiles = require('fs').readdirSync(__dirname).filter(name=>name!=='.git' && name!=='.workbuddy').sort();
+  const expectedFiles = ['.gitattributes', '.gitignore', '00-启动 APEX 总控台.lnk', 'AGENTS.md', 'README.md', 'app.js', 'backend', 'index.html', 'runner-lab', 'smoke-test.js', 'styles.css'].sort();
   check(JSON.stringify(dirFiles) === JSON.stringify(expectedFiles),
     '根目录只保留源码、Git 配置和唯一启动入口（实际：' + dirFiles.join(', ') + '）');
   const n0 = T.DATA.notes.length;
@@ -1882,11 +1901,11 @@ try {
   const focusHtml = T.viewHome();
   check(focusHtml.includes('data-act="expandMod"') && focusHtml.includes('collapse-row'),
     '专注视图下模块收起为可展开的摘要行');
-  T.S.expanded['launch'] = true;
+  T.S.expanded.projects = true;
   const expandedHtml = T.viewHome();
   check(expandedHtml.includes('data-act="collapseMod"') && expandedHtml.includes('collapse-trigger'),
     '展开后的模块出现单独「收起」入口（collapseMod）');
-  delete T.S.expanded['launch'];
+  delete T.S.expanded.projects;
   T.S.focus = false;
 } catch (e) { console.log('FAIL 专注视图收起 → ' + e.message); fail++; }
 
@@ -1914,25 +1933,27 @@ try {
   check(css2.includes('.is-fullscreen .view{') && css2.includes('margin-inline:auto'),
     '全屏模式：主内容 max-width + 居中（禁止无脑拉伸）');
   /* 卡片内元素限宽令牌已移除：它们在 1260 标准窗口下就把内容缩成孤岛
-     （进度条 520px / 应用网格 420px 居中，卡内左右各空 113~226px）。
+     （旧进度条 520px / 应用网格 420px 居中，卡内左右各空 113~226px）。
      宽度改由 .home-grid 的列比例决定，超宽屏交给 --main-max 兜底。 */
   check(!/--hero-track-max|--hero-proj-max|--quick-max/.test(css2),
     '已彻底移除卡内限宽令牌（hero-track / hero-proj / quick-max）');
-  check(!/\.home-grid \.apps\{[^}]*max-width/.test(css2),
-    '最近打开网格不再限宽居中（否则宽卡片里会左右各留一块空白）');
-  check(/\.apps\{[^}]*repeat\(4,minmax\(0,1fr\)\)/.test(css2)
-    && /\.home-grid \.apps\{[^}]*repeat\(2,minmax\(0,1fr\)\)/.test(css2),
-    '最近打开网格 4 列 × 2 行铺满卡片（磁贴接近正方，不再是竖直细条）');
-  check(/\.hero-progress \.track\{[^}]*max-width/.test(css2) === false
-    && /\.hero-progress\{[^}]*max-width/.test(css2) === false,
-    'hero 进度条不再限宽（右侧不再空掉半张卡）');
-  check(/--home-tile-ico:/.test(css2), '总控台磁贴图标尺寸走令牌，不在组件里硬写 px');
-  check(/grid-template-rows:minmax\(196px,\.66fr\)/.test(css2),
-    'hero 行高份额 .66fr 就位（原来 .72fr 留白过多）');
-  check(/grid-template-columns:minmax\(0,1fr\) minmax\(0,1fr\) minmax\(0,1\.3fr\)/.test(css2),
-    '活动卡加宽到 1.3fr（低于 ~360px 时行标题会被挤成一个字）');
+  check(/\.home-grid\{[^}]*grid-template-areas:"overview heat" "projects activity"/.test(css2),
+    '仪表盘以当前项目 / 活跃度 / 项目总览 / 最近活动四区填满单屏');
+  check(/\.heat-grid\{[^}]*repeat\(12,var\(--dash-heat-cell\)\)/.test(css2)
+    && /\.heat-grid\{[^}]*repeat\(7,var\(--dash-heat-cell\)\)/.test(css2),
+    '活跃图按 12 周 × 7 日排列，尺寸走仪表盘令牌');
+  check(!/\.dashboard-progress\{|\.dashboard-project-bar\{|\.hero-progress\{|\.ov-prog\{/.test(css2),
+    '项目完成百分比及其进度条样式已彻底移除');
+  check(/--dash-card-pad:/.test(css2) && /--dash-heat-cell:/.test(css2),
+    '仪表盘密度和活跃图尺寸均走顶部设计令牌');
+  check(/grid-template-rows:minmax\(0,1\.06fr\) minmax\(0,\.94fr\)/.test(css2),
+    '仪表盘两行按内容密度分配，不再把高度留给空白');
+  check(/grid-template-columns:minmax\(0,1\.38fr\) minmax\(var\(--dash-side-min\),\.92fr\)/.test(css2),
+    '当前项目与活跃度使用不对称列宽，信息层级更清晰');
   check(!/font-size:[^;}]*vw/.test(css2), '字号未使用 vw 单位');
-  check(html2.includes('id="fsBtn"'), '顶栏提供全屏切换按钮');
+  check(html2.includes('id="fsBtn"') && html2.includes('id="topmostBtn"')
+    && !html2.includes('id="sceneBtn"'),
+    '顶栏保留全屏切换，并以窗口置顶替换旧工作模式');
   /* 全局交互基线：禁用文本选择 + 输入控件放行（顺序不能反，否则输入框无法打字） */
   const iNone = css2.indexOf('user-select:none');
   const iText = css2.indexOf('user-select:text !important');
@@ -2065,7 +2086,7 @@ try {
 
   /* 30c. purgeProjRefs：删项目要连带清掉按项目名引用的结构，否则同名新建会「复活」 */
   const TMP = '__审计临时项目';
-  D.projects.push({ id:'__tmp', name:TMP, st:'正常', stCls:'pst-ok', parent:null, desc:'', progress:0, files:0, commits:0, tags:[], updated:'', ico:'sun', color:'#000', flowName:'临时流程', flowDesc:'', last:'—', runs:0, steps:[] });
+  D.projects.push({ id:'__tmp', name:TMP, st:'正常', stCls:'pst-ok', parent:null, desc:'', files:0, commits:0, tags:[], updated:'', ico:'sun', color:'#000', flowName:'临时流程', flowDesc:'', last:'—', runs:0, steps:[] });
   S.todos.plan.push({ id:'__t1', text:'临时待办', proj:TMP, due:'今天', urgent:false, done:false, kind:'todo' });
   S.notes.push({ id:'__n1', title:'临时记录', tag:'日常', pinned:false, time:'刚刚', body:'', proj:TMP, links:[] });
   D.projMeta[TMP] = { note:'临时元信息' };
@@ -2108,8 +2129,8 @@ try {
   /* 30g. 两处未判空的 find */
   check(/const cur = DATA\.projects\.find\(p=>p\.id===id\); if \(!cur\) break;/.test(app6),
     'focusProj 对不存在的项目 id 直接返回（不再取 cur.name）');
-  check(/const m = DATA\.sceneModes\.find\(x=>x\.id===v\); if \(!m\) break;/.test(app6),
-    'scene 对非法场景 id 直接返回（不再取 m.name）');
+  check(!/sceneModes|scenePop|sceneBtn|sceneName|场景联动|S\.scene/.test(app6),
+    '旧工作模式的数据、浮层、交互与设置项已彻底移除');
 } catch (e) { console.log('FAIL 0 项目兜底 → ' + e.message); fail++; }
 
 /* 31. 真实后端模块：APEX 启动不再走旧前端 */
@@ -2248,8 +2269,20 @@ try {
     && consoleLauncher31.includes('kernel32.TerminateProcess')
     && consoleLauncher31.includes('subprocess.CREATE_NO_WINDOW')
     && consoleLauncher31.includes('def open_site(')
-    && consoleLauncher31.includes('f"--app={url}"'),
-    '桌面一键入口按源码版本自动启动或安全重启，隐藏后台窗口并打开独立应用窗口');
+    && consoleLauncher31.includes('f"--app={url}"')
+    && consoleLauncher31.includes('APP_WINDOW_WIDTH = 990')
+    && consoleLauncher31.includes('APP_WINDOW_HEIGHT = 700')
+    && consoleLauncher31.includes('APP_WINDOW_PROFILE_DIR')
+    && consoleLauncher31.includes('f"--user-data-dir={APP_WINDOW_PROFILE_DIR}"')
+    && consoleLauncher31.includes('f"--window-size={APP_WINDOW_WIDTH},{APP_WINDOW_HEIGHT}"')
+    && consoleLauncher31.includes('f"--window-position={x},{y}"'),
+    '桌面一键入口安全启动或重启后，默认打开居中的 990×700 独立窗口');
+  check(app31.includes("apiRequest('/window')")
+    && app31.includes("apiRequest('/window/topmost'")
+    && app31.includes('function syncConsoleWindowControl()')
+    && main31.includes('@app.get("/api/window")')
+    && main31.includes('@app.put("/api/window/topmost")'),
+    '窗口置顶控件读取并更新后端验证的固定窗口状态，不伪造成功');
   check(startPs31.includes('Push-Location $backend') && startPs31.includes('finally') && startPs31.includes('Pop-Location'),
     'Apex Console 启动脚本不依赖调用者当前目录');
   check([startPs31, bootstrapPs31].every(text=>!/[^\x00-\x7F]/.test(text)),

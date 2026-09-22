@@ -14,6 +14,8 @@ if str(BACKEND_DIR) not in sys.path:
 from app.main import create_app
 from app.db import Database
 from app.module_runner import ModuleRunner
+from app.startup_manager import WindowsStartupManager
+from app.window_manager import ConsoleWindowError
 
 
 def make_fake_module(root: Path, project_root: Path) -> None:
@@ -109,6 +111,38 @@ def make_timeout_module(root: Path, project_root: Path) -> None:
     (module_dir / "module.json").write_text(json.dumps(manifest), encoding="utf-8")
 
 
+def make_interruptible_module(root: Path, project_root: Path) -> None:
+    module_dir = root / "interruptible-module"
+    module_dir.mkdir(parents=True, exist_ok=True)
+    worker = module_dir / "worker.py"
+    worker.write_text(
+        """
+import json
+import pathlib
+import sys
+import time
+
+result = pathlib.Path(sys.argv[1])
+action = sys.argv[2]
+if action == 'run':
+    time.sleep(10)
+state = 'running' if action == 'run' else 'stopped'
+result.write_text(json.dumps({'ok': True, 'status': {'state': state}}), encoding='utf-8')
+""".strip(),
+        encoding="utf-8",
+    )
+    manifest = {
+        "schemaVersion": 1, "id": "interruptible-module", "projectId": "apex",
+        "name": "Interruptible Module", "version": "1.0.0", "projectRoot": str(project_root),
+        "timeoutSeconds": 15,
+        "actions": {
+            action: {"program": sys.executable, "cwd": "{module_dir}", "args": [str(worker), "{result_path}", action]}
+            for action in ("run", "stop")
+        },
+    }
+    (module_dir / "module.json").write_text(json.dumps(manifest), encoding="utf-8")
+
+
 def make_malformed_result_module(root: Path, project_root: Path) -> None:
     module_dir = root / "malformed-module"
     module_dir.mkdir(parents=True, exist_ok=True)
@@ -142,6 +176,8 @@ def build_client(
     application_scanner=None,
     application_opener=None,
     application_icon_reader=None,
+    startup_manager=None,
+    window_manager=None,
 ) -> TestClient:
     modules_dir = tmp_path / "modules"
     project_root = tmp_path / "external-project"
@@ -155,8 +191,73 @@ def build_client(
         application_scanner=application_scanner,
         application_opener=application_opener,
         application_icon_reader=application_icon_reader,
+        startup_manager=startup_manager,
+        window_manager=window_manager,
     )
     return TestClient(app)
+
+
+class FakeStartupManager:
+    def __init__(self, enabled: bool = False) -> None:
+        self.enabled = enabled
+        self.command = '"C:\\APEX\\pythonw.exe" "C:\\APEX\\console_launcher.py"'
+
+    def status(self) -> dict[str, object]:
+        return {"enabled": self.enabled, "command": self.command}
+
+    def set_enabled(self, enabled: bool) -> dict[str, object]:
+        self.enabled = enabled
+        return self.status()
+
+
+class FakeStartupRegistryKey:
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_args) -> None:
+        return None
+
+
+class FakeStartupRegistry:
+    HKEY_CURRENT_USER = object()
+    KEY_READ = 1
+    KEY_SET_VALUE = 2
+    KEY_QUERY_VALUE = 4
+    REG_SZ = 1
+
+    def __init__(self) -> None:
+        self.values: dict[str, str] = {}
+
+    def OpenKey(self, *_args) -> FakeStartupRegistryKey:
+        return FakeStartupRegistryKey()
+
+    def QueryValueEx(self, _key, name: str) -> tuple[str, int]:
+        if name not in self.values:
+            raise FileNotFoundError(name)
+        return self.values[name], self.REG_SZ
+
+    def SetValueEx(self, _key, name: str, _reserved: int, _kind: int, value: str) -> None:
+        self.values[name] = value
+
+    def DeleteValue(self, _key, name: str) -> None:
+        if name not in self.values:
+            raise FileNotFoundError(name)
+        del self.values[name]
+
+
+class FakeConsoleWindowManager:
+    def __init__(self, *, available: bool = True, topmost: bool = False) -> None:
+        self.available = available
+        self.topmost = topmost
+
+    def status(self) -> dict[str, object]:
+        return {"available": self.available, "topmost": self.topmost, "width": 990, "height": 700}
+
+    def set_topmost(self, enabled: bool) -> dict[str, object]:
+        if not self.available:
+            raise ConsoleWindowError("没有可控制的 APEX 固定窗口")
+        self.topmost = enabled
+        return self.status()
 
 
 def wait_execution(client: TestClient, execution_id: str) -> dict:
@@ -170,6 +271,54 @@ def wait_execution(client: TestClient, execution_id: str) -> dict:
             return payload
         time.sleep(0.05)
     raise AssertionError("项目执行在测试超时内未完成")
+
+
+def test_startup_setting_reads_back_the_windows_registration(tmp_path: Path) -> None:
+    manager = FakeStartupManager()
+    with build_client(tmp_path, startup_manager=manager) as client:
+        assert client.get("/api/settings/startup").json() == {
+            "enabled": False,
+            "command": manager.command,
+        }
+        enabled = client.put("/api/settings/startup", json={"enabled": True})
+        assert enabled.status_code == 200
+        assert enabled.json() == {"enabled": True, "command": manager.command}
+        assert manager.enabled is True
+
+        disabled = client.put("/api/settings/startup", json={"enabled": False})
+        assert disabled.status_code == 200
+        assert disabled.json() == {"enabled": False, "command": manager.command}
+        assert manager.enabled is False
+
+
+def test_windows_startup_manager_writes_then_reads_back_registration() -> None:
+    registry = FakeStartupRegistry()
+    manager = WindowsStartupManager(command='"C:\\APEX\\pythonw.exe" "C:\\APEX\\console_launcher.py" --no-open', registry=registry)
+    assert manager.status()["enabled"] is False
+    assert manager.set_enabled(True)["enabled"] is True
+    assert registry.values[manager.value_name] == manager.command
+    assert manager.set_enabled(False)["enabled"] is False
+    assert manager.value_name not in registry.values
+
+
+def test_console_window_topmost_setting_uses_the_fixed_window_manager(tmp_path: Path) -> None:
+    manager = FakeConsoleWindowManager()
+    with build_client(tmp_path, window_manager=manager) as client:
+        assert client.get("/api/window").json() == {
+            "available": True, "topmost": False, "width": 990, "height": 700,
+        }
+        response = client.put("/api/window/topmost", json={"enabled": True})
+        assert response.status_code == 200
+        assert response.json()["topmost"] is True
+        assert manager.topmost is True
+
+    unavailable = FakeConsoleWindowManager(available=False)
+    unavailable_root = tmp_path / "unavailable"
+    unavailable_root.mkdir()
+    with build_client(unavailable_root, window_manager=unavailable) as client:
+        response = client.put("/api/window/topmost", json={"enabled": True})
+        assert response.status_code == 503
+        assert response.json()["detail"] == "没有可控制的 APEX 固定窗口"
 
 
 def test_bootstrap_registers_real_module_project(tmp_path: Path) -> None:
@@ -1025,6 +1174,38 @@ def test_duplicate_project_execution_is_rejected_while_timeout_is_active(tmp_pat
     assert execution["status"] == "failed"
     assert "超时" in execution["error"]
     assert execution["steps"][0]["run"]["status"] == "failed"
+
+
+def test_stop_interrupts_an_active_execution_before_running_the_close_action(tmp_path: Path) -> None:
+    modules_dir = tmp_path / "modules"
+    project_root = tmp_path / "external-project"
+    project_root.mkdir()
+    make_interruptible_module(modules_dir, project_root)
+    app = create_app(
+        db_path=tmp_path / "test.db", modules_dir=modules_dir,
+        runs_dir=tmp_path / "runs", static_root=None,
+    )
+    with TestClient(app) as client:
+        started = client.post("/api/projects/apex/executions", json={"action": "run"})
+        assert started.status_code == 202
+        first_id = started.json()["id"]
+        deadline = time.monotonic() + 2
+        while time.monotonic() < deadline:
+            first = client.get(f"/api/executions/{first_id}").json()
+            if first["status"] == "running":
+                break
+            time.sleep(0.02)
+        assert first["status"] == "running"
+
+        stopped = client.post("/api/projects/apex/executions", json={"action": "stop"})
+        assert stopped.status_code == 202
+        stopped_execution = wait_execution(client, stopped.json()["id"])
+        interrupted = client.get(f"/api/executions/{first_id}").json()
+
+    assert interrupted["status"] == "interrupted"
+    assert interrupted["steps"][0]["status"] == "interrupted"
+    assert stopped_execution["status"] == "stopped"
+    assert stopped_execution["steps"][0]["status"] == "stopped"
 
 
 def test_execution_rejects_missing_module_definition_before_creating_history(tmp_path: Path) -> None:

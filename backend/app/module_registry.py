@@ -9,6 +9,10 @@ from typing import Any
 
 ID_RE = re.compile(r"^[a-z][a-z0-9-]{1,63}$")
 
+# 未声明项目元数据时的兜底，保持既有「APEX 一键启动」项目的显示文案不变。
+DEFAULT_PROJECT_NAME = "APEX 启动"
+DEFAULT_PROJECT_DESCRIPTION = "一键启动 AK、Steam 与 APEX，不启动旧前端。"
+
 
 @dataclass(frozen=True)
 class ModuleAction:
@@ -21,6 +25,8 @@ class ModuleAction:
 class ModuleDefinition:
     id: str
     project_id: str
+    project_name: str
+    project_description: str
     name: str
     version: str
     module_dir: Path
@@ -36,6 +42,15 @@ class ModuleRegistry:
     def __init__(self, root: Path) -> None:
         self.root = Path(root)
         self._modules: dict[str, ModuleDefinition] = {}
+
+    @property
+    def console_root(self) -> Path:
+        """模块目录默认是 <console>/backend/modules，往上两级即 console 根目录。
+
+        manifest 里 `projectRoot` 与动作参数都可写 `{console_root}`，两处必须同一个口径，
+        所以统一从这里派生。
+        """
+        return self.root.parent.parent.resolve()
 
     def load(self) -> dict[str, ModuleDefinition]:
         modules: dict[str, ModuleDefinition] = {}
@@ -75,7 +90,7 @@ class ModuleRegistry:
             raise ValueError(f"{path}: 缺少 actions.run")
         module_dir = path.parent.resolve()
         project_root_raw = self._required_text(data, "projectRoot", path)
-        console_root = str(self.root.parent.parent.resolve())
+        console_root = str(self.console_root)
         project_root = Path(project_root_raw.replace("{console_root}", console_root)).resolve()
         actions: dict[str, ModuleAction] = {}
         for action_name, action_raw in actions_raw.items():
@@ -98,9 +113,15 @@ class ModuleRegistry:
         timeout = int(data.get("timeoutSeconds", 240))
         if timeout < 1 or timeout > 1800:
             raise ValueError(f"{path}: timeoutSeconds 必须在 1..1800")
+        project_name = str(data.get("projectName") or "").strip() or DEFAULT_PROJECT_NAME
+        project_description = (
+            str(data.get("projectDescription") or "").strip() or DEFAULT_PROJECT_DESCRIPTION
+        )
         return ModuleDefinition(
             id=module_id,
             project_id=self._required_text(data, "projectId", path),
+            project_name=project_name,
+            project_description=project_description,
             name=self._required_text(data, "name", path),
             version=self._required_text(data, "version", path),
             module_dir=module_dir,

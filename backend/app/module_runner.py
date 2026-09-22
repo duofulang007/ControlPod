@@ -46,7 +46,7 @@ class ModuleRunner:
             )
             self.db.execute(
                 "INSERT OR IGNORE INTO projects(id,name,description,status,created_at,updated_at) VALUES(?,?,?,?,?,?)",
-                (item.project_id, "APEX 启动", "一键启动 AK、Steam 与 APEX，不启动旧前端。", "正常", now, now),
+                (item.project_id, item.project_name, item.project_description, "正常", now, now),
             )
             self.db.execute(
                 "INSERT OR IGNORE INTO project_modules(project_id,module_id,sort_order,enabled) VALUES(?,?,0,1)",
@@ -132,6 +132,28 @@ class ModuleRunner:
         self._tasks[run_id] = task
         task.add_done_callback(lambda _: self._tasks.pop(run_id, None))
         return self.get_run(run_id) or {}
+
+    def run_is_live(self, run_id: str) -> bool:
+        """这个 run 在本进程里是否还有活着的执行任务。
+
+        任务已结束（`_tasks` 里的条目被回收，或已 done）就意味着不会再有新的落库状态了 ——
+        等待方必须据此收手，不能对着一个不再变化的 'running' 行无限空转。
+        """
+        task = self._tasks.get(run_id)
+        return task is not None and not task.done()
+
+    async def cancel_run(self, run_id: str, reason: str) -> None:
+        """Stop a live module process and persist an honest interrupted state."""
+        task = self._tasks.get(run_id)
+        if task is not None and not task.done():
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+        run = self.get_run(run_id)
+        if run is not None and run["status"] in RUNNING_STATES:
+            self.db.execute(
+                "UPDATE runs SET status='interrupted',finished_at=?,error=? WHERE id=?",
+                (utc_now(), reason, run_id),
+            )
 
     async def _start_web_module(
         self, project_id: str, module: dict[str, Any], action: str
@@ -258,31 +280,41 @@ class ModuleRunner:
             return []
         return lines[-limit:]
 
+    def _run_values(self, module: ModuleDefinition, run_dir: Path) -> dict[str, str]:
+        """动作参数的可用占位符集合。manifest 里能写哪些名字，全看这里。"""
+        return {
+            "module_dir": str(module.module_dir),
+            "project_root": str(module.project_root),
+            "console_root": str(self.registry.console_root),
+            "run_dir": str(run_dir),
+            "result_path": str(run_dir / "result.json"),
+            "log_path": str(run_dir / "module.log"),
+        }
+
     async def _execute(self, run_id: str, module: ModuleDefinition, action: str, run_dir: Path) -> None:
         self.db.execute("UPDATE runs SET status='running' WHERE id=?", (run_id,))
         result_path = run_dir / "result.json"
         log_path = run_dir / "module.log"
         stdout_path = run_dir / "process.stdout.log"
         stderr_path = run_dir / "process.stderr.log"
-        values = {
-            "module_dir": str(module.module_dir),
-            "project_root": str(module.project_root),
-            "run_dir": str(run_dir),
-            "result_path": str(result_path),
-            "log_path": str(log_path),
-        }
-        action_def = module.actions[action]
-        program = self._expand(action_def.program, values)
-        args = [self._expand(arg, values) for arg in action_def.args]
-        creationflags = (
-            0
-            if module.requires_admin
-            else getattr(__import__("subprocess"), "CREATE_NO_WINDOW", 0)
-        ) if os.name == "nt" else 0
+        values = self._run_values(module, run_dir)
         exit_code: int | None = None
         error: str | None = None
         status = "failed"
+        proc: asyncio.subprocess.Process | None = None
         try:
+            # 占位符展开必须留在这道 try 里面：manifest 里写了一个未知占位符时，
+            # 异常若从 try 前面逃出去，下面的 finally 就不会执行，run 永远停在 'running'。
+            # 后果不是「报个错」而是项目卡死在「运行中」——启动按钮消失、点关闭弹出的是别的流程，
+            # 前端看上去就是「点了没反应」。（{console_root} 曾只在 projectRoot 里被替换，踩过这个坑。）
+            action_def = module.actions[action]
+            program = self._expand(action_def.program, values)
+            args = [self._expand(arg, values) for arg in action_def.args]
+            creationflags = (
+                0
+                if module.requires_admin
+                else getattr(__import__("subprocess"), "CREATE_NO_WINDOW", 0)
+            ) if os.name == "nt" else 0
             with stdout_path.open("wb") as stdout_handle, stderr_path.open("wb") as stderr_handle:
                 proc = await asyncio.create_subprocess_exec(
                     program,
@@ -309,6 +341,12 @@ class ModuleRunner:
                         with log_path.open("a", encoding="utf-8") as handle:
                             for line in process_error.splitlines():
                                 handle.write(f"[ERROR] {line}\n")
+        except asyncio.CancelledError:
+            error = "项目操作已被关闭或重启请求强制中断"
+            status = "interrupted"
+            if proc is not None and proc.returncode is None:
+                proc.kill()
+                await proc.wait()
         except Exception as exc:  # noqa: BLE001 - stored as a real run failure
             error = f"{type(exc).__name__}: {exc}"
         finally:

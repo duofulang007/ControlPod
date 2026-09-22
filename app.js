@@ -111,17 +111,17 @@ function projStColor(st){ return projStDef(st).c; }
 /* ---------------- 数据 ---------------- */
 const DATA = {
   /* ---------------- 项目（原工作流模块迁移：一个项目 = 一个独立运行单元） ----------------
-     记录结构：项目层（name/st/desc/progress/files/commits/tags/updated，总控台与抽屉在用）
+     记录结构：项目层（name/st/desc/files/commits/tags/updated，总控台与抽屉在用）
              + 运行层（ico/color/flowName/flowDesc/last/runs/steps，原 workflow 字段平移） */
   projects: [
     {id:'apex', name:'APEX Automation', st:'正常', stCls:'pst-ok', parent:null, desc:'从总控台直接调用 APEX 启动核心，不再打开原来的前端。',
-     progress:72, files:38, commits:214, tags:['Python','asyncio','SQLite'], updated:'12 分钟前',
+     files:38, commits:214, tags:['Python','asyncio','SQLite'], updated:'12 分钟前',
      ico:'sun', color:'#E8402A', flowName:'APEX 一键启动', flowDesc:'AK 加速 → Steam → APEX，由真实后端模块执行', last:'—', runs:0,
      steps:[
        {id:'w1s1', type:'script', ref:'apex-launcher', label:'APEX 一键启动', note:'AK → Steam → APEX', wait:true, on:true}
      ]},
     {id:'ops', name:'local-ops', st:'已暂停', stCls:'b-slate', parent:'apex', desc:'本地环境巡检与备份脚本集合，暂缓维护。',
-     progress:18, files:11, commits:42, tags:['Bash','cron'], updated:'6 天前',
+     files:11, commits:42, tags:['Bash','cron'], updated:'6 天前',
      ico:'focus', color:'#2563EB', flowName:'深度开发', flowDesc:'关掉干扰，只留编辑器、终端与待评审的 PR', last:'昨天 21:10', runs:126,
      steps:[
        {id:'w2s1', type:'app', ref:'vscode',   label:'VS Code',  note:'', wait:true,  on:true},
@@ -131,7 +131,7 @@ const DATA = {
        {id:'w2s5', type:'app', ref:'spotify',  label:'Spotify',  note:'', wait:false, on:false}
      ]},
     {id:'ai', name:'AI助手', st:'开发中', stCls:'b-blue', parent:null, desc:'个人 AI 工作台：对话、检索与日常任务的自动化编排。',
-     progress:34, files:19, commits:87, tags:['Python','LLM','CLI'], updated:'1 小时前',
+     files:19, commits:87, tags:['Python','LLM','CLI'], updated:'1 小时前',
      ico:'doc', color:'#7C4DFF', flowName:'日常助理', flowDesc:'把对话、检索和笔记收进一趟流程', last:'9月10日', runs:21,
      steps:[
        {id:'ai1', type:'web',    ref:'https://chat.openai.com', label:'ChatGPT', note:'日常对话与检索', wait:true, on:true},
@@ -206,12 +206,6 @@ const DATA = {
     {id:'n10', title:'对话沉淀自动归档到笔记目录', tag:'灵感', proj:'AI助手', pinned:false, time:'昨天 12:40', body:'有价值的结论自动生成笔记并打上项目标签。'},
     {id:'n11', title:'给常用指令建快捷短语', tag:'灵感', proj:'AI助手', pinned:false, time:'9月10日', body:'高频指令配短触发词，减少重复输入。'}
   ],
-  sceneModes: [
-    {id:'dev',  name:'开发模式', color:'#E8402A', desc:'编辑器优先 · 关闭通知打扰 · 保留系统指标'},
-    {id:'work', name:'工作模式', color:'#2563EB', desc:'文档与会议优先 · 降低后台进程优先级'},
-    {id:'fun',  name:'娱乐模式', color:'#7C4DFF', desc:'游戏加速 · 静音通知 · 提升 GPU 优先级'},
-    {id:'game', name:'游戏模式', color:'#0E8A3C', desc:'独占全屏 · 关闭后台同步 · 风扇满速'}
-  ],
   tracks: [
     {name:'A New Beginning', artist:'Various Artists'},
     {name:'Soft Machine',    artist:'Airwaves'},
@@ -259,7 +253,7 @@ const DATA = {
 
   /* 新建项目模板（下轮「新建项目」流程接入；先落位保证结构一致） */
   projectTemplate: {
-    id:'', name:'未命名项目', st:'正常', stCls:'pst-ok', parent:null, desc:'', progress:0, files:0, commits:0,
+    id:'', name:'未命名项目', st:'正常', stCls:'pst-ok', parent:null, desc:'', files:0, commits:0,
     tags:[], updated:'刚刚', ico:'focus', color:'#2563EB', flowName:'默认流程', flowDesc:'', last:'—', runs:0, steps:[]
   },
 
@@ -284,7 +278,6 @@ const S = {
   focus:false,          // 首页收起态（专注视图）
   expanded:{},          // 专注视图下已展开的模块（可单独收起）
   theme:'light',
-  scene:'dev',
   appQuery:'',          // 应用页模糊搜索词
   uninstallArm:'',      // 应用详情里处于「待二次确认卸载」的应用 id
   appView:'list',       // 应用页全部应用区视图（list/grid）
@@ -302,6 +295,13 @@ const S = {
   scanLoading:false,
   scanError:'',
   scanRequest:0,        // 扫描请求令牌：刷新时淘汰旧响应，关闭弹窗后不重新弹出
+  startupEnabled:null,  // null=尚未从 Windows 启动项读取；其余值以接口读回结果为准
+  startupLoading:false,
+  startupUpdating:false,
+  startupError:'',
+  windowState:{available:false, topmost:false, width:990, height:700},
+  windowUpdating:false,
+  windowError:'',
   playerOn:false, track:0, prog:38,
   appCat:'全部',
   apps: DATA.apps.slice(),
@@ -535,7 +535,7 @@ function obsidianProjectNote(w){
     `### ${oneLine(n.title)}\n\n> ${oneLine(n.tag)} · ${oneLine(n.time)}\n\n${String(n.body || '').trim() || '暂无正文'}`
   ).join('\n\n') : '暂无项目记录';
   const back = consoleProjectUrl(w);
-  return `---\nproject_id: ${w.id}\nproject: ${JSON.stringify(String(w.name || ''))}\nconsole_managed: true\ntags:\n  - 项目\n---\n\n# ${w.name}\n\n> 此页面由 APEX 控制台生成；再次更新会覆盖全文。\n\n[返回 APEX 控制台当前项目](${back})\n\n## 项目概览\n\n- 状态：${w.st}\n- 完成度：${w.progress}%\n- 运行流程：${w.flowName}\n- 最近运行：${w.last}\n\n## 项目说明\n\n${w.desc || ''}\n\n## 项目任务\n\n${taskText}\n\n## 项目记录\n\n${noteText}\n`;
+  return `---\nproject_id: ${w.id}\nproject: ${JSON.stringify(String(w.name || ''))}\nconsole_managed: true\ntags:\n  - 项目\n---\n\n# ${w.name}\n\n> 此页面由 APEX 控制台生成；再次更新会覆盖全文。\n\n[返回 APEX 控制台当前项目](${back})\n\n## 项目概览\n\n- 状态：${w.st}\n- 运行流程：${w.flowName}\n- 最近运行：${w.last}\n\n## 项目说明\n\n${w.desc || ''}\n\n## 项目任务\n\n${taskText}\n\n## 项目记录\n\n${noteText}\n`;
 }
 function newObsidianProject(id){
   const w = DATA.projects.find(x=>x.id===id); if (!w) return false;
@@ -590,7 +590,6 @@ const KIND_SHOW = '待办';
    开发上下文的待办列表按它分组；编辑入口在待办编辑抽屉与新建抽屉。 */
 const TASK_PRI = ['高', '中', '低'];
 const priOf = t => (t && TASK_PRI.includes(t.pri)) ? t.pri : '中';
-const groupByPri = arr => TASK_PRI.map(p => ({ p, items: arr.filter(t => priOf(t) === p) })).filter(g => g.items.length);
 /* 区域移动：任务拖入 / 按钮提升的统一入口。
    zone='cur' → 加入当前任务区（支持多个）；zone=高/中/低 → 切换优先级并移出当前区。
    一致性：同一任务同一时刻只在一个区域 —— 移入优先级区即从当前区移除，反之亦然。 */
@@ -703,9 +702,6 @@ const store = {
   get(k, d){ try { const v = localStorage.getItem(k); return v === null ? d : v; } catch(e){ return d; } },
   set(k, v){ try { localStorage.setItem(k, v); return true; } catch(e){ return false; } }
 };
-/* 首屏只放最常用的一小撮，其余收进各自页面 —— 避免「用数量代替重点」 */
-const HOME_APPS = 8, HOME_ACTS = 4, HOME_FILES = 3, HOME_SUMMARY = 6;
-
 function toast(msg, icon){
   const box = $('#toasts');
   const el = document.createElement('div');
@@ -717,15 +713,52 @@ function toast(msg, icon){
 }
 
 function addActivity(text, proj, icoName, color, kind){
-  S.acts.unshift({text, proj, time:'刚刚', ico:icoName, c:color, kind});
+  S.acts.unshift({text, proj, time:'刚刚', at:new Date().toISOString(), ico:icoName, c:color, kind});
   if (S.acts.length > 9) S.acts.pop();
 }
 
 /* ---------------- 总控台（首页） ---------------- */
+function activityDay(activity){
+  const stamped = activity && activity.at ? new Date(activity.at) : null;
+  if (stamped && !Number.isNaN(stamped.getTime())) return new Date(stamped.getFullYear(), stamped.getMonth(), stamped.getDate());
+  const label = String((activity && activity.time) || '');
+  const today = new Date();
+  if (/刚刚|分钟前|小时前|今天/.test(label)) return new Date(today.getFullYear(), today.getMonth(), today.getDate());
+  if (/昨天/.test(label)) return new Date(today.getFullYear(), today.getMonth(), today.getDate() - 1);
+  return null;
+}
+function dashboardHeatmapHTML(activities){
+  const dayMs = 24 * 60 * 60 * 1000;
+  const end = new Date(); end.setHours(0, 0, 0, 0);
+  const start = new Date(end.getTime() - dayMs * 83);
+  const counts = new Map();
+  (activities || []).forEach(activity => {
+    const day = activityDay(activity);
+    if (!day || day < start || day > end) return;
+    const key = day.toISOString().slice(0, 10);
+    counts.set(key, (counts.get(key) || 0) + 1);
+  });
+  const cells = Array.from({length:84}, (_, index) => {
+    const day = new Date(start.getTime() + index * dayMs);
+    const key = day.toISOString().slice(0, 10), count = counts.get(key) || 0;
+    const level = count === 0 ? 0 : Math.min(4, count);
+    return `<span class="heat-cell h${level}" aria-label="${key}：${count} 条活动"></span>`;
+  }).join('');
+  const months = [0, 28, 56].map(offset => {
+    const day = new Date(start.getTime() + offset * dayMs);
+    return `<span>${day.getMonth() + 1}月</span>`;
+  }).join('');
+  const total = Array.from(counts.values()).reduce((sum, count) => sum + count, 0);
+  return `<div class="heat-wrap" role="img" aria-label="近十二周项目活动热力图，共 ${total} 条可按日统计的活动">
+    <div class="heat-months">${months}</div>
+    <div class="heat-body"><div class="heat-days" aria-hidden="true"><span>一</span><span></span><span>三</span><span></span><span>五</span><span></span><span>日</span></div><div class="heat-grid">${cells}</div></div>
+    <div class="heat-foot"><span>仅统计带时间的活动</span><span class="heat-legend" aria-hidden="true">少 <i class="h0"></i><i class="h1"></i><i class="h2"></i><i class="h3"></i><i class="h4"></i> 多</span></div>
+  </div>`;
+}
 function viewHome(){
   const acts = S.acts;
   const cur = DATA.projects.find(p=>p.id===S.proj) || DATA.projects[0];
-  /* 兜底：总控台的 hero / 进度 / 项目切换全部挂在「当前项目」上，一个项目都没有时不能取 cur.st。
+  /* 兜底：总控台的当前项目信息与项目切换全部挂在「当前项目」上，一个项目都没有时不能取 cur.st。
      正常路径已被「至少保留一个项目」挡住，这里是第二道防线（外加自定义 URL 直接进来）。 */
   if (!cur) return `
   <div class="page-head"><div><h1>总控台</h1><p>还没有项目</p></div></div>
@@ -734,68 +767,40 @@ function viewHome(){
       <button class="btn btn-primary btn-sm" data-act="newProject">${IC.plus('#fff')}新建项目</button></div>
   </section>`;
 
-  /* 继续工作 Hero（横向主卡：状态 + 标题 + 进度 + 项目切换） */
-  const hero = `
-  <section class="card hero">
-    <div class="hero-top">
-      <div class="hero-meta">
-        <span class="chip" style="background:var(--green-bg);color:var(--green);border-color:transparent"><span class="dot" style="background:var(--green)"></span>${esc(cur.st)}</span>
-        <span class="chip soft">更新于 ${esc(cur.updated)}</span>
-      </div>
-      <div class="hero-actions">
-        <button class="btn btn-primary" data-act="resume">${IC.play('#fff')}继续工作流</button>
-      </div>
+  const openTasks = S.todos.plan.filter(task => !task.done).length;
+  const activeProjects = DATA.projects.filter(project => project.st !== '已暂停').length;
+  const enabledModules = DATA.projects.reduce((sum, project) => sum + project.steps.filter(step => step.on).length, 0);
+  const currentTasks = projTasks(cur.name).filter(task => !task.done).length;
+  const currentModules = cur.steps.filter(step => step.on).length;
+  const overviewCard = `
+  <section class="card dashboard-overview">
+    <div class="dashboard-overview-main">
+      <div class="hero-meta"><span class="chip ${projStCls(cur.st)}"><span class="dot" style="background:${projStColor(cur.st)}"></span>${esc(cur.st)}</span><span class="chip soft">更新于 ${esc(cur.updated)}</span></div>
+      <div><p class="dashboard-kicker">当前项目</p><h2>${esc(cur.name)}</h2><p class="dashboard-desc">${esc(cur.desc)}</p></div>
+      <div class="dashboard-context"><span><b>${currentModules}</b> 个模块已启用</span><span><b>${currentTasks}</b> 项待办待处理</span></div>
+      <div class="dashboard-actions"><button class="btn btn-primary" data-act="openWf" data-id="${cur.id}">${IC.chevR('#fff')}进入项目</button><button class="btn btn-ghost btn-sm" data-act="focusProj" data-id="${cur.id}">切换当前项目</button></div>
     </div>
-    <div class="hero-title">${esc(cur.name)}</div>
-    <div class="hero-progress">
-      <span class="track" style="flex:1"><i style="width:${cur.progress}%"></i></span>
-      <b>${cur.progress}%</b>
-    </div>
-    <div class="hero-side">
-      ${DATA.projects.map(p=>`
-        <button class="proj-row ${p.id===cur.id?'on':''}" data-act="focusProj" data-id="${p.id}" title="切换到 ${esc(p.name)}">
-          <span class="dot" style="background:${projStColor(p.st)}"></span>
-          <span class="p-name">${esc(p.name)}</span>
-          <span class="p-cur">${p.id===cur.id?IC.check('var(--brand)'):''}</span>
-        </button>`).join('')}
+    <div class="dashboard-kpis" aria-label="项目概览数据">
+      <div><span>活跃项目</span><strong>${activeProjects}</strong><small>共 ${DATA.projects.length} 个</small></div>
+      <div><span>待处理</span><strong>${openTasks}</strong><small>项目内任务</small></div>
+      <div><span>启用模块</span><strong>${enabledModules}</strong><small>可执行单元</small></div>
+      <div><span>活动记录</span><strong>${acts.length}</strong><small>当前会话</small></div>
     </div>
   </section>`;
-
-  /* 最近打开卡（按最近启动时间排序，固定 8 个 —— 铺满 4 列 × 2 行，磁贴不至于被拉宽变扁） */
-  const launchCard = `
-  <section class="card tight launch-card">
-    <div class="card-head">
-      <span class="ricon" style="color:var(--purple)">${IC.grid('var(--purple)')}</span>
-      <div class="card-title">最近打开的应用</div>
-      <div class="right"><button class="link" data-act="goApps">全部 ${S.apps.length} 个</button></div>
-    </div>
-    <div class="apps">
-      ${byRecent(S.apps).slice(0, HOME_APPS).map(a=>`
-        <button class="app-tile" data-act="launch" data-id="${a.id}" title="${esc(a.name)} · 最近 ${esc(a.last)}">
-          <span class="ico">${appIconHTML(a.icon)}</span>
-          <span>${esc(a.name)}</span>
-        </button>`).join('')}
-    </div>
+  const heatCard = `
+  <section class="card tight dashboard-heat">
+    <div class="card-head"><span class="ricon" style="color:var(--green)">${IC.grid('var(--green)')}</span><div class="card-title">项目活跃度<small>近 12 周 · 按日聚合</small></div></div>
+    ${dashboardHeatmapHTML(acts)}
   </section>`;
-
-  /* 最近活动卡（图标底片行，可展开） */
-  const actCard = `
-  <section class="card tight acts-card">
-    <div class="card-head">
-      <span class="ricon" style="color:var(--teal)">${IC.clock('var(--teal)')}</span>
-      <div class="card-title">最近活动</div>
-      <div class="right"><button class="link" data-act="allActs">全部记录</button></div>
-    </div>
-    <div class="list">
-      ${acts.length ? acts.slice(0, S.more.acts ? 100 : HOME_ACTS).map(a=>`
-        <div class="row">
-          <span class="ricon-box" style="color:${a.c}">${IC[a.ico](a.c)}</span>
-          <span class="r-title">${esc(a.text)}</span>
-          <span class="r-meta">${esc(a.proj)}</span>
-          <span class="r-time">${esc(a.time)}</span>
-        </div>`).join('') : `<div class="empty">${IC.clock('currentColor')}<span>暂无记录</span></div>`}
-    </div>
-    ${(!S.more.acts && acts.length > HOME_ACTS) ? `<button class="link" data-act="moreActs" style="align-self:flex-start">展开其余 ${acts.length - HOME_ACTS} 条</button>` : ''}
+  const projectsCard = `
+  <section class="card tight dashboard-projects">
+    <div class="card-head"><span class="ricon" style="color:var(--brand)">${IC.grid('var(--brand)')}</span><div class="card-title">项目总览<small>每个项目独立管理</small></div><div class="right"><button class="link" data-act="goPage" data-v="projects">管理项目</button></div></div>
+    <div class="dashboard-project-list">${DATA.projects.map(project => `<button class="dashboard-project-row ${project.id===cur.id?'on':''}" data-act="enterProj" data-id="${project.id}"><span class="dot" style="background:${projStColor(project.st)}"></span><span class="dashboard-project-name">${esc(project.name)}<small>${project.steps.filter(step => step.on).length} 个模块 · ${project.runs} 次运行</small></span><span class="dashboard-project-go">${IC.chevR('currentColor')}</span></button>`).join('')}</div>
+  </section>`;
+  const activityCard = `
+  <section class="card tight dashboard-activity">
+    <div class="card-head"><span class="ricon" style="color:var(--teal)">${IC.clock('var(--teal)')}</span><div class="card-title">最近活动<small>按项目追踪操作</small></div><div class="right"><button class="link" data-act="allActs">全部记录</button></div></div>
+    <div class="dashboard-activity-list">${acts.length ? acts.slice(0, 4).map(activity => `<div class="row"><span class="ricon-box" style="color:${activity.c}">${IC[activity.ico](activity.c)}</span><span class="r-title">${esc(activity.text)}<small>${esc(activity.proj)}</small></span><span class="r-time">${esc(activity.time)}</span></div>`).join('') : `<div class="empty">${IC.clock('currentColor')}<span>暂无活动记录</span></div>`}</div>
   </section>`;
 
   /* 专注视图：主卡占满，次级模块收起为摘要行，可逐个展开 / 单独收起 */
@@ -809,19 +814,16 @@ function viewHome(){
             <span class="chip soft">更新于 ${esc(cur.updated)}</span>
           </div>
           <div class="hero-title">${esc(cur.name)}</div>
-          <div class="hero-progress">
-            <span class="track" style="flex:1"><i style="width:${cur.progress}%"></i></span>
-            <b>${cur.progress}%</b>
-          </div>
+          <div class="hero-project-facts"><span>${currentModules} 个模块已启用</span><span>${currentTasks} 项待办待处理</span></div>
         </div>
         <div class="hero-actions">
-          <button class="btn btn-primary" data-act="resume">${IC.play('#fff')}继续工作流</button>
+          <button class="btn btn-primary" data-act="openWf" data-id="${cur.id}">${IC.chevR('#fff')}进入项目</button>
         </div>
       </div>
     </section>`;
     const mods = [
-      {k:'launch',ico:'grid',  c:C.purple, title:'最近打开', sum:`最近启动的 ${HOME_APPS} 个 · 共 ${S.apps.length} 个`, card:launchCard},
-      {k:'acts',  ico:'clock', c:C.teal,   title:'最近活动', sum:`${S.acts.length} 条更新`,                     card:actCard}
+      {k:'projects',ico:'grid', c:C.brand, title:'项目总览', sum:`${DATA.projects.length} 个项目 · ${activeProjects} 个活跃`, card:projectsCard},
+      {k:'activity',ico:'clock', c:C.teal, title:'最近活动', sum:`${S.acts.length} 条更新`, card:activityCard}
     ];
     return `<div class="page-head">
         <div><h1>总控台</h1><p>专注视图 · 主卡占满，次级模块收起为摘要行</p></div>
@@ -853,16 +855,17 @@ function viewHome(){
   }
 
   return `
-    <div class="page-head">
-      <div><h1>总控台</h1><p>正在做 ${esc(cur.name)} · 任务与项目记录统一在项目内管理</p></div>
+    <div class="page-head dashboard-head">
+      <div><h1>项目仪表盘</h1><p>集中查看项目状态、待办概况与近期活跃</p></div>
       <div class="right">
-        <button class="btn btn-ghost btn-sm" data-act="focus">${IC.list('var(--ink-2)')}专注视图</button>
+        <span class="dashboard-period">当前会话</span><button class="btn btn-ghost btn-sm" data-act="focus">${IC.list('var(--ink-2)')}专注视图</button>
       </div>
     </div>
     <div class="home-grid">
-      ${hero}
-      ${launchCard}
-      ${actCard}
+      ${overviewCard}
+      ${heatCard}
+      ${projectsCard}
+      ${activityCard}
     </div>`;
 }
 
@@ -1752,6 +1755,82 @@ async function loadScannedApps(){
     if (modal && modal.classList && modal.classList.contains('on')) addApp();
   }
 }
+async function loadStartupSetting(){
+  S.startupLoading = true; S.startupError = '';
+  try {
+    const state = await apiRequest('/settings/startup');
+    S.startupEnabled = state && state.enabled === true;
+  } catch (err) {
+    S.startupEnabled = null;
+    S.startupError = err && err.message ? err.message : '无法读取 Windows 启动项';
+  } finally {
+    S.startupLoading = false;
+  }
+}
+async function updateStartupSetting(enabled){
+  if (S.startupLoading || S.startupUpdating) return;
+  S.startupUpdating = true; S.startupError = ''; render(true);
+  try {
+    const state = await apiRequest('/settings/startup', {method:'PUT', body:JSON.stringify({enabled})});
+    S.startupEnabled = state && state.enabled === true;
+    toast(S.startupEnabled ? '开机自启动已开启，并已确认 Windows 启动项' : '开机自启动已关闭，并已确认 Windows 启动项已移除');
+  } catch (err) {
+    S.startupError = err && err.message ? err.message : '无法更新 Windows 启动项';
+    toast(`开机自启动未变更：${S.startupError}`);
+  } finally {
+    S.startupUpdating = false;
+    render(true);
+  }
+}
+function applyConsoleWindowState(state){
+  S.windowState = {
+    available:state && state.available === true,
+    topmost:state && state.topmost === true,
+    width:Number(state && state.width) || 990,
+    height:Number(state && state.height) || 700
+  };
+  syncConsoleWindowControl();
+}
+function syncConsoleWindowControl(){
+  const button = $('#topmostBtn');
+  if (!button || !button.classList) return;
+  const available = S.windowState.available;
+  const topmost = available && S.windowState.topmost;
+  button.disabled = !available || S.windowUpdating;
+  button.classList.toggle('on', topmost);
+  button.setAttribute('aria-pressed', topmost ? 'true' : 'false');
+  button.title = !available
+    ? '未检测到 APEX 固定窗口：请从桌面入口打开总控台'
+    : topmost ? '取消窗口置顶' : '窗口置顶：固定窗口在最上层显示';
+}
+async function loadConsoleWindowState(){
+  try {
+    const state = await apiRequest('/window');
+    S.windowError = '';
+    applyConsoleWindowState(state);
+  } catch (err) {
+    S.windowError = err && err.message ? err.message : '无法读取固定窗口状态';
+    applyConsoleWindowState({available:false, topmost:false});
+  }
+}
+async function updateConsoleWindowTopmost(){
+  if (!S.windowState.available || S.windowUpdating) return;
+  S.windowUpdating = true; syncConsoleWindowControl();
+  try {
+    const state = await apiRequest('/window/topmost', {
+      method:'PUT', body:JSON.stringify({enabled:!S.windowState.topmost})
+    });
+    S.windowError = '';
+    applyConsoleWindowState(state);
+    toast(S.windowState.topmost ? '固定窗口已置顶' : '固定窗口已取消置顶');
+  } catch (err) {
+    S.windowError = err && err.message ? err.message : '无法更新窗口置顶状态';
+    toast(`窗口置顶未变更：${S.windowError}`);
+  } finally {
+    S.windowUpdating = false;
+    syncConsoleWindowControl();
+  }
+}
 /* 后端启动时用真实项目、任务、模块、绑定关系和运行记录替换原型种子。 */
 async function loadBackendState(){
   try {
@@ -1963,18 +2042,6 @@ function runStateOf(id){
   const r = S.running; if (!r || r.wfId!==S.wf || !r.states[id]) return '';
   return {done:'ok', now:'now', wait:'wait', error:'error'}[r.states[id]] || '';
 }
-function chipCls(id){
-  const s = runStateOf(id);
-  return s==='done' ? 'ok' : s==='now' ? 'now' : s==='error' ? 'err' : '';
-}
-function runTextOf(s){
-  const st = (S.running && S.running.states[s.id]) || '';
-  if (st==='done') return '已完成';
-  if (st==='now')  return '启动中…';
-  if (st==='error') return '执行失败';
-  if (st==='wait') return '排队中';
-  return s.wait ? '等待前序' : '并行';
-}
 
 /* ---------- 预备检查 ---------- */
 /* 把现有 wait 关系归纳成展示条目（唯一推导入口，纯函数，不改数据）：
@@ -2094,7 +2161,7 @@ function projMetaOf(w){
   };
 }
 
-/* 卡 1 · 身份卡：正常态展示身份 / 时间线 / 完成度；编辑态整卡换成编辑窗口。
+/* 卡 1 · 身份卡：正常态展示身份 / 时间线 / 工作概况；编辑态整卡换成编辑窗口。
    编辑态不复用展示结构，避免「输入控件与只读信息混排」导致焦点与层级混乱。
    右上角铅笔按钮是编辑窗口的唯一入口。 */
 function projIdCardHTML(w, act){
@@ -2125,16 +2192,12 @@ function projIdCardHTML(w, act){
           ? `${esc(act.text)}<span class="ov-time">${esc(act.time)}</span>`
           : '<span class="ov-mute">还没有关联动态</span>')}
       </div>
-      <div class="ov-prog">
-        <span class="ov-prog-k">开发完成度</span>
-        <span class="track"><i style="width:${w.progress}%"></i></span>
-        <b>${w.progress}%</b>
-      </div>
+      <div class="ov-summary"><span>工作概况</span><b>${projTasks(w.name).filter(task => !task.done).length} 项待办 · ${w.steps.filter(step => step.on).length} 个模块已启用</b></div>
     </section>`;
 }
 
 /* 区块 2 · 概览：项目信息 / 项目能力 / 项目统计 三卡
-   信息分工：卡 1 回答「这是什么」（身份 / 标签 / 时间线 / 进度），
+   信息分工：卡 1 回答「这是什么」（身份 / 标签 / 时间线 / 工作概况），
              卡 2 回答「它能做什么」（流程 / 模块构成 / 启用明细 / 就绪度），
              卡 3 回答「积累了多少」（文件 / 运行）。
    页面级主操作（运行项目）不在这三张卡里 —— 已上提到页头，避免主按钮沉在信息卡底部导致主次不分 */
@@ -2916,9 +2979,9 @@ function projectRunControlsHTML(w, stay){
   const restartBtn = (disabled, label) => `<button class="btn btn-ghost btn-sm pjt-restart" data-act="restartProject" ${attr} ${disabled ? 'disabled' : ''}
     title="先完整关闭项目，再重新启动">${IC.reset('currentColor')}${label}</button>`;
   if (real && busy){
-    if (action === 'stop') return stopBtn(true, '关闭中');
-    if (action === 'restart') return stopBtn(true, '关闭项目') + restartBtn(true, '重启中');
-    return runBtn(true, '运行中');
+    if (action === 'stop') return stopBtn(true, '关闭中') + restartBtn(false, '改为重启');
+    if (action === 'restart') return stopBtn(false, '改为关闭') + restartBtn(true, '重启中');
+    return stopBtn(false, '关闭项目') + restartBtn(false, '重启项目');
   }
   if (real && projIsStarted(w.id)) return stopBtn(false, '关闭项目') + restartBtn(false, '重启项目');
   if (!real && busy) return stopBtn(false, '关闭项目');
@@ -3451,6 +3514,18 @@ function viewSettings(){
       <div class="s-txt"><div class="s-t">${label}</div><div class="s-d">${desc}</div></div>
       <button class="switch ${on?'on':''}" data-act="switch" data-k="${key}"><i></i></button>
     </div>`;
+  const startupBusy = S.startupLoading || S.startupUpdating;
+  const startupDesc = S.startupError
+    ? `未能读取或更新：${esc(S.startupError)}`
+    : startupBusy
+      ? (S.startupUpdating ? '正在更新 Windows 启动项…' : '正在读取 Windows 启动项…')
+      : '登录系统后通过 Windows 启动项在后台启动 APEX 总控台服务';
+  const startupSwitch = `<div class="set-row">
+      <div class="s-txt"><div class="s-t">开机自启动</div><div class="s-d">${startupDesc}</div></div>
+      <button class="switch ${S.startupEnabled===true?'on':''}" data-act="switch" data-k="auto"
+        ${startupBusy || S.startupEnabled===null ? 'disabled aria-disabled="true"' : ''}
+        aria-label="${S.startupEnabled===true?'关闭':'开启'}开机自启动"><i></i></button>
+    </div>`;
   return `
   <div class="page-head"><div><h1>设置</h1><p>外观、Obsidian、通用行为与快捷键</p></div></div>
   <div class="grid g-2">
@@ -3481,11 +3556,10 @@ function viewSettings(){
     </section>
     <section class="card tight">
       <div class="card-head"><div class="card-title">通用</div></div>
-      ${sw('开机自启动','登录系统后自动运行 APEX 守护进程', true, 'auto')}
+      ${startupSwitch}
       ${sw('桌面通知','脚本运行完成或失败时推送系统通知', true, 'notify')}
       ${sw('自动保存','编辑中的文件每 30 秒自动落盘', true, 'save')}
       ${sw('使用数据统计','匿名上报崩溃与性能数据', false, 'telemetry')}
-      ${sw('场景联动','切换场景模式时同步调整系统设置', true, 'scene')}
     </section>
     <section class="card tight">
       <div class="card-head">
@@ -3818,18 +3892,6 @@ function openPop(id, x, y, html){
   el.style.left = Math.min(x, window.innerWidth - r.width - 16) + 'px';
   el.style.top  = (y + 8) + 'px';
 }
-function scenePop(btn){
-  const r = btn.getBoundingClientRect();
-  openPop('scenePop', r.left, r.bottom, `
-    <div class="pop-h">切换场景模式</div>
-    ${DATA.sceneModes.map(m=>`
-      <button class="pop-item" data-act="scene" data-v="${m.id}">
-        <span class="dot" style="background:${m.color}"></span>
-        <span style="flex:1"><span style="display:block;${m.id===S.scene?'font-weight:500':''}">${esc(m.name)}</span>
-        <span style="display:block;font-size:11px;color:var(--ink-3)">${esc(m.desc)}</span></span>
-        ${m.id===S.scene?`<span style="width:15px;height:15px;display:block;color:var(--brand)">${IC.check('#E8402A')}</span>`:''}
-      </button>`).join('')}`);
-}
 function bellPop(btn){
   const r = btn.getBoundingClientRect();
   openPop('bellPop', r.right - 300, r.bottom, `
@@ -3986,15 +4048,13 @@ function openProject(id){
       <span class="badge ${p.stCls}">${esc(p.st)}</span>
       ${p.tags.map(t=>`<span class="badge b-slate">${esc(t)}</span>`).join('')}
     </div>
-    <div class="track"><i style="width:${p.progress}%"></i></div>
     <div class="metrics" style="gap:24px">
-      <span class="metric">完成度 <b>${p.progress}%</b></span>
       <span class="metric">文件 <b>${p.files}</b></span>
       <span class="metric">提交 <b>${p.commits}</b></span>
       <span class="metric">更新 <b>${esc(p.updated.replace(' ',''))}</b></span>
     </div>
     <div style="display:flex;gap:8px">
-      <button class="btn btn-primary btn-sm" data-act="resume">${IC.play('#fff')}继续项目</button>
+      <button class="btn btn-primary btn-sm" data-act="openWf" data-id="${p.id}">${IC.play('#fff')}进入项目</button>
       <button class="btn btn-ghost btn-sm" data-act="toast" data-v="已归档 ${esc(p.name)}">归档项目</button>
     </div>`);
 }
@@ -4295,7 +4355,7 @@ async function startBackendAction(wf, token, action){
     let payload = await apiRequest(`/projects/${encodeURIComponent(wf.id)}/executions`, {method:'POST', body:JSON.stringify({action})});
     if (!applyBackendRun(wf, token, payload)) return;
     while (S.running && S.running.token===token){
-      await delay(750);
+      await delay(150);
       if (!S.running || S.running.token!==token) return;
       payload = await apiRequest(`/executions/${encodeURIComponent(S.running.runId)}`);
       if (!applyBackendRun(wf, token, payload)) return;
@@ -4326,8 +4386,7 @@ function restartProject(id){
   const wf = DATA.projects.find(w=>w.id===id);
   if (!wf){ toast('这个项目已经不存在了'); return false; }
   if (!REAL_PROJECT_IDS.has(wf.id)){ toast('这个项目没有真实重启动作'); return false; }
-  if (!projIsStarted(id)){ toast('项目尚未启动，不需要重启'); return false; }
-  if (projIsRunning(id)){ toast(`「${wf.name}」正在执行操作`); return false; }
+  if (!projIsStarted(id) && !projIsRunning(id)){ toast('项目尚未启动，不需要重启'); return false; }
   const steps = wf.steps.filter(s=>s.on);
   runToken++;
   S.running = {token:runToken, wfId:wf.id, i:-1, done:0, total:steps.length || 1, states:{}, log:[], order:steps.map(s=>s.id), real:true, action:'restart', status:'queued'};
@@ -4489,12 +4548,11 @@ function aiReply(q){
 /* ---------------- 事件 ---------------- */
 document.addEventListener('click', e => {
   const t = e.target.closest('[data-act]');
-  if (!t){ if (!e.target.closest('.pop') && !e.target.closest('#sceneBtn')) closePops(); return; }
+  if (!t){ if (!e.target.closest('.pop')) closePops(); return; }
   const act = t.dataset.act;
   const v = t.dataset.v, id = t.dataset.id, k = t.dataset.k;
 
   switch(act){
-    case 'resume':   toast('正在恢复 APEX Automation 项目'); addActivity('恢复了 APEX Automation 项目','APEX Automation','play',C.green,'项目'); if(S.page==='home') render(true); break;
     case 'focusProj': {
       if (id !== S.proj){
         const cur = DATA.projects.find(p=>p.id===id); if (!cur) break;   // 项目可能刚被删掉
@@ -4690,13 +4748,12 @@ document.addEventListener('click', e => {
       break;
     }
     case 'switch': {
+      if (k === 'auto') { void updateStartupSetting(S.startupEnabled !== true); break; }
       t.classList.toggle('on');
       if (k === 'glass'){
         const on = t.classList.contains('on');
         document.documentElement.classList.toggle('no-blur', !on);
         toast(on ? '玻璃质感已开启' : '玻璃质感已关闭（卡片改为纯色底）');
-      } else if (k === 'auto'){
-        toast(t.classList.contains('on') ? '开机自启动已开启' : '开机自启动已关闭');
       } else if (k === 'notify'){
         toast(t.classList.contains('on') ? '桌面通知已开启' : '桌面通知已关闭');
       } else if (k === 'save'){
@@ -4720,15 +4777,6 @@ document.addEventListener('click', e => {
     case 'obsidianUnbindAsk':   armObsidianUnbind(id); break;
     case 'obsidianUnbindCancel':S.obsidianUnbindArm = ''; render(true); break;
     case 'obsidianUnbindProject': unbindObsidianProject(id); break;
-    case 'scene': {
-      const m = DATA.sceneModes.find(x=>x.id===v); if (!m) break;   // 非法 id 不再往下取 m.name
-      S.scene = v;
-      $('#sceneName').textContent = m.name;
-      $('#sceneDot').style.background = m.color;
-      document.documentElement.style.setProperty('--brand', m.color);
-      closePops(); toast(`已切换到${m.name}`);
-      break;
-    }
     case 'closeDrawer': closeDrawer(); break;
     case 'closeModal':  closeModal(); break;
     /* ---- 工作流 / 步骤编排 ---- */
@@ -4855,7 +4903,6 @@ $('#paletteInput').addEventListener('input', e => { palSel = 0; buildPalette(e.t
 $('#paletteList').addEventListener('click', e => {
   const b = e.target.closest('[data-pi]'); if (b) runPalette(+b.dataset.pi);
 });
-$('#sceneBtn').addEventListener('click', e => { e.stopPropagation(); scenePop(e.currentTarget); });
 $('#bellBtn').addEventListener('click', e => { e.stopPropagation(); bellPop(e.currentTarget); });
 $('#voiceBtn').addEventListener('click', e => {
   e.stopPropagation();
@@ -4871,8 +4918,10 @@ $('#focusBtn').addEventListener('click', () => {
 });
 $('#miniBtn').addEventListener('click', () => { $('#app').classList.toggle('mini'); });
 $('#drawerMask').addEventListener('click', closeDrawer);
+const topmostBtn = $('#topmostBtn');
+if (topmostBtn) topmostBtn.addEventListener('click', () => { void updateConsoleWindowTopmost(); });
 
-/* ---------- 全屏模式：页面只支持「1260×840 标准窗口 / 全屏」两种规格 ----------
+/* ---------- 全屏模式：桌面入口默认 990×700 固定窗口，仍可随时切换全屏 ----------
    全屏由 Fullscreen API 驱动：点击按钮请求/退出，fullscreenchange 时切换 body.is-fullscreen，
    CSS 据此给主内容加 max-width + 居中（不做连续 resize 计算）。 */
 const fsBtn = $('#fsBtn');
@@ -5105,6 +5154,9 @@ setInterval(()=>{
     if (S.backendError) toast(`后端数据加载失败：${S.backendError}`);
     void syncProjectRuntime();
   };
-  if (typeof fetch === 'function') void loadBackendState().then(finish);
+  if (typeof fetch === 'function') void loadBackendState().then(async () => {
+    await Promise.all([loadStartupSetting(), loadConsoleWindowState()]);
+    finish();
+  });
   else finish();
 })();
