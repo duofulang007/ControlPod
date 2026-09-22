@@ -1,0 +1,31 @@
+# Local Python environment and runtime data
+backend/.venv/
+backend/data/
+**/test-tmp/
+**/.pytest_cache/
+**/.pytest-*/
+**/pytest-cache-files-*/
+backend/**/__pycache__/
+backend/**/*.py[cod]
+
+# Local test caches
+__pycache__/
+
+# Machine-specific settings and transient output
+.env
+.env.*
+!.env.example
+*.log
+
+# Generated visual-check evidence; source documents remain tracked
+backend/docs/*.visual-check.*
+
+# Agent tooling metadata (local notes, never part of the deliverable)
+.workbuddy/
+
+# runner-lab: personal running/health data stays local, never in the repo.
+# Rebuild data.js by importing an export package once (runner-lab/导入数据.cmd).
+runner-lab/data.js
+runner-lab/data.prev.js
+runner-lab/inbox/*
+!runner-lab/inbox/README.txt
