@@ -232,6 +232,36 @@ def test_version_seven_database_adds_application_launch_targets_without_losing_r
     ) == {"name": "旧应用", "launch_path": "", "source_key": ""}
 
 
+def test_version_nine_database_adds_project_order_without_reordering_existing_rows(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "version-nine.db"
+    with sqlite3.connect(path) as conn:
+        conn.executescript(
+            """
+            CREATE TABLE projects (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL UNIQUE,
+                description TEXT NOT NULL DEFAULT '',
+                status TEXT NOT NULL DEFAULT '正常',
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+            INSERT INTO projects VALUES ('b', '第二个', '', '正常', '2026-01-02', '2026-01-02');
+            INSERT INTO projects VALUES ('a', '第一个', '', '正常', '2026-01-01', '2026-01-01');
+            INSERT INTO projects VALUES ('c', '第三个', '', '正常', '2026-01-03', '2026-01-03');
+            PRAGMA user_version = 9;
+            """
+        )
+
+    db = Database(path)
+    db.init()
+
+    assert database_version(path) == LATEST_SCHEMA_VERSION
+    rows = db.fetch_all("SELECT id,sort_order FROM projects ORDER BY sort_order, created_at, id")
+    assert [(row["id"], row["sort_order"]) for row in rows] == [("a", 0), ("b", 1), ("c", 2)]
+
+
 def test_database_newer_than_code_fails_closed(tmp_path: Path) -> None:
     path = tmp_path / "future.db"
     with sqlite3.connect(path) as conn:

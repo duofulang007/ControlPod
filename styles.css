@@ -46,7 +46,7 @@ textarea,
   --green:#0E8A3C;   --green-bg:rgba(16,163,74,.12);
   --blue:#2563EB;    --blue-bg:rgba(37,99,235,.12);
   --amber:#B0700F;   --amber-bg:rgba(186,117,23,.14);
-  --purple:#6D3BF5;  --purple-bg:rgba(124,77,255,.12);
+  --purple-bg:rgba(124,77,255,.12);
   --teal:#0B8F8F;    --teal-bg:rgba(14,165,165,.12);
   --slate:#7A828F;   --slate-bg:rgba(122,130,143,.14);
 
@@ -84,14 +84,27 @@ textarea,
   --dash-desc:12.5px;
   --dash-stat:24px;
   --dash-stat-label:10.5px;
-  --dash-heat-cell:11px;
-  --dash-heat-gap:4px;
+  --dash-heat-gap:3px;
   --dash-heat-label:10px;
-  --dash-heat-0:var(--tile);
-  --dash-heat-1:rgba(14,138,60,.20);
-  --dash-heat-2:rgba(14,138,60,.42);
-  --dash-heat-3:rgba(14,138,60,.68);
-  --dash-heat-4:var(--green);
+  --dash-heat-empty-h:64px;
+  /* 方格圆角用百分比：跟着格子大小成正比，小格不会糊成圆点、大格不会显得太方 */
+  --dash-heat-cell-r:22%;
+  /* 活跃度底色：单一蓝色系五档，只表达在线时长（0 = 未活跃浅灰，越深 = 在线越久）。
+     严禁在底色里掺红绿；代码增删只在悬停气泡里用色。 */
+  --dash-heat-0:#EBEDF0;
+  --dash-heat-1:#BFDBFE;
+  --dash-heat-2:#93C5FD;
+  --dash-heat-3:#3B82F6;
+  --dash-heat-4:#2563EB;
+  /* 悬停气泡：深色胶囊 + 两行（日期/在线，+ 增 / - 删），两种主题同一个深色底 */
+  --heat-tip-bg:#14161A;
+  --heat-tip-ink:#FFFFFF;
+  --heat-tip-add:#10B981;
+  --heat-tip-del:#EF4444;
+  --heat-tip-r:10px;
+  --heat-tip-pad:5px 10px;
+  --heat-tip-gap:2px;
+  --heat-tip-rise:4px;
 
   /* Obsidian 项目资料中枢：尺寸与动效集中在令牌，组件规则不硬写数值 */
   --ease-out:cubic-bezier(.23,1,.32,1);
@@ -113,7 +126,6 @@ textarea,
   --obs-copy-gap:3px;
   --obs-panel-gap:10px;
   --obs-panel-shift:6px;
-  --obs-focus-ring:3px;
 
   /* 居中弹窗：所有「编辑 / 填写」表单的宿主。宽度分两档——宽版给长文本 / 列表，窄版给字段少的表单 */
   --modal-w:760px;
@@ -132,6 +144,11 @@ textarea,
   --tile-min:290px;
   --board-gap:14px;
   --tile-pad:16px;
+  /* 卡片拖拽排序的视觉：抬起幅度与拖拽阴影。JS 通过 getComputedStyle 读这两个值，
+     所以调手感只改这里，不用去动 app.js */
+  --pjt-lift-scale:1.035;
+  --pjt-lift-tilt:1.4deg;
+  --pjt-sh-drag:0 22px 46px rgba(46,26,20,.24);
 
   /* 应用列表：行卡片固定高度 + 行距（步长 = 高 + 距，smoke/app.js 的整数行计算依赖它） */
   --app-row-h:46px;
@@ -162,7 +179,7 @@ textarea,
   --green:#4ADE80;  --green-bg:rgba(74,222,128,.14);
   --blue:#7DA4FF;   --blue-bg:rgba(125,164,255,.14);
   --amber:#E5AE55;  --amber-bg:rgba(229,174,85,.14);
-  --purple:#A98BFF; --purple-bg:rgba(169,139,255,.14);
+  --purple-bg:rgba(169,139,255,.14);
   --teal:#4FD1C5;   --teal-bg:rgba(79,209,197,.14);
   --slate:#9AA2B0;  --slate-bg:rgba(154,162,176,.14);
 
@@ -177,11 +194,15 @@ textarea,
   --sh:0 8px 24px rgba(0,0,0,.34);
   --sh-lg:0 18px 44px rgba(0,0,0,.5);
 
-  --dash-heat-0:var(--tile);
-  --dash-heat-1:rgba(74,222,128,.18);
-  --dash-heat-2:rgba(74,222,128,.38);
-  --dash-heat-3:rgba(74,222,128,.62);
-  --dash-heat-4:var(--green);
+  /* 拖拽中的卡片阴影：深色态用纯黑加不透明度，避免浅色投影在暗底上发灰 */
+  --pjt-sh-drag:0 22px 46px rgba(0,0,0,.62);
+
+  /* 深色态蓝阶：同一支蓝色系在暗底上升一档，保证「越活跃越亮」的读法不变 */
+  --dash-heat-0:rgba(255,255,255,.06);
+  --dash-heat-1:#1E3A8A;
+  --dash-heat-2:#2563EB;
+  --dash-heat-3:#3B82F6;
+  --dash-heat-4:#60A5FA;
 
   --bg:
     radial-gradient(1200px 680px at 6% -8%, #2A2029 0%, rgba(42,32,41,0) 60%),
@@ -426,18 +447,7 @@ input,select{font:inherit;color:inherit}
 button:focus-visible,input:focus-visible,.row:focus-visible,.tab:focus-visible{
   outline:2px solid var(--brand);outline-offset:2px;border-radius:var(--r-sm)}
 
-/* ---------- 主卡 Hero（横向：状态徽章 / 大标题 / 进度 / 项目切换） ---------- */
-.hero{
-  position:relative;overflow:hidden;border-radius:var(--r-card);
-  border:1px solid rgba(255,255,255,.85);
-  background-image:linear-gradient(135deg,#FFFFFF 0%,#F4F6FA 62%,#EDF1F7 100%);
-  justify-content:space-between;min-height:0;
-}
-[data-theme="dark"] .hero{
-  background-image:linear-gradient(135deg,#23242B 0%,#1E1F26 62%,#1B1C22 100%);
-  border-color:var(--line);
-}
-.hero-main{flex:1;min-width:0;min-height:0;display:flex;flex-direction:column;justify-content:space-between;gap:14px}
+/* ---------- 主卡状态区（状态徽章 / 说明句） ---------- */
 .hero-meta{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
 .chip{
   display:inline-flex;align-items:center;gap:6px;
@@ -447,10 +457,6 @@ button:focus-visible,input:focus-visible,.row:focus-visible,.tab:focus-visible{
 }
 .chip.soft{background:rgba(255,255,255,.62);border-color:transparent}
 [data-theme="dark"] .chip.soft{background:rgba(255,255,255,.07)}
-.hero-title{font-family:Inter,sans-serif;font-size:28px;font-weight:700;letter-spacing:-.6px;line-height:1.12}
-.hero-actions{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
-.hero-project-facts{display:flex;align-items:center;gap:var(--dash-gap);flex-wrap:wrap;font-size:var(--dash-desc);color:var(--ink-2)}
-.hero-project-facts span{display:inline-flex;align-items:center;gap:calc(var(--dash-gap) / 3)}
 
 /* ---------- 项目仪表盘：当前项目、按项目总览、活跃度与最近活动，单屏、有主次 ---------- */
 .home-grid{
@@ -461,77 +467,89 @@ button:focus-visible,input:focus-visible,.row:focus-visible,.tab:focus-visible{
   grid-template-areas:"overview heat" "projects activity";
   gap:var(--gap);
 }
-.dashboard-overview{grid-area:overview;display:grid;grid-template-columns:minmax(0,1.12fr) minmax(0,.88fr);gap:var(--dash-gap);padding:var(--dash-card-pad);background-image:linear-gradient(135deg,var(--card-strong),var(--card));}
+.dashboard-overview{grid-area:overview;display:flex;flex-direction:column;gap:var(--dash-gap);padding:var(--dash-card-pad);background-image:linear-gradient(135deg,var(--card-strong),var(--card));}
 .dashboard-heat{grid-area:heat}
 .dashboard-projects{grid-area:projects}
 .dashboard-activity{grid-area:activity}
 .home-grid .card{min-height:0;overflow:hidden}
 .home-grid .card-head{flex:0 0 auto}
-.dashboard-overview-main{min-width:0;display:flex;flex-direction:column;justify-content:space-between;gap:var(--dash-gap)}
-.dashboard-kicker{margin:0 0 calc(var(--dash-gap) / 3);font-size:var(--dash-kicker);font-weight:600;letter-spacing:.08em;color:var(--ink-3)}
+.dashboard-overview-main{flex:1;min-height:0;display:flex;flex-direction:column;justify-content:center;gap:calc(var(--dash-gap) / 1.6)}
+.dashboard-kicker{margin:0 calc(var(--dash-gap) / 3) 0 0;font-size:var(--dash-kicker);font-weight:600;letter-spacing:.08em;color:var(--ink-3)}
 .dashboard-overview h2{margin:0;font-size:var(--dash-title);line-height:1.15;letter-spacing:-.04em}
-.dashboard-desc{margin:calc(var(--dash-gap) / 2) 0 0;color:var(--ink-2);font-size:var(--dash-desc);line-height:1.6}
-.dashboard-context{display:flex;align-items:center;gap:var(--dash-gap);flex-wrap:wrap;font-size:var(--dash-desc);color:var(--ink-2)}
-.dashboard-context span{display:inline-flex;align-items:baseline;gap:calc(var(--dash-gap) / 3)}
-.dashboard-context b{font-size:var(--dash-stat);font-weight:650;line-height:1;color:var(--ink)}
+.dashboard-desc{margin:calc(var(--dash-gap) / 3) 0 0;color:var(--ink-2);font-size:var(--dash-desc);line-height:1.6;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.dashboard-overview-foot{display:flex;align-items:center;gap:calc(var(--dash-gap) / 2);flex-wrap:wrap}
 .dashboard-actions{display:flex;align-items:center;gap:calc(var(--dash-gap) / 2);flex-wrap:wrap}
-.dashboard-kpis{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:var(--dash-gap)}
-.dashboard-kpis>div{display:flex;flex-direction:column;justify-content:center;gap:calc(var(--dash-gap) / 5);padding:var(--dash-gap);border:1px solid var(--line-2);border-radius:var(--r-inner);background:var(--tile-2)}
-.dashboard-kpis span,.dashboard-kpis small{font-size:var(--dash-stat-label);color:var(--ink-3)}
+.dashboard-kpis{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:calc(var(--dash-gap) / 2);min-height:0}
+.dashboard-kpis>div{display:flex;min-width:0;min-height:0;flex-direction:column;justify-content:center;gap:calc(var(--dash-gap) / 5);padding:calc(var(--dash-gap) / 1.6) calc(var(--dash-gap) / 1.5);border:1px solid var(--line-2);border-radius:var(--r-inner);background:var(--tile-2);overflow:hidden}
+.dashboard-kpis span,.dashboard-kpis small{font-size:var(--dash-stat-label);color:var(--ink-3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .dashboard-kpis strong{font-size:var(--dash-stat);font-weight:650;line-height:1;color:var(--ink)}
-.heat-wrap{display:flex;flex:1;min-height:0;flex-direction:column;justify-content:center;gap:var(--dash-gap)}
-.heat-months{display:grid;grid-template-columns:repeat(3,1fr);margin-left:calc(var(--dash-heat-cell) + var(--dash-gap));font-size:var(--dash-heat-label);color:var(--ink-4)}
-.heat-body{display:flex;align-items:stretch;gap:calc(var(--dash-gap) / 2)}
-.heat-days{display:grid;grid-template-rows:repeat(7,var(--dash-heat-cell));gap:var(--dash-heat-gap);width:var(--dash-heat-cell);font-size:var(--dash-heat-label);line-height:var(--dash-heat-cell);color:var(--ink-4);text-align:center}
-.heat-grid{display:grid;grid-template-columns:repeat(12,var(--dash-heat-cell));grid-template-rows:repeat(7,var(--dash-heat-cell));grid-auto-flow:column;gap:var(--dash-heat-gap);justify-content:space-between;flex:1;min-width:0}
-.heat-cell,.heat-legend i{display:block;width:var(--dash-heat-cell);height:var(--dash-heat-cell);border-radius:calc(var(--r-sm) / 2);background:var(--dash-heat-0)}
-.heat-cell.h1,.heat-legend .h1{background:var(--dash-heat-1)}
-.heat-cell.h2,.heat-legend .h2{background:var(--dash-heat-2)}
-.heat-cell.h3,.heat-legend .h3{background:var(--dash-heat-3)}
-.heat-cell.h4,.heat-legend .h4{background:var(--dash-heat-4)}
-.heat-foot{display:flex;justify-content:space-between;align-items:center;gap:var(--dash-gap);font-size:var(--dash-heat-label);color:var(--ink-4)}
-.heat-legend{display:flex;align-items:center;gap:calc(var(--dash-heat-gap) / 1.4);white-space:nowrap}
-.heat-legend i{width:calc(var(--dash-heat-cell) * .76);height:calc(var(--dash-heat-cell) * .76)}
+/* 活跃度热力图：26 列 = 周、7 行 = 周几。
+   自适应完全交给 CSS Grid 本身——列宽 1fr 平分卡宽，方格用 aspect-ratio 保持正方形，
+   所以格子宽度天然等于列宽，不存在「算出来的格宽 > 卡宽」的溢出，也就永远没有横向滚动条；
+   月份刻度与格子共用同一套 1fr 列模板，逐列对齐是结构保证的（不再由 JS 量尺寸）。
+   明细只在悬停气泡里出现，卡片本身不放任何摘要行 / 统计卡。 */
+.heat-wrap{display:flex;flex:1;min-height:0;flex-direction:column;justify-content:center}
+.heat-empty{display:flex;align-items:center;justify-content:center;min-height:var(--dash-heat-empty-h);font-size:var(--dash-heat-label);color:var(--ink-3)}
+.heat-tabs{display:flex;align-items:center;gap:calc(var(--dash-gap) / 2)}
+.heat-tab{border:0;background:transparent;padding:2px 4px;color:var(--ink-4);font:inherit;font-size:var(--dash-heat-label);font-weight:600;cursor:pointer}
+.heat-tab.on{color:var(--ink)}
+.heat-tab:hover{color:var(--ink-2)}
+.heat-body{display:flex;flex-direction:column;gap:var(--dash-heat-gap);width:100%;min-width:0}
+.heat-grid{display:grid;grid-auto-flow:column;grid-auto-columns:minmax(0,1fr);grid-template-rows:repeat(7,auto);gap:var(--dash-heat-gap)}
+.heat-months{display:grid;grid-auto-flow:column;grid-auto-columns:minmax(0,1fr);gap:var(--dash-heat-gap);font-size:var(--dash-heat-label);line-height:1.5;color:var(--ink-4);white-space:nowrap;overflow:visible}
+.heat-cell{position:relative;display:block;border-radius:var(--dash-heat-cell-r);background:var(--dash-heat-0)}
+/* 方格保持 1:1 用百分比 padding（基于已解析的列宽）而不是 aspect-ratio：
+   本仓库踩过 aspect-ratio + auto 行轨道被 stretch 对齐忽略、整片棋盘塌成一条线的坑 */
+.heat-cell::before{content:"";display:block;padding-top:100%}
+.heat-cell.h1{background:var(--dash-heat-1)}
+.heat-cell.h2{background:var(--dash-heat-2)}
+.heat-cell.h3{background:var(--dash-heat-3)}
+.heat-cell.h4{background:var(--dash-heat-4)}
+.heat-cell.today{box-shadow:0 0 0 1px var(--ink-2)}
+.heat-cell:hover{box-shadow:0 0 0 1px var(--ink-3)}
+/* 今天之后的格子：浅灰占位、不参与交互、JS 也不给它生成气泡 —— 未来日期不可能被悬停出来 */
+.heat-cell.future{pointer-events:none}
+/* 悬停气泡：深色胶囊。第一行「日期 · 在线时长」，第二行「+ 新增 / - 删减」（绿 / 红）。
+   淡入 + 上浮，统一 transition:all .3s ease */
+.heat-tip{position:absolute;bottom:calc(100% + 6px);left:50%;z-index:3;--heat-tip-dx:-50%;
+  display:flex;flex-direction:column;gap:var(--heat-tip-gap);
+  padding:var(--heat-tip-pad);border-radius:var(--heat-tip-r);
+  background:var(--heat-tip-bg);color:var(--heat-tip-ink);box-shadow:var(--sh-lg);
+  font-size:var(--dash-heat-label);line-height:1.5;white-space:nowrap;
+  opacity:0;pointer-events:none;
+  transform:translate(var(--heat-tip-dx),var(--heat-tip-rise));
+  transition:all .3s ease}
+.heat-cell:hover .heat-tip{opacity:1;transform:translate(var(--heat-tip-dx),0)}
+.heat-cell:nth-child(7n+1) .heat-tip{left:0;--heat-tip-dx:0}
+.heat-cell:nth-child(n+169) .heat-tip{left:auto;right:0;--heat-tip-dx:0}
+.heat-tip-l2{display:flex;align-items:center;gap:calc(var(--heat-tip-gap) * 2)}
+.heat-tip-sep{color:var(--heat-tip-ink);opacity:.45}
+.heat-add{color:var(--heat-tip-add);font-weight:600}
+.heat-del{color:var(--heat-tip-del);font-weight:600}
 .dashboard-project-list,.dashboard-activity-list{display:flex;flex:1;min-height:0;flex-direction:column;gap:calc(var(--dash-gap) / 2)}
+/* 项目总览行数可能超出卡高：列表自身滚动，滚动条与步骤区同款细样式 */
+.dashboard-project-list{overflow:hidden auto;padding-right:2px;scrollbar-width:thin;scrollbar-color:var(--line) transparent}
+.dashboard-project-list::-webkit-scrollbar{width:6px}
+.dashboard-project-list::-webkit-scrollbar-thumb{background:var(--line);border-radius:3px}
+.dashboard-project-list::-webkit-scrollbar-track{background:transparent}
 .dashboard-project-row{display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;gap:var(--dash-gap);width:100%;padding:calc(var(--dash-gap) / 1.35);border-radius:var(--r-inner);text-align:left;background:var(--tile-2);border:1px solid transparent;transition:background var(--motion-press) var(--ease-out),border-color var(--motion-press) var(--ease-out),transform var(--motion-press) var(--ease-out)}
 .dashboard-project-row:hover{background:var(--hover);border-color:var(--brand-line);transform:translateY(calc(var(--dash-gap) / -10))}
 .dashboard-project-row.on{background:var(--brand-soft);border-color:var(--brand-line)}
 .dashboard-project-name{display:flex;min-width:0;flex-direction:column;font-size:var(--dash-desc);font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .dashboard-project-name small{margin-top:calc(var(--dash-gap) / 6);font-size:var(--dash-stat-label);font-weight:400;color:var(--ink-3)}
-.dashboard-project-go{width:var(--dash-heat-cell);height:var(--dash-heat-cell);color:var(--ink-3)}
+.dashboard-project-go{width:13px;height:13px;color:var(--ink-3)}
 .dashboard-project-go svg{display:block;width:100%;height:100%}
 .dashboard-activity .row{padding:calc(var(--dash-gap) / 1.35);min-height:0}
 .dashboard-activity .r-title{display:flex;min-width:0;flex-direction:column;gap:calc(var(--dash-gap) / 6)}
 .dashboard-activity .r-title small{font-size:var(--dash-stat-label);font-weight:400;color:var(--ink-3)}
-.dashboard-period{font-size:var(--dash-stat-label);color:var(--ink-3);white-space:nowrap}
-
-/* ---------- 专注视图：主卡高度恒定，展开内容在次级区滚动 ---------- */
-.focus-layout{flex:1;min-height:0;display:flex;flex-direction:column;gap:var(--gap)}
-.focus-layout .focus-hero{flex:0 0 auto;min-height:0}
-.focus-mods{flex:1;min-height:0;overflow:hidden auto;display:flex;flex-direction:column;gap:10px}
-.expanded-mod{display:flex;flex-direction:column;gap:10px;flex:0 0 auto}
-.collapse-trigger{
-  display:flex;align-items:center;gap:12px;width:100%;
-  padding:14px 16px;border-radius:var(--r-card);
-  background:var(--card);border:1px solid var(--brand-line);
-  box-shadow:var(--sh);text-align:left;
-}
-.collapse-trigger .c-title{font-size:15px;font-weight:600}
-.collapse-trigger .c-sum{font-size:12px;color:var(--ink-3)}
-.collapse-trigger .c-open{margin-left:auto;display:flex;align-items:center;gap:7px;
-  font-size:12px;color:var(--ink-3)}
-.chev.up{transform:rotate(180deg)}
 
 /* ---------- 玻璃质感开关（设置页 · 真实生效） ---------- */
-.no-blur .card,.no-blur .sidebar,.no-blur .collapse-row,
+.no-blur .card,.no-blur .sidebar,
 .no-blur .drawer,.no-blur .palette{
   backdrop-filter:none !important;-webkit-backdrop-filter:none !important;
 }
-.no-blur .card,.no-blur .collapse-row{background:#FFFFFF}
-.no-blur .hero{background-image:linear-gradient(135deg,#FFFFFF 0%,#F4F6FA 62%,#EDF1F7 100%)}
-[data-theme="dark"] .no-blur .card,
-[data-theme="dark"] .no-blur .collapse-row{background:#23242B}
-[data-theme="dark"] .no-blur .hero{background-image:linear-gradient(135deg,#23242B 0%,#1B1C22 100%)}
+.no-blur .card{background:#FFFFFF}
+[data-theme="dark"] .no-blur .card{background:#23242B}
 
 /* ---------- 抽屉里的输入控件 ---------- */
 .drawer-input{
@@ -549,13 +567,6 @@ button:focus-visible,input:focus-visible,.row:focus-visible,.tab:focus-visible{
 .metrics{display:flex;align-items:center;gap:18px;flex-wrap:wrap}
 .metric{font-family:Inter,sans-serif;font-size:12px;font-weight:500;color:var(--ink-2);white-space:nowrap}
 .metric b{color:var(--ink);font-weight:600}
-.spacer{flex:1}
-.player{display:flex;align-items:center;gap:8px;padding:5px 8px 5px 5px;border-radius:var(--r-pill);
-  background:var(--card-strong);border:1px solid var(--line-2)}
-.pbar{width:70px;height:4px;border-radius:2px;background:var(--tile);overflow:hidden}
-.pbar i{display:block;height:100%;background:var(--brand);border-radius:2px;width:38%}
-.play{width:26px;height:26px;border-radius:50%;background:var(--brand);display:grid;place-items:center;flex:0 0 26px}
-.play:hover{background:var(--brand-dark)}
 
 /* ---------- 应用宫格 ---------- */
 .apps{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}
@@ -571,23 +582,6 @@ button:focus-visible,input:focus-visible,.row:focus-visible,.tab:focus-visible{
 .app-tile span{font-size:11px;color:var(--ink-2);max-width:100%;overflow:hidden;
   text-overflow:ellipsis;white-space:nowrap}
 .app-tile.add .ico{opacity:.55}
-
-/* ---------- 收起态 ---------- */
-.collapse-row{
-  display:flex;align-items:center;gap:12px;padding:0 18px;height:66px;
-  background:var(--card);border:1px solid rgba(255,255,255,.85);
-  backdrop-filter:var(--blur);-webkit-backdrop-filter:var(--blur);
-  border-radius:var(--r-card);box-shadow:var(--sh);width:100%;text-align:left;
-  transition:all .18s ease;
-}
-[data-theme="dark"] .collapse-row{border-color:var(--line)}
-.collapse-row:hover{border-color:var(--brand-line);transform:translateY(-1px)}
-.collapse-row .c-ico,.collapse-trigger .c-ico{width:28px;height:28px;flex:0 0 28px;display:block}
-.collapse-row .c-title{font-size:15px;font-weight:600}
-.collapse-row .c-sum{font-size:12px;color:var(--ink-3)}
-.collapse-row .c-open{margin-left:auto;display:flex;align-items:center;gap:7px;
-  font-size:12px;color:var(--ink-2)}
-.collapse-row .chev{transition:transform .24s ease}
 
 @keyframes slideIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
 .anim{animation:slideIn .26s cubic-bezier(.2,.7,.3,1) both}
@@ -764,14 +758,13 @@ button:focus-visible,input:focus-visible,.row:focus-visible,.tab:focus-visible{
 
 /* ---------- 图标尺寸统一 ---------- */
 svg{display:block}
-.ricon>svg,.c-ico>svg,.app-tile .ico>svg,.p-ico>svg,
-.btn>svg,.icon-btn>svg,.play>svg,.empty>svg,.toast>svg,.field>svg,.pop-item>svg{
+.ricon>svg,.app-tile .ico>svg,.p-ico>svg,
+.btn>svg,.icon-btn>svg,.empty>svg,.toast>svg,.field>svg,.pop-item>svg{
   width:100%;height:100%
 }
 .btn>svg{width:16px;height:16px;flex:0 0 16px}
 .btn-sm>svg{width:14px;height:14px;flex:0 0 14px}
 .icon-btn>svg{width:20px;height:20px}
-.play>svg{width:13px;height:13px}
 .empty>svg{width:28px;height:28px}
 .toast>svg{width:15px;height:15px;flex:0 0 15px}
 .field>svg{width:16px;height:16px;flex:0 0 16px}
@@ -963,6 +956,15 @@ svg{display:block}
 .pjt-new-ico>svg{width:16px;height:16px}
 .pjt-new-t{font-size:13px;font-weight:600}
 .pjt-new-s{font-size:11px;color:var(--ink-4)}
+/* ---------- 项目选择页：卡片拖拽排序 ----------
+   零额外 UI：没有手柄、没有指示线、没有占位卡。长按卡片空白处 200ms 才起拖。
+   拖拽期间不给卡片留 transform 过渡 —— 位移是 JS 的弹簧积分逐帧算出来的，
+   留着 transition 会被浏览器再补间一次，看起来又慢又飘。
+   被拖的那张只加抬起态（阴影 / 层级 / 光标）；缩放与倾斜由 JS 读 :root 令牌后逐帧写死值。 */
+.pjt-board.is-arming,.pjt-board.is-sorting{user-select:none;-webkit-user-select:none}
+.pjt-board.is-sorting .pjt-card{transition-property:border-color,box-shadow,background}
+.pjt-card.is-dragging{cursor:grabbing;z-index:30;border-color:var(--brand-line);
+  background:var(--card-strong);box-shadow:var(--pjt-sh-drag)}
 /* 触屏没有悬停：进入提示直接上色，否则它永远停在低权重的灰字状态 */
 @media (hover:none){
   .pjt-enter{color:var(--brand)}

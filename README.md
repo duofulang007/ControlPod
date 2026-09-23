@@ -6,13 +6,15 @@
 
 ## 当前能力
 
-- 项目管理：创建、复制、编辑、删除项目，并查看项目运行状态与历史。
+- 项目管理：创建、复制、编辑、删除项目，拖拽调整项目卡顺序，并查看项目运行状态与历史。
 - 执行模块：维护可复用的网站模块与内置 APEX 启动模块，将模块组合到项目中运行。
+- 开发者活跃度：首页热力图，底色表达控制台在线时长（页面每分钟静默上报一次），悬停显示当日在线分钟与代码新增 / 删减行数；代码行数由本机 git 仓库只读扫描得出，可在每日 / 每周 / 累计三个口径间切换。
 - 跑步数据看板：解析小米运动健康官方导出包，本地生成跑步数据分析看板
   （训练负荷模型、跑姿体检、每日建议）。看板是**独立仓库** `../run-analytics`，
   总控台只负责接入与启动；健康数据不出本机。
 - 真实应用：识别 Windows 开始菜单、已注册应用与 App Paths 中的可启动程序；添加后可从控制台启动，并显示 Windows 原生图标。
 - 项目上下文：在项目内维护待办、项目记录、文件关联和 Obsidian 主页连接。
+- 界面偏好：主题、强调色、信息密度、玻璃质感等外观选项保存在浏览器本机，刷新后保持。
 - 本地运行：桌面入口可检查服务状态，打开独立窗口；源码变更后安全重启本地服务。
 
 ## 运行环境
@@ -75,14 +77,15 @@ apex-console/
 ```
 
 `run-analytics/`（跑步数据看板）是**独立 git 仓库**，按「每个项目模块一个仓库」的约定
-放在本仓库的同级目录（`D:\Projects\run-analytics`），`backend/modules/run-analytics/module.json`
+放在本仓库的同级目录（`D:\Projects\run-analytics`），`backend/modules/runner-lab/module.json`
 的 `projectRoot` 用相对路径 `..\run-analytics` 指向它。总控台仓库不跟踪其任何文件。
+（接入层目录沿用历史名 `runner-lab`，与运行历史、模块 id 绑定，**不要改名**。）
 
 ## 模块仓库约定
 
 平台（本仓库）与模块项目（如 run-analytics）分仓库管理：
 
-- 模块项目 clone 到 `D://Projects//<名称>`（与本仓库同级），在 `backend/modules/<模块>/module.json`
+- 模块项目 clone 到 `D:\Projects\<名称>`（与本仓库同级），在 `backend/modules/<模块>/module.json`
   里用相对路径 `..\<名称>` 声明 `projectRoot`。
 - 提交口诀：改了模块项目 → 在模块仓库里 commit/push；改了总控台（含 `backend/modules/`
   下的模块接入层）→ 在本仓库 commit/push。两边都改就两边各提交一次。
@@ -107,6 +110,10 @@ backend\.venv\Scripts\python.exe -m pytest backend\tests -q
 - 跑步健康数据（`data.js`）在独立的 run-analytics 仓库里同样被它自己的 `.gitignore` 排除；
   换机器后 clone 两个仓库、双击 `run-analytics\导入数据.cmd` 导入一次即可重建。
 - 应用扫描仅读取 Windows 已公开注册的启动入口；控制台不会上传扫描结果或项目数据。
+- 活跃度统计完全在本机完成：在线分钟数记进本地 SQLite（`activity_heartbeats` 表），代码新增 / 删减
+  通过只读 `git log --numstat` 扫描代码目录得出。要统计的目录写在 `backend/data/activity_config.json`
+  的 `codeDirs`（缺省 `D:\Projects`，只扫一层子目录里的 git 仓库，非 git 目录忽略）；该配置文件位于
+  已忽略的 `backend/data/` 内，不会进仓库。Obsidian 连接配置与界面偏好存在浏览器本机；其余数据都只落在本机磁盘。
 
 ## 现阶段范围
 

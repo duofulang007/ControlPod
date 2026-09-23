@@ -2,6 +2,9 @@ from __future__ import annotations
 
 import json
 import os
+import subprocess
+import time
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Callable, Literal
 from urllib.parse import urlsplit
@@ -26,6 +29,7 @@ from .services.project_service import (
     NoteNotFoundError,
     ProjectConflictError,
     ProjectNotFoundError,
+    ProjectOrderError,
     ProjectService,
     TaskNotFoundError,
 )
@@ -98,6 +102,11 @@ class ProjectCreate(BaseModel):
     name: str = Field(min_length=1, max_length=80)
     description: str = Field(default="", max_length=500)
     status: str = Field(default="开发中", pattern="^(正常|开发中|已暂停)$")
+
+
+class ProjectOrderWrite(BaseModel):
+    """项目选择页拖拽后的完整顺序；只接受全量列表，避免半截写入。"""
+    project_ids: list[str] = Field(min_length=1, max_length=500)
 
 
 class ProjectFileCreate(BaseModel):
@@ -259,7 +268,7 @@ def create_app(
             return operation()
         except (ProjectNotFoundError, TaskNotFoundError, NoteNotFoundError) as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
-        except BasicInfoValidationError as exc:
+        except (BasicInfoValidationError, ProjectOrderError) as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
         except ProjectConflictError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
@@ -330,9 +339,122 @@ def create_app(
         except ConsoleWindowError as exc:
             raise HTTPException(status_code=503, detail=str(exc)) from exc
 
+    git_change_cache: dict[tuple, tuple[float, dict[str, dict[str, int]]]] = {}
+
+    def activity_code_dirs() -> list[Path]:
+        """全局代码目录：backend/data/activity_config.json 的 codeDirs，缺省扫描 D:\\Projects 的一级子目录。"""
+        cfg_path = db.path.parent / "activity_config.json"
+        try:
+            payload = json.loads(cfg_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            payload = {}
+        raw = payload.get("codeDirs", [r"D:\Projects"])
+        if not isinstance(raw, list):
+            return []
+        return [item for item in (Path(str(value)) for value in raw) if item.is_dir()]
+
+    def git_code_changes(since_days: int) -> dict[str, dict[str, int]]:
+        """扫描全局代码目录下的 git 仓库，按本机本地日聚合代码新增/删除行数。
+        结果按（目录集合, 起始日）缓存 5 分钟；二进制文件、非 git 目录与 git 不可用一律跳过，
+        不让代码统计失败影响页面。"""
+        bases = tuple(activity_code_dirs())
+        since = (datetime.now().astimezone() - timedelta(days=max(1, int(since_days)))).strftime("%Y-%m-%d")
+        key = (bases, since)
+        cached = git_change_cache.get(key)
+        now_ts = time.time()
+        if cached and now_ts - cached[0] < 300:
+            return cached[1]
+        buckets: dict[str, dict[str, int]] = {}
+        creationflags = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
+        for base in bases:
+            try:
+                repos = sorted(path for path in base.iterdir() if (path / ".git").exists())
+            except OSError:
+                continue
+            for repo in repos:
+                try:
+                    proc = subprocess.run(
+                        ["git", "-C", str(repo), "log", f"--since={since}", "--date=short-local",
+                         "--pretty=format:@@%ad", "--numstat"],
+                        capture_output=True, text=True, encoding="utf-8", errors="replace",
+                        timeout=60, check=True, creationflags=creationflags,
+                    )
+                except (OSError, subprocess.SubprocessError):
+                    continue
+                day = ""
+                for line in proc.stdout.splitlines():
+                    stripped = line.strip()
+                    if stripped.startswith("@@"):
+                        day = stripped[2:].strip()[:10]
+                        continue
+                    if not day or not stripped:
+                        continue
+                    parts = stripped.split("\t")
+                    if len(parts) < 2:
+                        continue
+                    try:
+                        adds, dels = int(parts[0]), int(parts[1])
+                    except ValueError:
+                        continue
+                    slot = buckets.setdefault(day, {"adds": 0, "dels": 0})
+                    slot["adds"] += adds
+                    slot["dels"] += dels
+        git_change_cache[key] = (now_ts, buckets)
+        return buckets
+
+    def activity_daily_counts(days: int) -> list[dict]:
+        """按「本机本地日」聚合真实活跃度：控制台在线分钟数（页面心跳上报，同一分钟多标签页不重复计）
+        + 全局代码目录 git 仓库的代码新增/删除行数。count = online + code，仅作接口兼容保留；
+        控制台热力图底色只用 online（底色代表在线时长），代码增删只在悬停气泡里显示。
+        心跳从部署当天开始积累；代码增删可由 git 历史回填。"""
+        span = max(1, min(int(days), 400))
+        today = datetime.now().astimezone().date()
+        first = today - timedelta(days=span - 1)
+
+        online: dict[str, int] = {
+            str(row["day"]): int(row["minutes"] or 0)
+            for row in db.fetch_all("SELECT day, minutes FROM activity_heartbeats")
+        }
+        adds_by_day: dict[str, int] = {}
+        dels_by_day: dict[str, int] = {}
+        for day, slot in git_code_changes(span).items():
+            adds_by_day[day] = int(slot["adds"])
+            dels_by_day[day] = int(slot["dels"])
+
+        days_payload: list[dict] = []
+        for offset in range(span):
+            key = (first + timedelta(days=offset)).isoformat()
+            online_minutes = online.get(key, 0)
+            adds = adds_by_day.get(key, 0)
+            dels = dels_by_day.get(key, 0)
+            days_payload.append({
+                "date": key,
+                "online": online_minutes,
+                "adds": adds,
+                "dels": dels,
+                "count": online_minutes + adds + dels,
+            })
+        return days_payload
+
+    @app.get("/api/activity/daily")
+    def activity_daily(days: int = 371) -> dict:
+        return {"days": activity_daily_counts(days)}
+
+    @app.post("/api/activity/heartbeat")
+    def activity_heartbeat() -> dict:
+        """页面在线心跳：页面开着时前端每分钟上报一次，按本机本地日累加在线分钟数。"""
+        day = datetime.now(timezone.utc).astimezone().date().isoformat()
+        db.execute(
+            "INSERT INTO activity_heartbeats(day, minutes, updated_at) VALUES(?, 1, ?) "
+            "ON CONFLICT(day) DO UPDATE SET minutes=minutes+1, updated_at=excluded.updated_at",
+            (day, utc_now()),
+        )
+        row = db.fetch_one("SELECT minutes FROM activity_heartbeats WHERE day=?", (day,))
+        return {"day": day, "minutes": int(row["minutes"]) if row else 1}
+
     @app.get("/api/bootstrap")
     def bootstrap() -> dict:
-        projects = db.fetch_all("SELECT * FROM projects ORDER BY created_at, id")
+        projects = db.fetch_all("SELECT * FROM projects ORDER BY sort_order, created_at, id")
         tasks = db.fetch_all("SELECT * FROM tasks ORDER BY created_at, id")
         notes = [note_payload(row) for row in db.fetch_all(
             "SELECT * FROM notes ORDER BY pinned DESC,updated_at DESC,id"
@@ -408,6 +530,7 @@ def create_app(
             "projects": projects,
             "tasks": tasks,
             "notes": notes,
+            "activityDays": activity_daily_counts(371),
             "projectContexts": contexts,
             "projectFiles": project_files,
             "applications": applications,
@@ -428,6 +551,12 @@ def create_app(
             lambda: project_service.create_project(
                 payload.name, payload.description, payload.status
             )
+        )
+
+    @app.put("/api/projects/order")
+    def reorder_projects(payload: ProjectOrderWrite) -> list[dict]:
+        return project_service_response(
+            lambda: project_service.reorder_projects(payload.project_ids)
         )
 
     @app.patch("/api/projects/{project_id}")

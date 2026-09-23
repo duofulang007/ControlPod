@@ -32,6 +32,10 @@ class BasicInfoValidationError(ProjectServiceError):
     pass
 
 
+class ProjectOrderError(ProjectServiceError):
+    pass
+
+
 class ProjectService:
     """Apply project-domain rules without knowing about FastAPI requests."""
 
@@ -49,6 +53,20 @@ class ProjectService:
         now = utc_now()
         self.repository.insert_project(project_id, clean_name, description.strip(), status, now)
         return self.repository.find_project(project_id) or {}
+
+    def reorder_projects(self, ordered_ids: list[str]) -> list[dict[str, Any]]:
+        """整批重排项目顺序。请求必须是**全量且唯一**的 id 列表，否则整批拒绝、不写一半。"""
+        current = [row["id"] for row in self.repository.list_projects()]
+        if len(ordered_ids) != len(set(ordered_ids)):
+            raise ProjectOrderError("排序请求包含重复的项目")
+        unknown = [item for item in ordered_ids if item not in current]
+        if unknown:
+            raise ProjectOrderError("排序请求包含不存在的项目")
+        if len(ordered_ids) != len(current):
+            raise ProjectOrderError("排序请求缺少项目，已拒绝整批写入")
+        with self.repository.transaction() as conn:
+            self.repository.set_project_order_in_transaction(conn, ordered_ids)
+        return self.repository.list_projects()
 
     def update_project(
         self, project_id: str, name: str, description: str, status: str

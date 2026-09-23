@@ -23,7 +23,22 @@ const ctx = {
     querySelector:(s) => { const e = el(); const v = ctx.__stubVals ? ctx.__stubVals[s] : undefined; if (v !== undefined) e.value = v; return e; },
     querySelectorAll:() => [],
     activeElement:{ tagName:'BODY', id:'' },
-    documentElement:{ dataset:{ theme:'light' }, style:{ setProperty(){} } }
+    documentElement:{
+      dataset:{ theme:'light' },
+      style:{ _vars:{}, setProperty(k, v){ this._vars[k] = v; } },
+      /* classList 要有真实记忆：applyGlass 靠它切换 <html class="no-blur">，
+         桩若不记录，断言就只能看「没抛错」，测不出玻璃质感到底开没开 */
+      classList:(() => {
+        const set = new Set();
+        return {
+          _set:set,
+          add(c){ set.add(c); },
+          remove(c){ set.delete(c); },
+          toggle(c, force){ const on = force === undefined ? !set.has(c) : !!force; on ? set.add(c) : set.delete(c); return on; },
+          contains(c){ return set.has(c); }
+        };
+      })()
+    }
   },
   location:{ hash:'' },
   localStorage:{
@@ -45,6 +60,7 @@ src += `\nglobalThis.__T = { viewHome, viewApps, viewProjects, viewModules, view
   buildPalette, aiZone, aiReply, startRun, advanceRun, addStep, openNote, noteModalHTML, closeNoteModal,
   openModal, closeModal,
   preflight, startVoice, stopVoice, useVoice, launch, render, S, DATA, WF_SEED, fuzzyMatch,
+  buildHeatPayload, heatLevel, dashboardHeatmapHTML, heatSeries, heatWeeklySeries, heatCumulativeSeries, heatCardRecords, heatTipHTML,
   projRunHTML,
   projDevHTML, projSettingsHTML, projDelete, requestProjectDelete, applyProjectDelete, createProject, setNewProjectStatus, agentContextText, copyText, wfFlowItems,
   basicInfoModalHTML, basicInfoPreflightHTML, parseBasicInfoText, basicInfoParsedHasBody,
@@ -55,12 +71,16 @@ src += `\nglobalThis.__T = { viewHome, viewApps, viewProjects, viewModules, view
   toggleObsidianHub, editObsidianBinding, armObsidianUnbind, unbindObsidianProject,
   parseAppRoute, applyAppRoute, OBSIDIAN_STORE_KEY,
   normalizeObsidianState, persistObsidianState, loadObsidianState,
+  PREFS_STORE_KEY, DENSITY_STEPS, DENSITY_LABELS, normalizePrefs, persistPrefs, loadPrefs, applyDensity,
+  THEME_VALUES, ACCENTS, PREF_KEYS, BOOL_PREF_DEFAULTS, isDensityStep, applyTheme, applyAccent, applyGlass, applyPrefs,
   TASK_KIND, KIND_SHOW, taskKindOf, allTodos, projTasks, projTodos, projFixes, projNotes, noteIsIdea, devCounts, devTaskOf,
   noteLinksOf, notesLinkedTo, detachTodoRefs, refBadgeOf, linkBadgeOf, newNote,
-  priOf, promoteDevTask, moveTaskZone, pruneCurTasks, devTidsOf,
+  priOf, moveTaskZone, pruneCurTasks, devTidsOf,
   PROJ_STS, projStDef, projStCls, projStColor, projStatusCtl, setProjStatus, projOverviewHTML,
+  flowNameOf, lastUsedLabel, backendEpoch,
   projIdCardHTML, projEditFormHTML, projEditCheck, applyProjEdit, renameProjRefs, PE_LIMIT,
   projTileHTML, projFlat, projKids, projParentOf, unwrapProjKids,
+  initProjSort, projSortBlocked, projSortSlotAt, applyProjectOrder, PROJ_SORT,
   projectRunControlsHTML, projIsRunning, projIsStarted, stopProject, restartProject, dupProject, refreshProj,
   alphaOf, groupByAlpha, fitAppList, alphaJump, appScrollDragBlocked,
   addApp, appPopMenu, tagPop, setCat, newCatFor, removeFromList,
@@ -75,7 +95,10 @@ src += `\nglobalThis.__T = { viewHome, viewApps, viewProjects, viewModules, view
   replaceBackendApps, updateBackendApp, deleteBackendApp, loadBackendState, removeStep,
   executionLogEntries, executionState, applyExecutionSteps, backendRuntimeState, restoreBackendExecution, applyBackendRun,
   REAL_PROJECT_IDS, BACKEND_PROJECT_IDS, BACKEND_TASK_IDS, BACKEND_NOTE_IDS, BACKEND_APP_IDS,
-  purgeProjRefs, projPurgeCounts, projDeleteModalHTML };\n`;
+  purgeProjRefs, projPurgeCounts, projDeleteModalHTML };
+/* palItems 是 app.js 里的 let 变量、每次 buildPalette 都会整体重写，导出时会快照成空数组，
+   所以要用 getter 取实时值（否则「命令面板排序」这类断言永远看到空列表）。 */
+Object.defineProperty(globalThis.__T, 'palItems', { get(){ return palItems; } });\n`;
 
 try { vm.runInContext(src, ctx); }
 catch (e){ console.log('LOAD_FAIL: ' + e.message); process.exit(1); }
@@ -134,9 +157,20 @@ try {
   check(/href="styles\.css\?v=[^"]+"/.test(html) && /src="app\.js\?v=[^"]+"/.test(html),
     '入口为样式和脚本附带版本参数，首次启用 no-store 时也能绕开旧浏览器缓存');
 } catch (e) { console.log('FAIL 导航 → ' + e.message); fail++; }
-try { T.S.focus = true; check(T.viewHome().includes('collapse-row'), 'viewHome 专注视图'); }
-catch (e) { console.log('FAIL viewHome(focus) → ' + e.message); fail++; }
-T.S.focus = false;
+/* 1b. 专注视图整体移除（2026-09-23）：状态字段、渲染分支、顶栏入口、命令面板项、
+   Ctrl+. 快捷键、动作分支与样式一次性清干净 —— 删功能不留死代码 */
+try {
+  const vh = T.viewHome();
+  const appGone = fs.readFileSync(path.join(__dirname, 'app.js'), 'utf8');
+  const idxGone = fs.readFileSync(path.join(__dirname, 'index.html'), 'utf8');
+  const cssGone = fs.readFileSync(path.join(__dirname, 'styles.css'), 'utf8');
+  check(!appGone.includes('专注视图') && !appGone.includes('S.focus') && !appGone.includes('S.expanded')
+    && !appGone.includes('expandMod') && !appGone.includes('collapseMod') && !appGone.includes('IC.list')
+    && !idxGone.includes('focusBtn') && !vh.includes('collapse-row') && !vh.includes('data-act="focus"'),
+    '专注视图已整体移除（状态 / 渲染分支 / 顶栏入口 / 动作分支 / 快捷键全部清空）');
+  check(!/\.focus-layout|\.focus-mods|\.collapse-row|\.collapse-trigger|\.expanded-mod|\.hero\{|\.hero-main|\.hero-title|\.hero-actions|\.hero-project-facts/.test(cssGone),
+    '专注视图孤儿样式已清理（专注布局 / 收起行 / 展开行 / 大标题家族）');
+} catch (e) { console.log('FAIL 专注视图移除 → ' + e.message); fail++; }
 
 /* 1c. 项目文件只按项目 id 关联，打开与移除都必须走受限后端接口。 */
 try {
@@ -697,7 +731,7 @@ try {
   check(skel.indexOf('>截止</div>') > -1 && skel.indexOf('>截止</div>') < skel.indexOf('>优先级</div>'),
     '共用骨架字段顺序：标题 → 截止 → 优先级');
   check(!skel.includes('<small>'), '共用骨架不带灰字说明（保持与新建一致的干净版式）');
-  const editForm = appSrc2.slice(appSrc2.indexOf('function todoMenu('), appSrc2.indexOf('function openProject('));
+  const editForm = appSrc2.slice(appSrc2.indexOf('function todoMenu('), appSrc2.indexOf('function openTool('));
   check(!editForm.includes('<small>') && !editForm.includes('hint-line'),
     '编辑弹窗去掉全部灰字说明（含已失效的「其余记录可从项目记录编辑窗口关联」）');
   check(editForm.includes('保存</button>') && editForm.includes('删除</button>')
@@ -949,7 +983,7 @@ try {
   const devCard = view.slice(view.indexOf('board-title">开发上下文'), view.indexOf('board-title">运行流程'));
   check(devCard.length > 0 && !devCard.includes('继续开发') && !view.includes('继续开发'),
     '开发上下文卡不再出现「继续开发 <项目名>」标题（整页零残留）');
-  check(/开发上下文<\/span><\/div>\s*<section class="card tight">\s*<div class="dev-cols">/.test(view),
+  check(/开发上下文<\/span><\/div>\s*<section class="card">\s*<div class="dev-cols">/.test(view),
     '开发上下文卡直接以内容开场：card-head 整行（标题 + 状态徽章）已删除');
   check(!devCard.includes('class="card-head"') && !devCard.includes('badge b-blue'),
     '开发上下文卡内无 card-head、无状态徽章（devContext.status 只剩弹窗 nm-meta 一个宿主）');
@@ -1318,7 +1352,7 @@ try {
   const totalOcc = (apps.match(new RegExp(T.S.apps.length + ' 个', 'g')) || []).length;
   check(totalOcc === 1 && !apps.includes('上方为最近打开的应用'),
     '应用页总数只在「全部应用」旁出现一次（不重复计数，实际 ' + totalOcc + ' 次）');
-  T.S.more.apps = true; T.S.favOnly = true;
+  T.S.favOnly = true;
   const favHtml = T.viewApps();
   const favNames = [...favHtml.matchAll(/ar-name">([^<]+)/g)].map(m => m[1].trim());
   const commonNames = T.S.apps.filter(a => a.st === '常用').map(a => a.name);
@@ -1328,7 +1362,6 @@ try {
   const allN = [...T.viewApps().matchAll(/ar-name">/g)].length;
   check(allN === T.S.apps.length,
     '关闭开关恢复全部应用（' + allN + ' 个）');
-  T.S.more.apps = false;
   /* 剔除二次确认：askRemove 态渲染预演弹窗 */
   T.S.confirmRemove = T.S.apps[0].id;
   const confirmHtml = T.viewApps();
@@ -1337,7 +1370,7 @@ try {
   T.S.confirmRemove = '';
   /* 首页：项目仪表盘只保留项目数据，不重复应用页入口。 */
   const home = T.viewHome();
-  check(home.includes('项目仪表盘') && home.includes('项目活跃度') && !home.includes('最近打开的应用'),
+  check(home.includes('项目仪表盘') && home.includes('活跃度') && !home.includes('最近打开的应用'),
     '首页改为项目仪表盘，不再重复应用入口');
   const projectRows = (home.match(/class="dashboard-project-row/g) || []).length;
   check(projectRows === T.DATA.projects.length, '仪表盘按项目呈现总览行（实际 ' + projectRows + '）');
@@ -1362,7 +1395,6 @@ try {
   check(JSON.stringify(favSeq()) === JSON.stringify(favAfter),
     '取消全部置顶不影响「最近打开」（不再沿用全部应用列表的排序结果）');
   T.S.apps.forEach((a,i) => { a.st = stBackup[i]; });
-  T.S.more = {};
 } catch (e) { console.log('FAIL 信息密度 → ' + e.message); fail++; }
 
 /* 15a-2. 应用列表：物理惯性滚动（自管 transform 位移，替代原生滚动） */
@@ -1674,7 +1706,7 @@ try {
 /* 18d. 各模块副标题不再含说明句，只剩状态数字 */
 try {
   const cases = [
-    {p:'viewHome',     must: ['项目仪表盘','集中查看项目状态、待办概况与近期活跃'], mustNot: ['正在做','工作流','次级模块收起']},
+    {p:'viewHome',     must: ['项目仪表盘'], mustNot: ['当前会话','正在做','工作流','次级模块收起','集中查看项目状态']},
     {p:'viewApps',     must: ['<h1>应用</h1>'], mustNot: ['按使用频率排序','其余默认收起','最常用的','上方为最近打开的应用']},
     {p:'viewProjects', must: ['个项目 ·', '点任意卡片进入详情'], mustNot: ['全部在一屏内可选','选中后立即在下方展开']},
     {p:'viewWorkflows',must: ['执行模块启用'], mustNot: ['个 · 当前选中']}
@@ -1739,6 +1771,16 @@ try {
 
 /* 18. 总控台单屏 bento 网格：项目仪表盘只呈现当前项目、项目总览、活跃度与最近活动 */
 try {
+  /* 活跃度 = 在线分钟（底色）+ 代码增删（气泡），后端真实聚合：测试给 S.heatDays / S.heatDetail 喂已知数据再渲染 */
+  T.S.backendReady = true;
+  const heatDow = (new Date().getDay() + 6) % 7;
+  const heatTodayIdx = 364 + heatDow;   /* 53 列全窗（周一为首列）：今天下标 = 364 + 周内偏移；卡片只渲染末尾 13 周 */
+  const heatKeyOf = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  const heatKey = heatKeyOf(new Date());
+  const heatPrevDay = new Date(); heatPrevDay.setDate(heatPrevDay.getDate() - 1);
+  T.S.heatDays = new Array(371).fill(0);
+  T.S.heatDays[heatTodayIdx] = 16; T.S.heatDays[heatTodayIdx - 1] = 1000;   /* 今天 16 分钟 / 昨天 1000 分钟 */
+  T.S.heatDetail = { [heatKey]: { online: 16, adds: 2100, dels: 240 }, [heatKeyOf(heatPrevDay)]: { online: 1000, adds: 10, dels: 5 } };
   const home = T.viewHome();
   check(home.includes('home-grid'), '总控台使用单屏网格布局（home-grid）');
   const cards = (home.match(/<section class="card/g) || []).length;
@@ -1747,12 +1789,77 @@ try {
     && home.includes('dashboard-projects') && home.includes('dashboard-activity')
     && !home.includes('launch-card') && !home.includes('todo-card') && !home.includes('notes-card'),
     '仪表盘不再重复应用、待办或笔记入口');
-  check(home.includes('近 12 周 · 按日聚合') && (home.match(/class="heat-cell/g) || []).length === 84,
-    '活跃图固定展示近 12 周共 84 个按日格子');
+  check((home.match(/class="heat-cell/g) || []).length === 91,
+    '热力图 13 周 × 7 行共 91 格（一个季度，格子铺满卡宽）：1 格 = 1 天，底色只表达在线时长');
+  check(home.includes('data-act="heatMode"') && home.includes('>每日</button>')
+    && home.includes('>每周</button>') && home.includes('>累计</button>')
+    && /class="heat-tab on" data-act="heatMode" data-v="daily"/.test(home),
+    '活跃度卡右上角提供 每日 / 每周 / 累计 三口径切换，默认选中「每日」');
+  const heatTodayLabel = `${new Date().getMonth() + 1}月${new Date().getDate()}日`;
+  check(home.includes(`<span class="heat-tip-l1">${heatTodayLabel} · 在线16分钟</span>`)
+    && home.includes('<span class="heat-add">+2100</span>')
+    && home.includes('<span class="heat-del">-240</span>'),
+    '悬停气泡两行：第一行「日期 · 在线16分钟」，第二行「+2100 / -240」（+ 绿 / - 红）');
+  const heatFuture = 6 - heatDow;   /* 末列里今天之后的格子数（今天一定落在最后一列） */
+  check((home.match(/class="heat-cell future"/g) || []).length === heatFuture
+    && home.includes('<span class="heat-cell future" aria-hidden="true"></span>')
+    && (home.match(/class="heat-tip"/g) || []).length === 91 - heatFuture,
+    '今天之后的格子只作浅灰占位、不可交互、不生成气泡 —— 悬停不可能出现未来日期');
+  /* 月份刻度行：与格子共用同一套 13 列模板，所以必定逐格 13 个 span；
+     ① 不能有逗号 —— 刻度串拼数组会走 Array.join(',') 往格子间塞逗号，必须 join('')；
+     ② 两个标之间至少隔 3 列 —— 靠近的「残月」让位给紧随的整月，不出现「6月 8月 9月」独缺 7月 */
+  const monthsBlock = (home.match(/<div class="heat-months" aria-hidden="true">([\s\S]*?)<\/div>/) || [])[1] || '';
+  const monthCells = monthsBlock.match(/<span>[^<]*<\/span>/g) || [];
+  const markCols = monthCells.reduce((acc, cell, col) => (/^<span>\d+月<\/span>$/.test(cell) ? (acc.push(col), acc) : acc), []);
+  check(monthCells.length === 13 && !monthsBlock.includes(',')
+    && monthCells.every(c => c === '<span></span>' || /^<span>\d+月<\/span>$/.test(c))
+    && markCols.every((col, i) => i === 0 || col - markCols[i - 1] >= 3),
+    '月份刻度逐格 13 个 span、无逗号（join(\'\') 拼接），且两个标至少隔 3 列');
+  check(/run\.len >= 2 && run\.col - prevMark >= 3/.test(fs.readFileSync(path.join(__dirname, 'app.js'), 'utf8')),
+    '月份刻度源码级：残月（不足 2 列）不打标，且标与标至少隔 3 列');
+  check(/class="heat-cell h2 today"/.test(home) && (home.match(/heat-cell h4/g) || []).length === 1,
+    '每日口径：今天格 h2（16 分钟）带 today 描边，昨天 1000 分钟 h4');
+  check(!home.includes('data-act="heatFull"') && !home.includes('heat-full-btn'),
+    '活跃度卡不再有「放大」入口：全屏弹窗外壳与 x 关闭按钮已删除');
+  T.S.heatMode = 'weekly';
+  const homeWeekly = T.viewHome();
+  const heatWeekH4 = heatDow === 0 ? 7 : heatDow + 1;   /* 含 1000 分钟那一列里「已过去」的格子数（周一那天算在上一个整列） */
+  check((homeWeekly.match(/heat-cell h4/g) || []).length === heatWeekH4
+    && /heat-tip-l1">\d+月\d+日–\d+月\d+日 · 在线\d+分钟</.test(homeWeekly),
+    '每周口径：整列 7 格统一显示所在周合计（1 格 = 1 周），气泡显示该周日期区间与周在线合计');
+  T.S.heatMode = 'total';
+  const homeTotal = T.viewHome();
+  check((homeTotal.match(/heat-cell h4/g) || []).length === 2
+    && homeTotal.includes(`<span class="heat-tip-l1">截至${heatTodayLabel} · 累计在线1016分钟</span>`),
+    '累计口径：1 格 = 截至该日的累计（1000 → 1016 分钟滚动递增），气泡显示截至该日的累计在线与增删');
+  T.S.heatMode = 'daily';
+  check(!home.includes('heat-sum') && !home.includes('heat-delta') && !home.includes('heat-days') && !home.includes('近 12 周'),
+    '活跃度卡极简：无摘要行/增减徽章/周几标签/副题/统计卡，明细只进 tooltip');
+  T.S.backendReady = false;
+  const homeNoBackend = T.viewHome();
+  check(homeNoBackend.includes('后端未连接 · 活跃度暂不可用') && !homeNoBackend.includes('heat-cell'),
+    '后端断开时活跃度如实显示不可用，不给「全空 = 没有活动」的假象');
+  T.S.backendReady = true;
+  const heatPayload = T.buildHeatPayload([{ date: heatKey, online: 5, adds: 7, dels: 2, count: 14 }]);
+  check(heatPayload.counts.length === 371 && heatPayload.counts[heatTodayIdx] === 5 && heatPayload.counts[heatTodayIdx - 1] === 0
+    && heatPayload.detail[heatKey].online === 5 && heatPayload.detail[heatKey].adds === 7 && heatPayload.detail[heatKey].dels === 2,
+    '后端 date→计数对齐 53 周窗口：底色取 online（5 分钟），不再混进 count（14）里的代码行数');
+  check(T.heatLevel(0) === 0 && T.heatLevel(9) === 1 && T.heatLevel(10) === 2 && T.heatLevel(999) === 3 && T.heatLevel(1000) === 4,
+    '色阶对数五档：0 / 1-9 / 10-99 / 100-999 / 1000+（分钟量级跨度大，线性分档会糊成一片）');
+  check(T.heatSeries([1,2,3,4,5,6,7,8], 'daily').join() === '1,2,3,4,5,6,7,8'
+    && T.heatSeries([1,2,3,4,5,6,7,8], 'weekly').join() === '28,28,28,28,28,28,28,8'
+    && T.heatSeries([1,2,3,4,5,6,7,8], 'total').join() === '1,3,6,10,15,21,28,36',
+    '三口径聚合：每日原样 / 每周整列 7 天求和（1 格 = 1 周）/ 累计逐日滚动和（1 格 = 截至该日）；三个序列走同一套聚合');
+  check((home.match(/class="dashboard-kpis"/g) || []).length === 1 && home.includes('dashboard-overview-foot'),
+    '当前项目卡纵向流式：指标条独占底部一行，窄窗口下主操作与指标不再被裁剪');
   check(!home.includes('hero-metrics') && !home.includes('CPU '), 'Hero 系统指标行已删除（极简）');
   check(!home.includes('data-act="actFilter"'), '最近活动卡筛选 tabs 已精简');
   check(!home.includes('tile-use'), '仪表盘不展示无关的应用使用次数');
-  check(home.includes('每个项目独立管理'), '总控台明确以项目为管理单元');
+  check(home.includes('项目总览') && (home.match(/dashboard-project-row/g) || []).length >= 1,
+    '总控台明确以项目为管理单元：项目总览逐项目成行');
+  check(!home.includes('heat-foot') && !home.includes('悬停格子查看') && !home.includes('每个项目独立管理')
+    && !home.includes('按项目追踪') && !home.includes('可执行单元') && !home.includes('项目内任务'),
+    '总控台说明文字极简：活跃度脚注、卡片副题、KPI 术语注释、页头说明句已删，只留数据');
 } catch (e) { console.log('FAIL 总控台网格 → ' + e.message); fail++; }
 
 /* 22. 独立待办 / 笔记模块已整体删除：内容只在项目里管理 */
@@ -1881,7 +1988,7 @@ try {
   /* 编辑类：不再出现 openDrawer */
   const editSegs = {
     '新建项目任务': seg('function newTodo(', 'function todoMenu('),
-    '项目任务编辑': seg('function todoMenu(', 'function openProject('),
+    '项目任务编辑': seg('function todoMenu(', 'function openTool('),
     '新建项目': seg('function newProjectDrawer(', 'function createProject('),
     '添加应用·选择': seg('function addApp(', 'function addAppConfirm('),
     '添加应用·命名': seg('function addAppConfirm(', 'function stashAddForm('),
@@ -1897,7 +2004,6 @@ try {
   /* 纯查看类：仍走右侧抽屉 */
   const viewSegs = {
     '应用详情': seg('function appDetail(', 'function toggleAppPin('),
-    '项目详情': seg('function openProject(', 'function openTool('),
     '云同步': seg('function openTool(', 'function addApp(')
   };
   Object.keys(viewSegs).forEach(k => check(viewSegs[k].includes('openDrawer('),
@@ -1918,20 +2024,6 @@ try {
   check(T.S.proj === 'ops' && T.viewHome().includes(cur.name), '切换项目后 Hero 与 S.proj 同步为「' + cur.name + '」');
   T.S.proj = before;
 } catch (e) { console.log('FAIL 项目切换 → ' + e.message); fail++; }
-
-/* 25. 专注视图：展开后可单独收起 */
-try {
-  T.S.focus = true; T.S.expanded = {};
-  const focusHtml = T.viewHome();
-  check(focusHtml.includes('data-act="expandMod"') && focusHtml.includes('collapse-row'),
-    '专注视图下模块收起为可展开的摘要行');
-  T.S.expanded.projects = true;
-  const expandedHtml = T.viewHome();
-  check(expandedHtml.includes('data-act="collapseMod"') && expandedHtml.includes('collapse-trigger'),
-    '展开后的模块出现单独「收起」入口（collapseMod）');
-  delete T.S.expanded.projects;
-  T.S.focus = false;
-} catch (e) { console.log('FAIL 专注视图收起 → ' + e.message); fail++; }
 
 /* 26. 项目内容唯一入口：旧的 AI 待办摘要与全局新建动作已移除 */
 try {
@@ -1963,12 +2055,51 @@ try {
     '已彻底移除卡内限宽令牌（hero-track / hero-proj / quick-max）');
   check(/\.home-grid\{[^}]*grid-template-areas:"overview heat" "projects activity"/.test(css2),
     '仪表盘以当前项目 / 活跃度 / 项目总览 / 最近活动四区填满单屏');
-  check(/\.heat-grid\{[^}]*repeat\(12,var\(--dash-heat-cell\)\)/.test(css2)
-    && /\.heat-grid\{[^}]*repeat\(7,var\(--dash-heat-cell\)\)/.test(css2),
-    '活跃图按 12 周 × 7 日排列，尺寸走仪表盘令牌');
+  check(/\.heat-grid\{[^}]*grid-auto-columns:minmax\(0,1fr\)/.test(css2)
+    && /\.heat-grid\{[^}]*repeat\(7,auto\)/.test(css2)
+    && /\.heat-months\{[^}]*grid-auto-columns:minmax\(0,1fr\)/.test(css2)
+    && /\.heat-cell::before\{[^}]*padding-top:100%/.test(css2)
+    && !/\.heat-cell\{[^}]*aspect-ratio/.test(css2)
+    && !/\.heat-wrap\{[^}]*overflow-x/.test(css2)
+    && !css2.includes('--heat-cell')
+    && /\.heat-cell\.h4\{background:var\(--dash-heat-4\)\}/.test(css2),
+    '热力图纯 CSS Grid 自适应卡宽：1fr 平分列宽 + 百分比 padding 撑正方形，格宽恒等于列宽，不可能撑出横向滚动；五档色阶走令牌');
+  check(/--dash-heat-0:#EBEDF0/.test(css2) && /--dash-heat-1:#BFDBFE/.test(css2) && /--dash-heat-4:#2563EB/.test(css2),
+    '底色单色系五档：未活跃 #EBEDF0，在线越久越深直至 #2563EB（不掺任何红绿）');
+  check(/\.heat-months\{[^}]*grid-auto-columns:minmax\(0,1fr\)/.test(css2)
+    && /\.heat-cell\.today\{box-shadow:0 0 0 1px var\(--ink-2\)\}/.test(css2),
+    '月份刻度与格子共用同一套 1fr 列模板（逐列严格对齐），今天格用令牌描边标记');
+  check(!/\.heat-full-btn/.test(css2) && !/\.heat-full-mask/.test(css2)
+    && !/\.heat-full-card/.test(css2) && !/\.heat-full-head/.test(css2),
+    '放大按钮 / 全屏弹窗外壳 / x 关闭按钮的样式已连删除干净（不留死代码）');
+  check(/\.heat-tip\{[^}]*background:var\(--heat-tip-bg\)/.test(css2)
+    && /\.heat-tip\{[^}]*transition:all \.3s ease/.test(css2)
+    && /\.heat-cell:hover \.heat-tip\{[^}]*opacity:1/.test(css2)
+    && /\.heat-add\{color:var\(--heat-tip-add\)/.test(css2)
+    && /\.heat-del\{color:var\(--heat-tip-del\)/.test(css2),
+    '悬停气泡是深色胶囊（两种主题同底），带淡入 + 上浮（transition:all .3s ease），+ 绿 / - 红');
+  check(/\.heat-cell\.future\{pointer-events:none\}/.test(css2)
+    && /\.heat-cell\{[^}]*background:var\(--dash-heat-0\)/.test(css2),
+    '未来格只继承未活跃浅灰底且不可交互（JS 也不给它气泡），不为它另写一套样式');
+  const monthsRuleHeat = (css2.match(/\.heat-months\{[^}]*\}/) || [''])[0];
+  const gridRuleHeat = (css2.match(/\.heat-grid\{[^}]*\}/) || [''])[0];
+  check(monthsRuleHeat.indexOf('1fr') > -1 && gridRuleHeat.indexOf('1fr') > -1
+    && /\.heat-body\{[^}]*width:100%/.test(css2)
+    && !/\.heat-body\{[^}]*margin:0 auto/.test(css2),
+    '月历与格子同容器、同列模板、整幅铺满卡宽（不再是「按卡宽算出来的固定块居中」）');
+  check(/\.heat-tab\.on\{color:var\(--ink\)\}/.test(css2) && /\.heat-empty\{/.test(css2),
+    '三口径 tab 与后端断开空态样式齐备');
+  check(!/\.heat-sum\{|\.heat-delta\{|\.heat-days\{/.test(css2),
+    '摘要行/增减徽章/周几标签样式已连删除干净（不留死代码）');
+  check(/\.dashboard-project-list\{[^}]*overflow:hidden auto/.test(css2)
+    && /\.dashboard-project-list::-webkit-scrollbar\{width:6px\}/.test(css2),
+    '项目总览列表自身滚动：项目多于卡高时出细滚动条可看全');
+  check(/\.dashboard-kpis\{[^}]*repeat\(4,minmax\(0,1fr\)\)/.test(css2)
+    && /\.dashboard-kpis>div\{[^}]*min-height:0/.test(css2),
+    '当前项目指标为固定 4 列紧凑条，格子可收缩，矮窗口下不再横向溢出');
   check(!/\.dashboard-progress\{|\.dashboard-project-bar\{|\.hero-progress\{|\.ov-prog\{/.test(css2),
     '项目完成百分比及其进度条样式已彻底移除');
-  check(/--dash-card-pad:/.test(css2) && /--dash-heat-cell:/.test(css2),
+  check(/--dash-card-pad:/.test(css2) && /--dash-heat-gap:/.test(css2) && /--dash-heat-label:/.test(css2),
     '仪表盘密度和活跃图尺寸均走顶部设计令牌');
   check(/grid-template-rows:minmax\(0,1\.06fr\) minmax\(0,\.94fr\)/.test(css2),
     '仪表盘两行按内容密度分配，不再把高度留给空白');
@@ -2137,11 +2268,11 @@ try {
     '删除预演弹窗写明会连带清掉多少条待办与记录');
   S.projConfirm = '';
 
-  /* 30e. 命令面板「常用」不再硬编码项目 id（删掉项目后会静默跑错项目） */
+  /* 30e. 命令面板「常用项目」不再硬编码项目 id（删掉项目后会静默跑错项目） */
   check(!/startRun\('apex'\)|startRun\('ops'\)/.test(app6),
     '命令面板不再写死 startRun(\'apex\'/\'ops\')');
-  check(/name:'常用', items:DATA\.projects[\s\S]{0,160}flowName/.test(app6),
-    '「常用」由项目表动态派生（项目删掉后入口自动消失）');
+  check(/name:'常用项目', items:DATA\.projects[\s\S]{0,160}lastUsedLabel/.test(app6),
+    '「常用项目」由项目表动态派生、按最近使用排序（项目删掉后入口自动消失）');
 
   /* 30f. startRun 不再用 curWf() 静默兜底 */
   check(/const wf = DATA\.projects\.find\(w=>w\.id===id\);\n\s*if \(!wf\)\{ toast\('这个项目已经不存在了'\); return; \}/.test(app6),
@@ -2151,8 +2282,10 @@ try {
   check(!S.running, '运行一个不存在的项目不会启动任何流程');
 
   /* 30g. 两处未判空的 find */
-  check(/const cur = DATA\.projects\.find\(p=>p\.id===id\); if \(!cur\) break;/.test(app6),
-    'focusProj 对不存在的项目 id 直接返回（不再取 cur.name）');
+  check(/case 'focusProj': projSwitchPop\(t\); break;/.test(app6)
+    && /function projSwitchPop\(btn\)\{[\s\S]{0,140}openPop\('projSwitchPop'/.test(app6)
+    && /case 'setCurProj':[\s\S]{0,200}if \(!p \|\| id === S\.proj\) break;/.test(app6),
+    '切换当前项目改为浮层选单：focusProj 只负责开弹层，setCurProj 判空且同项目不重切');
   check(!/sceneModes|scenePop|sceneBtn|sceneName|场景联动|S\.scene/.test(app6),
     '旧工作模式的数据、浮层、交互与设置项已彻底移除');
 } catch (e) { console.log('FAIL 0 项目兜底 → ' + e.message); fail++; }
@@ -2202,6 +2335,26 @@ try {
     && db31.includes('def _migration_3_project_notes')
     && app31.includes('payload.notes') && app31.includes('function updateBackendNote('),
     '项目记录支持数据库迁移、加载、创建、保存、置顶与删除');
+  check(main31.includes('@app.get("/api/activity/daily"')
+    && main31.includes('"activityDays": activity_daily_counts(371)')
+    && main31.includes('@app.post("/api/activity/heartbeat"')
+    && main31.includes('def git_code_changes(')
+    && db31.includes('def _migration_9_activity_heartbeats')
+    && app31.includes('function buildHeatPayload(')
+    && app31.includes('function heatSeries(')
+    && app31.includes('function heatWeeklySeries(')
+    && app31.includes('function heatCumulativeSeries(')
+    && app31.includes('function heatTipHTML(')
+    && app31.includes('function dashboardHeatmapHTML(')
+    && !app31.includes('function sizeHeat(') && !app31.includes('--heat-cell')
+    && !app31.includes('heatFullHTML')
+    && app31.includes('S.heatDays = next.counts;')
+    && app31.includes('S.heatDetail = next.detail;')
+    && app31.includes('startHeartbeat();')
+    && app31.includes("apiRequest('/activity/heartbeat', { method: 'POST' })")
+    && app31.includes('dashboardHeatmapHTML(S.heatDays)')
+    && app31.includes('function refreshHeatCounts('),
+    '项目活跃度按本机本地日聚合在线分钟（页面 60s 心跳）与全局代码目录 git 增删行数，卡片 13 周自适应热力图（底色 = 在线时长，气泡 = 代码增删），随 bootstrap 与 60s 节流刷新');
   check(main31.includes('@app.put("/api/projects/{project_id}/basic-info"')
     && db31.includes('def _migration_4_project_context')
     && projectService31.includes('def save_basic_info(')
@@ -2312,6 +2465,284 @@ try {
   check([startPs31, bootstrapPs31].every(text=>!/[^\x00-\x7F]/.test(text)),
     'Windows PowerShell 5 入口脚本全部保持纯 ASCII，避免无 BOM UTF-8 被错误解码');
 } catch (e) { console.log('FAIL 真实后端模块 → ' + e.message); fail++; }
+
+/* 32. 项目选择页卡片拖拽排序：二维命中 + 长按起拖 + 弹簧让位 + 后端持久化 */
+try {
+  const app32 = fs.readFileSync(path.join(__dirname, 'app.js'), 'utf8');
+  const css32 = fs.readFileSync(path.join(__dirname, 'styles.css'), 'utf8');
+  const main32 = fs.readFileSync(path.join(__dirname, 'backend/app/main.py'), 'utf8');
+  const db32 = fs.readFileSync(path.join(__dirname, 'backend/app/db.py'), 'utf8');
+  const repo32 = fs.readFileSync(path.join(__dirname, 'backend/app/repositories/project_repository.py'), 'utf8');
+  const service32 = fs.readFileSync(path.join(__dirname, 'backend/app/services/project_service.py'), 'utf8');
+
+  /* 二维命中：3 列 × 2 行，每格 300×200、卡片 290×180 */
+  const grid32 = [];
+  for (let i = 0; i < 6; i++) grid32.push({ x:(i % 3) * 300, y:Math.floor(i / 3) * 200, w:290, h:180 });
+  check(T.projSortSlotAt(grid32, 300 + 145, 200 + 90, 0) === 4,
+    '二维命中：从第一格拖到第二行第二格落在下标 4（按一维顺序会错判成 1）');
+  check(T.projSortSlotAt(grid32, 600 + 145, 0 + 90, 0) === 2,
+    '二维命中：同一行拖到第三格落在下标 2');
+  check(T.projSortSlotAt(grid32, 0 + 145, 0 + 90, 0) === 0, '回到原位仍命中下标 0');
+  check(T.projSortSlotAt(grid32, 296, 90, 0) === 0 && T.projSortSlotAt(grid32, 300, 90, 0) === 1,
+    '等距滞回：槽位边界附近不来回换位，越过边界才换');
+
+  check(T.PROJ_SORT.holdMs === 200 && T.PROJ_SORT.tolerance > 0,
+    '长按 200ms 才起拖，起拖前位移超过容差就交回原生滚动');
+  check(typeof T.initProjSort === 'function' && /S\.page === 'projects'\)\s*initProjSort\(\)/.test(app32),
+    '项目选择页每次渲染都重新绑定拖拽排序');
+  check(T.projSortBlocked({ closest:() => ({}) }) === true && T.projSortBlocked({ closest:() => null }) === false,
+    '卡片内的按钮 / 链接长按不参与拖拽，卡片空白处可以起拖');
+  check(/function projSortBlocked\(target\)\{[\s\S]{0,140}closest\('button,a,input,textarea,select'\)/.test(app32)
+    && !/projSortBlocked\(target\)\{[\s\S]{0,140}data-act/.test(app32),
+    '起拖黑名单只排真控件：不用 appScrollDragBlocked，否则 [data-act] 会让整张卡都拖不动');
+  check(app32.includes('.pjt-card[data-id]') && T.viewProjects().includes('class="pjt-card pjt-new"'),
+    '尾部「新建项目」占位卡没有 data-id，不参与拖拽，始终留在最后');
+  check(/const integrate = \(rec, dt\)/.test(app32) && app32.includes('PROJ_SORT.stiffness')
+    && app32.includes('Math.ceil(dt / PROJ_SORT.step)') && app32.includes('rec.follow'),
+    '让位与落位共用一个物理弹簧积分器：位移逐帧写 transform，没有瞬移与闪烁');
+  check(app32.includes('ResizeObserver') && app32.includes('窗口尺寸已改变，已取消这次排序'),
+    '窗口尺寸变化会重新测量；拖拽中变化则安全取消并归位');
+  check(app32.includes("board.addEventListener('touchmove', onBlockScroll, { passive:false })")
+    && !/[^{}]*is-(?:sorting|arming)[^{}]*\{[^}]*overflow/.test(css32),
+    '拖拽期间只吃掉滚动事件，不改看板 overflow（改 overflow 会变更列宽并触发重排）');
+  check(app32.includes("apiRequest('/projects/order'") && app32.includes("method:'PUT'")
+    && app32.includes('applyProjectOrder(rows)')
+    && app32.includes("toast(err && err.message ? err.message : '项目排序未保存')"),
+    '顺序落库成功后才重排本地列表；失败只弹回原位并如实提示');
+
+  check(css32.includes('.pjt-board.is-sorting .pjt-card{transition-property:border-color,box-shadow,background}'),
+    '拖拽期间卡片不再对 transform 做过渡，位移完全由弹簧驱动');
+  check(css32.includes('.pjt-card.is-dragging{cursor:grabbing;z-index:30')
+    && css32.includes('box-shadow:var(--pjt-sh-drag)'),
+    '被拖卡片只加抬起态（阴影加深 + 层级抬到最上），圆角 / 内边距 / 内容布局不变');
+  check(css32.includes('--pjt-lift-scale:1.035') && css32.includes('--pjt-lift-tilt:1.4deg')
+    && css32.includes('--pjt-sh-drag:0 22px 46px rgba(46,26,20,.24)')
+    && app32.includes("read('--pjt-lift-scale'") && app32.includes("read('--pjt-lift-tilt'"),
+    '抬起幅度与拖拽阴影走 :root 令牌，JS 与组件里都不硬写视觉值');
+  check(!/drag-handle|pjt-handle|拖拽图标|把手/.test(T.projTileHTML(T.DATA.projects[0])),
+    '卡片模板里没有拖拽手柄、把手或指示线（零额外 UI）');
+
+  /* 后端：只追加的迁移 + 全量校验的排序接口 */
+  check(db32.includes('_migration_10_project_order') && db32.includes('(10, _migration_10_project_order)'),
+    '新增只追加的迁移：projects 加 sort_order，旧库按原展示顺序回填');
+  check(repo32.includes('ORDER BY sort_order, created_at, id')
+    && repo32.includes('COALESCE(MAX(sort_order),-1)+1'),
+    '项目按 sort_order 读取，新建的项目排在末尾');
+  check(main32.includes('@app.put("/api/projects/order")') && main32.includes('class ProjectOrderWrite')
+    && service32.includes('排序请求缺少项目，已拒绝整批写入'),
+    '排序接口只接受全量且唯一的 id 列表，缺项 / 重复 / 未知整批拒绝');
+  check(main32.includes('ORDER BY sort_order, created_at, id'), 'bootstrap 同样按 sort_order 返回项目');
+} catch (e) { console.log('FAIL 卡片拖拽排序 → ' + e.message); fail++; }
+
+/* 33. 外观 · 信息密度：可调 + 跨刷新保留
+   （原实现 value="1" 写死、无状态字段：拖动只改内联令牌，任何重绘都把滑块弹回「标准」，刷新即丢） */
+try {
+  T.S.density = 2;
+  const setLoose = T.viewSettings();
+  T.S.density = 0;
+  const setTight = T.viewSettings();
+  T.S.density = 1;
+  check(/id="density" type="range" min="0" max="2" value="2" step="1"/.test(setLoose)
+    && /id="density" type="range" min="0" max="2" value="0" step="1"/.test(setTight),
+    '信息密度滑块的值由 S.density 渲染：重绘后停在上次选中的档位，不再固定弹回「标准」');
+
+  check(T.DENSITY_STEPS.length === 3 && T.DENSITY_STEPS[1].join(',') === '18,16',
+    '信息密度三档预设，中档（标准）与 :root 的 --pad:18px / --gap:16px 同值');
+  const densVars = ctx.document.documentElement.style._vars;
+  T.applyDensity(0);
+  const tightVars = densVars['--pad'] + '|' + densVars['--gap'];
+  T.applyDensity(2);
+  const looseVars = densVars['--pad'] + '|' + densVars['--gap'];
+  T.applyDensity('x');                       // 非法档位 → 回退标准
+  check(tightVars === '14px|12px' && looseVars === '24px|22px' && T.S.density === 1
+    && densVars['--pad'] === '18px' && densVars['--gap'] === '16px',
+    '信息密度只改 --pad / --gap 两个令牌（紧凑 14/12、宽松 24/22），非法档位回退标准 18/16');
+
+  const cssDens = fs.readFileSync(path.join(__dirname, 'styles.css'), 'utf8');
+  check(cssDens.includes('--pad:18px') && cssDens.includes('--gap:16px'),
+    '标准档就是 :root 的默认令牌值，滑块默认态与样式起点一致');
+  T.S.density = 2; T.persistPrefs();
+  check(JSON.parse(storageData[T.PREFS_STORE_KEY]).density === 2,
+    '信息密度写入浏览器本机偏好（apex-console.prefs.v1），与 Obsidian 配置共用同一套 store 包装');
+  T.S.density = 1;
+  check(T.loadPrefs() === true && T.S.density === 2, '刷新后从本机偏好还原上次选中的信息密度');
+  storageData[T.PREFS_STORE_KEY] = '{"density":9}';
+  check(T.loadPrefs() === true && T.S.density === 1, '偏好档位越界时回退「标准」，不把非法值写进状态');
+  storageData[T.PREFS_STORE_KEY] = '{broken';
+  T.S.density = 2;
+  check(T.loadPrefs() === false && T.S.density === 2, '偏好 JSON 损坏时安全回退且不动当前状态，不阻断页面');
+  delete storageData[T.PREFS_STORE_KEY];
+
+  const appDens = fs.readFileSync(path.join(__dirname, 'app.js'), 'utf8');
+  check(appDens.includes('loadPrefs();\n  applyPrefs();'),
+    '启动流程读取偏好并回写令牌：刷新后卡片内边距真的还原，而不只是记住一个数字');
+  const densBranch = (appDens.match(/if \(e\.target\.id==='density'\)\{([\s\S]*?)\n  \}/) || [])[1] || '';
+  check(/applyDensity\(/.test(densBranch) && /persistPrefs\(\);/.test(densBranch) && !/render\(/.test(densBranch),
+    '拖动滑块只落偏好与令牌、不整页重渲染（重渲染会在拖动过程中重建滑块，观感就是弹回去）');
+} catch (e) { console.log('FAIL 信息密度 → ' + e.message); fail++; }
+
+/* 34. 外观偏好：主题 / 强调色 / 玻璃质感 / 通用开关 —— 可调 + 跨刷新保留
+   （原实现把开关初值写死在 markup 里、事件分支只改内联样式不落偏好：重绘即弹回，刷新即丢） */
+try {
+  check(T.PREF_KEYS.join(',') === 'theme,accent,density,glass,notify,save,telemetry',
+    '外观偏好恰好 7 个字段：主题 / 强调色 / 信息密度 / 玻璃质感 / 桌面通知 / 自动保存 / 使用数据统计');
+  check(T.ACCENTS.length === 4 && T.THEME_VALUES.join(',') === 'light,dark' && T.ACCENTS[0] === '#E8402A',
+    '强调色 4 色、主题两值，色板首项与 :root 的 --brand 默认值同色');
+
+  const htmlEl = ctx.document.documentElement;
+  const prefVars = htmlEl.style._vars;
+  T.applyTheme('dark');
+  const themeDark = htmlEl.dataset.theme;
+  T.applyTheme('neon');                                  // 非法值 → 回退浅色
+  check(themeDark === 'dark' && htmlEl.dataset.theme === 'light',
+    'applyTheme 只写 <html data-theme>，非法值回退浅色，不把脏值落到文档根');
+
+  T.applyAccent('#2563EB');
+  const accentSet = prefVars['--brand'];
+  T.applyAccent('#000000');                              // 不在色板内 → 回退首项
+  check(accentSet === '#2563EB' && prefVars['--brand'] === '#E8402A',
+    'applyAccent 只写 --brand 令牌，色板外的值回退默认强调色');
+
+  T.applyGlass(false);
+  const glassOff = htmlEl.classList.contains('no-blur');
+  T.applyGlass(true);
+  check(glassOff === true && htmlEl.classList.contains('no-blur') === false,
+    'applyGlass 用 <html class="no-blur"> 表达「关闭玻璃质感」，组件里不硬写视觉值');
+
+  const np = T.normalizePrefs({ theme:'dark', accent:'#000000', density:9, glass:'yes', notify:false, save:true, telemetry:true });
+  check(np && np.theme === 'dark' && np.accent === '#E8402A' && np.density === 1 && np.glass === true
+     && np.notify === false && np.save === true && np.telemetry === true,
+    'normalizePrefs 逐字段白名单：坏字段各自回默认，好字段一个不丢');
+  check(T.normalizePrefs(null) === null && T.normalizePrefs([1,2]) === null && T.normalizePrefs('x') === null,
+    '偏好根不是对象时返回 null，交由调用方保留当前状态（不阻断页面）');
+
+  T.S.theme='dark'; T.S.accent='#7C4DFF'; T.S.density=0; T.S.glass=false;
+  T.S.notify=false; T.S.save=false; T.S.telemetry=true;
+  T.persistPrefs();
+  const savedP = JSON.parse(storageData[T.PREFS_STORE_KEY]);
+  check(savedP.theme==='dark' && savedP.accent==='#7C4DFF' && savedP.density===0 && savedP.glass===false
+     && savedP.notify===false && savedP.save===false && savedP.telemetry===true,
+    'persistPrefs 一次落盘全部 7 个外观偏好');
+  T.S.theme='light'; T.S.accent='#E8402A'; T.S.density=1; T.S.glass=true;
+  T.S.notify=true; T.S.save=true; T.S.telemetry=false;
+  check(T.loadPrefs() === true && T.S.theme==='dark' && T.S.accent==='#7C4DFF' && T.S.density===0
+     && T.S.glass===false && T.S.notify===false && T.S.save===false && T.S.telemetry===true,
+    '刷新后 7 个外观偏好整体还原，不再「刷新即回默认」');
+  delete storageData[T.PREFS_STORE_KEY];
+
+  /* 源码级接线：分支必须走 applier + 落偏好，而不是直接写内联样式 */
+  const appPref = fs.readFileSync(path.join(__dirname, 'app.js'), 'utf8');
+  const seg = (from, to) => {
+    const i = appPref.indexOf(from);
+    const j = appPref.indexOf(to, i + from.length);
+    return i >= 0 && j > i ? appPref.slice(i, j) : '';
+  };
+  check(appPref.includes('function applyPrefs(){ applyTheme(S.theme); applyAccent(S.accent); applyDensity(S.density); applyGlass(S.glass); }'),
+    'applyPrefs 是唯一入口：启动时一次把主题 / 强调色 / 密度 / 玻璃质感都写回');
+  const themeBranch = seg("case 'theme':", "case 'accent':");
+  check(themeBranch.includes('applyTheme(S.theme)') && themeBranch.includes('persistPrefs()'),
+    '设置页切换主题走 applier + 落偏好，不直接写 dataset');
+  const accentBranch = seg("case 'accent': {", "case 'switch': {");
+  check(accentBranch.includes('applyAccent(v)') && accentBranch.includes('persistPrefs()'),
+    '设置页切换强调色走 applier + 落偏好');
+  const toggleBranch = seg('function toggleTheme(){', 'function launch(');
+  check(toggleBranch.includes('applyTheme(S.theme)') && toggleBranch.includes('persistPrefs()'),
+    '顶栏主题按钮与设置页共用同一套 applier + 落偏好，不出现两套写法');
+  const switchBranch = seg("case 'switch': {", "case 'obsidianSave':");
+  check(switchBranch.includes('PREF_KEYS.includes(k)') && switchBranch.includes('persistPrefs()'),
+    'switch 分支只把 PREF_KEYS 里的开关当持久状态，项目级演示开关不污染偏好');
+
+  /* 渲染侧：开关初值必须来自 S，而不是写死在 markup 里 */
+  T.S.notify=false; T.S.save=false; T.S.telemetry=true; T.S.accent='#0E8A3C'; T.S.glass=false;
+  const setView2 = T.viewSettings();
+  check(setView2.includes('class="switch " data-act="switch" data-k="notify"')
+     && setView2.includes('class="switch " data-act="switch" data-k="save"')
+     && setView2.includes('class="switch on" data-act="switch" data-k="telemetry"'),
+    '通用区三个开关的 on 态由 S.notify / S.save / S.telemetry 渲染（重绘后不弹回写死值）');
+  check(setView2.includes('class="swatch on" data-act="accent" data-v="#0E8A3C"'),
+    '强调色选中态由 S.accent 渲染');
+  check(setView2.includes('data-k="glass"') && !setView2.includes('class="switch on" data-act="switch" data-k="glass"'),
+    '玻璃质感开关的 on 态由 S.glass 渲染');
+  T.S.notify=true; T.S.save=true; T.S.telemetry=false; T.S.accent='#E8402A'; T.S.glass=true;
+
+  check(!appPref.includes('tight'),
+    '死类名 tight 在 app.js 里零残留（样式侧 0 条规则，markup 侧也必须 0 次）');
+} catch (e) { console.log('FAIL 外观偏好 → ' + e.message); fail++; }
+
+/* 35. 流程名缺失时的呈现：占位符不许当数据
+   （后端 projects 表没有流程名字段，走控制台新建的项目也从未填过 —— 「没有名字」才是常态。
+    模板里曾预置一个看着像真名的占位流程名，它跟着 JSON 深拷贝流到项目卡 / 概览 / 命令面板，
+    看起来像真有这么个流程；命令面板「常用」组更因此出现多条完全同名、看不出指哪个项目的条目） */
+try {
+  check(T.DATA.projectTemplate.flowName === '',
+    '新建项目模板不再预置占位流程名：缺名字就如实缺，不塞一个像真名的值当数据');
+
+  check(T.flowNameOf({ flowName:'深度开发' }) === '深度开发'
+     && T.flowNameOf({ flowName:'' }) === '未命名流程'
+     && T.flowNameOf({}) === '未命名流程'
+     && T.flowNameOf(null) === '未命名流程',
+    'flowNameOf 是流程名的唯一出口：有名字用名字，没名字显示「未命名流程」，不返回空串或 undefined');
+
+  const noName = { id:'__noname', name:'临时无名项目', st:'正常', stCls:'pst-ok', parent:null, desc:'',
+    files:0, commits:0, tags:[], updated:'刚刚', ico:'focus', color:'#2563EB', flowName:'', flowDesc:'', last:'—', runs:0, steps:[] };
+  T.DATA.projects.push(noName);
+  const vp2 = T.viewProjects();
+  check(vp2.includes('未命名流程'),
+    '项目选择页的卡片 chip 对没有流程名的项目显示「未命名流程」，不再显示空值');
+
+  const wfBefore = T.S.wf;
+  T.S.wf = '__noname';
+  const vw2 = T.viewWorkflows(false);
+  check(vw2.includes('未命名流程') && !vw2.includes('undefined'),
+    '项目详情概览的「当前流程 / 运行流程」显示「未命名流程」，且不漏 undefined');
+  T.S.wf = wfBefore;
+  T.DATA.projects.pop();
+
+  const palSrc = fs.readFileSync(path.join(__dirname, 'app.js'), 'utf8');
+  const pa = palSrc.indexOf("{name:'常用项目'");
+  const pb = palSrc.indexOf("{name:'项目'", pa);
+  const commonGroup = pa >= 0 && pb > pa ? palSrc.slice(pa, pb) : '';
+  check(commonGroup.includes('t:`运行「${w.name}」`') && !commonGroup.includes('w.flowName'),
+    '命令面板「常用项目」条目标签以项目名为主体：不再出现多条只写流程名、彼此完全相同的条目');
+  check(!/默认流程/.test(palSrc),
+    '占位流程名在 app.js 里零残留（连注释都不留，否则同字面量会污染这类反向断言）');
+} catch (e) { console.log('FAIL 流程名呈现 → ' + e.message); fail++; }
+
+/* 36. 命令面板「常用项目」：按最近使用排序
+   （原来叫「常用」，装的却是全部项目、顺序就是数据顺序，既名不副实也看不出「常」在哪。
+    排序键必须是可比的毫秒数，不能拿 backendTimeLabel 的展示文案排 ——「今天 00:03」与「9月22日 13:30」按字符串比毫无意义） */
+try {
+  check(T.lastUsedLabel({ last:'今天 00:03' }) === '今天 00:03'
+     && T.lastUsedLabel({ last:'—' }) === '从未运行'
+     && T.lastUsedLabel({}) === '从未运行'
+     && T.lastUsedLabel(null) === '从未运行',
+    'lastUsedLabel：「最近使用」缺失时读作「从未运行」，而不是显示占位破折号');
+  check(T.backendEpoch('2026-09-23T16:52:03.205790+00:00') > T.backendEpoch('2026-09-23T08:19:20.289151+00:00')
+     && T.backendEpoch('2026-09-23T16:52:03.205790+00:00') > 0
+     && T.backendEpoch(null) === 0 && T.backendEpoch('') === 0 && T.backendEpoch('不是时间') === 0,
+    'backendEpoch 把后端时间串转成可比毫秒数，缺失 / 非法一律 0（从未运行自然沉底）');
+
+  /* 端到端：塞三个项目，只有排序键不同，看 buildPalette 的「常用项目」分组是否真的按它降序 */
+  const keep = T.DATA.projects.slice();
+  const mk = (id, name, lastTs, last) => ({ id, name, st:'正常', stCls:'pst-ok', parent:null, desc:'',
+    files:0, commits:0, tags:[], updated:'', ico:'focus', color:'#2563EB', flowName:'', flowDesc:'',
+    last, lastTs, runs:0, steps:[] });
+  T.DATA.projects.length = 0;
+  T.DATA.projects.push(
+    mk('p-old',  '很久没跑的项目', T.backendEpoch('2026-08-01T00:00:00+00:00'), '8月1日 08:00'),
+    mk('p-new',  '刚跑过的项目',   T.backendEpoch('2026-09-23T16:52:03+00:00'), '今天 00:52'),
+    mk('p-never','从没跑过的项目', 0, '—')
+  );
+  T.buildPalette('');
+  /* palItems 是全部面板条目的扁平数组，「常用项目」是第一个分组 → 取前 3 条即该分组 */
+  const order = T.palItems.slice(0, 3).map(it => it.t).join(' | ');
+  check(order === '运行「刚跑过的项目」 | 运行「很久没跑的项目」 | 运行「从没跑过的项目」',
+    '「常用项目」按最近使用降序：刚跑过的在最前，从没跑过的沉底（顺序 = ' + order + '）');
+  check(T.palItems[2].k === '从未运行' && T.palItems[0].k === '今天 00:52',
+    '每条右侧提示列就是排序用的那个「最近使用」口径，顺序自己就能说明白');
+  T.DATA.projects.length = 0;
+  keep.forEach(p => T.DATA.projects.push(p));
+} catch (e) { console.log('FAIL 常用项目 → ' + e.message); fail++; }
 
 console.log(fail === 0 ? '\nALL_PASS' : '\nFAIL_COUNT=' + fail);
 process.exit(fail === 0 ? 0 : 1);

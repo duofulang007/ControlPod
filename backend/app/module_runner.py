@@ -45,7 +45,9 @@ class ModuleRunner:
                 (item.id, item.name, item.id, item.version, str(item.manifest_path), now),
             )
             self.db.execute(
-                "INSERT OR IGNORE INTO projects(id,name,description,status,created_at,updated_at) VALUES(?,?,?,?,?,?)",
+                # 模块登记的项目的排在末尾，不插到用户已排好的卡片顺序最前面
+                "INSERT OR IGNORE INTO projects(id,name,description,status,created_at,updated_at,sort_order) "
+                "VALUES(?,?,?,?,?,?,(SELECT COALESCE(MAX(sort_order),-1)+1 FROM projects))",
                 (item.project_id, item.project_name, item.project_description, "正常", now, now),
             )
             self.db.execute(

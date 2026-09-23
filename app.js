@@ -47,7 +47,6 @@ const IC = {
   pin:   c => sv('<path d="M9 4.5h6l-1 5 3 3v2H7v-2l3-3-1-5z" stroke="@s" stroke-width="1.7" stroke-linejoin="round"/><path d="M12 14.5V20" stroke="@s" stroke-width="1.7" stroke-linecap="round"/>'.replace(/@s/g,c)),
   tag:   c => sv('<path d="M4.5 11.2V6A1.5 1.5 0 0 1 6 4.5h5.2a2 2 0 0 1 1.4.6l6.3 6.3a2 2 0 0 1 0 2.8l-4.7 4.7a2 2 0 0 1-2.8 0l-6.3-6.3a2 2 0 0 1-.6-1.4z" stroke="@s" stroke-width="1.7" stroke-linejoin="round"/><circle cx="8.8" cy="8.8" r="1.3" fill="@s"/>'.replace(/@s/g,c)),
   grid:  c => sv('<rect x="3.5" y="3.5" width="7" height="7" rx="1.8" stroke="@s" stroke-width="1.7"/><rect x="13.5" y="3.5" width="7" height="7" rx="1.8" stroke="@s" stroke-width="1.7"/><rect x="3.5" y="13.5" width="7" height="7" rx="1.8" stroke="@s" stroke-width="1.7"/><rect x="13.5" y="13.5" width="7" height="7" rx="1.8" stroke="@s" stroke-width="1.7"/>'.replace(/@s/g,c)),
-  list:  c => sv('<path d="M4 6.5h16M4 12h16M4 17.5h16" stroke="@s" stroke-width="1.8" stroke-linecap="round"/>'.replace(/@s/g,c)),
   term:  c => sv('<rect x="3" y="4.5" width="18" height="15" rx="2.6" stroke="@s" stroke-width="1.8"/><path d="M7 10l2.6 2.5L7 15" stroke="@s" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/><path d="M12.5 15h4.5" stroke="@s" stroke-width="1.7" stroke-linecap="round"/>'.replace(/@s/g,c)),
   clock: c => sv('<circle cx="12" cy="12" r="8.5" stroke="@s" stroke-width="1.8"/><path d="M12 7.6V12l3 1.9" stroke="@s" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>'.replace(/@s/g,c)),
   spark: c => sv('<path d="M12 3.5l1.9 4.9 4.9 1.9-4.9 1.9L12 17.1l-1.9-4.9L5.2 10.3l4.9-1.9L12 3.5z" stroke="@s" stroke-width="1.7" stroke-linejoin="round"/><path d="M18 15.5l.75 1.75L20.5 18l-1.75.75L18 20.5l-.75-1.75L15.5 18l1.75-.75L18 15.5z" stroke="@s" stroke-width="1.5" stroke-linejoin="round"/>'.replace(/@s/g,c)),
@@ -206,12 +205,6 @@ const DATA = {
     {id:'n10', title:'对话沉淀自动归档到笔记目录', tag:'灵感', proj:'AI助手', pinned:false, time:'昨天 12:40', body:'有价值的结论自动生成笔记并打上项目标签。'},
     {id:'n11', title:'给常用指令建快捷短语', tag:'灵感', proj:'AI助手', pinned:false, time:'9月10日', body:'高频指令配短触发词，减少重复输入。'}
   ],
-  tracks: [
-    {name:'A New Beginning', artist:'Various Artists'},
-    {name:'Soft Machine',    artist:'Airwaves'},
-    {name:'North Ridge',     artist:'Kino Park'},
-    {name:'Late Commit',     artist:'Bytefield'}
-  ],
 
   /* ---- 工作流 ---- */
   /* workflows 已并入上方 projects（2026-09-13 项目化迁移），此键不再存在。 */
@@ -254,7 +247,7 @@ const DATA = {
   /* 新建项目模板（下轮「新建项目」流程接入；先落位保证结构一致） */
   projectTemplate: {
     id:'', name:'未命名项目', st:'正常', stCls:'pst-ok', parent:null, desc:'', files:0, commits:0,
-    tags:[], updated:'刚刚', ico:'focus', color:'#2563EB', flowName:'默认流程', flowDesc:'', last:'—', runs:0, steps:[]
+    tags:[], updated:'刚刚', ico:'focus', color:'#2563EB', flowName:'', flowDesc:'', last:'—', runs:0, steps:[]
   },
 
   /* ---- 执行模块库：可以放进项目运行流程的模块（统一封装标准） ----
@@ -275,9 +268,13 @@ const WF_SEED = JSON.parse(JSON.stringify(DATA.projects));
 /* ---------------- 状态 ---------------- */
 const S = {
   page:'home',
-  focus:false,          // 首页收起态（专注视图）
-  expanded:{},          // 专注视图下已展开的模块（可单独收起）
   theme:'light',
+  density:1,            // 外观·信息密度档位 0/1/2（紧凑/标准/宽松）
+  accent:'#E8402A',     // 外观·强调色（写 --brand 令牌），取值受 ACCENTS 白名单约束
+  glass:true,           // 外观·玻璃质感；关闭时给 <html> 挂 no-blur，卡片改纯色底
+  notify:true,          // 通用·桌面通知（当前无推送实现，仅记录开关意愿）
+  save:true,            // 通用·自动保存
+  telemetry:false,      // 通用·使用数据统计（原型不采集，仅记录开关意愿）
   appQuery:'',          // 应用页模糊搜索词
   uninstallArm:'',      // 应用详情里处于「待二次确认卸载」的应用 id
   appView:'list',       // 应用页全部应用区视图（list/grid）
@@ -302,7 +299,6 @@ const S = {
   windowState:{available:false, topmost:false, width:990, height:700},
   windowUpdating:false,
   windowError:'',
-  playerOn:false, track:0, prog:38,
   appCat:'全部',
   apps: DATA.apps.slice(),
   projectFiles: [],
@@ -326,6 +322,10 @@ const S = {
   wf:'apex',
   running:null,        // {wfId, i, done, total, states, log, order}
   projectRuntime:{},   // 真实项目最后确认的运行态：{projectId:'running'|'stopped'}，启动时由后端运行记录恢复
+  heatDays:[],         // 活跃度热区 371 格（53 周）「每日在线分钟」（旧→今），由 /api/activity/daily 的 online 聚合
+  heatDetail:{},       // 活跃度按日明细：date → {online, adds, dels}，悬停 tooltip 用
+  heatMode:'daily',    // 热区口径：daily 每日（默认）/ weekly 每周合计 / total 累计
+  heatFetchedAt:0,     // 上次拉取活跃度聚合的时间戳（ms），用于 60s 节流
   larderTab:'app',
   larderQ:'',
   /* 模块页 */
@@ -343,8 +343,6 @@ const S = {
   runOpen:{},          // 运行详情展开状态：按 workflowId 隔离，不持久化
   wfEdit:null,         // 当前处于编辑模式的 workflowId；null 表示查看模式
   projEdit:null,       // 「概览 · 身份卡」内联编辑窗口打开的项目 id；null 表示未打开
-  /* 信息密度：各页「展开全部」开关，默认只显示常用项 */
-  more:{},
   /* 项目 */
   proj:'apex'
 };
@@ -391,6 +389,61 @@ function loadObsidianState(){
     return false;
   }
 }
+/* ---- 界面偏好（浏览器本机持久化，与「刷新即重置」的运行时状态区别对待）----
+   设置页的外观选择是用户偏好，不是一次会话的临时状态：刷新后必须还在。
+   与 Obsidian 配置同一套 store 包装；读取失败、JSON 损坏、档位越界一律安全回退默认值。 */
+const PREFS_STORE_KEY = 'apex-console.prefs.v1';
+const DENSITY_STEPS = [[14, 12], [18, 16], [24, 22]];   /* 档位 → [卡片内边距, 间距]，与 :root 的 --pad / --gap 同量级 */
+const DENSITY_LABELS = ['紧凑', '标准', '宽松'];
+const THEME_VALUES = ['light', 'dark'];
+const ACCENTS = ['#E8402A', '#2563EB', '#7C4DFF', '#0E8A3C'];   /* 与设置页色板同序，首项 = :root 的 --brand 默认值 */
+const isDensityStep = v => Number.isInteger(v) && v >= 0 && v < DENSITY_STEPS.length;
+const PREF_KEYS = ['theme', 'accent', 'density', 'glass', 'notify', 'save', 'telemetry'];
+const BOOL_PREF_DEFAULTS = { glass:true, notify:true, save:true, telemetry:false };
+function normalizePrefs(raw){
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+  /* 逐字段白名单：越界 / 类型不对就回该字段默认值，不因为一个坏字段丢掉整份偏好 */
+  const data = {
+    theme: THEME_VALUES.includes(raw.theme) ? raw.theme : 'light',
+    accent: ACCENTS.includes(raw.accent) ? raw.accent : ACCENTS[0],
+    density: isDensityStep(raw.density) ? raw.density : 1
+  };
+  Object.keys(BOOL_PREF_DEFAULTS).forEach(k => {
+    data[k] = typeof raw[k] === 'boolean' ? raw[k] : BOOL_PREF_DEFAULTS[k];
+  });
+  return data;
+}
+function persistPrefs(){
+  const out = {};
+  PREF_KEYS.forEach(k => { out[k] = S[k]; });
+  return store.set(PREFS_STORE_KEY, JSON.stringify(out));
+}
+function loadPrefs(){
+  const saved = store.get(PREFS_STORE_KEY, '');
+  if (!saved) return false;
+  try {
+    const data = normalizePrefs(JSON.parse(saved));
+    if (!data) return false;
+    PREF_KEYS.forEach(k => { S[k] = data[k]; });
+    return true;
+  } catch (_) {
+    return false;
+  }
+}
+/* 四个 applier 只写 :root / <html> 上的令牌与状态类，组件里不硬写视觉值（AGENTS.md 硬约束 6） */
+function applyDensity(v){
+  /* 非法档位回退「标准」；返回夹紧后的档位，调用方据此回写 S.density 与提示文案 */
+  const i = isDensityStep(v) ? v : 1;
+  const [pad, gap] = DENSITY_STEPS[i];
+  document.documentElement.style.setProperty('--pad', pad + 'px');
+  document.documentElement.style.setProperty('--gap', gap + 'px');
+  S.density = i;
+  return i;
+}
+function applyTheme(v){ document.documentElement.dataset.theme = THEME_VALUES.includes(v) ? v : 'light'; }
+function applyAccent(v){ document.documentElement.style.setProperty('--brand', ACCENTS.includes(v) ? v : ACCENTS[0]); }
+function applyGlass(on){ document.documentElement.classList.toggle('no-blur', on !== true); }
+function applyPrefs(){ applyTheme(S.theme); applyAccent(S.accent); applyDensity(S.density); applyGlass(S.glass); }
 function obsidianUri(action, params){
   const q = Object.entries(params || {})
     .filter(([,v]) => v !== '' && v != null)
@@ -535,7 +588,7 @@ function obsidianProjectNote(w){
     `### ${oneLine(n.title)}\n\n> ${oneLine(n.tag)} · ${oneLine(n.time)}\n\n${String(n.body || '').trim() || '暂无正文'}`
   ).join('\n\n') : '暂无项目记录';
   const back = consoleProjectUrl(w);
-  return `---\nproject_id: ${w.id}\nproject: ${JSON.stringify(String(w.name || ''))}\nconsole_managed: true\ntags:\n  - 项目\n---\n\n# ${w.name}\n\n> 此页面由 APEX 控制台生成；再次更新会覆盖全文。\n\n[返回 APEX 控制台当前项目](${back})\n\n## 项目概览\n\n- 状态：${w.st}\n- 运行流程：${w.flowName}\n- 最近运行：${w.last}\n\n## 项目说明\n\n${w.desc || ''}\n\n## 项目任务\n\n${taskText}\n\n## 项目记录\n\n${noteText}\n`;
+  return `---\nproject_id: ${w.id}\nproject: ${JSON.stringify(String(w.name || ''))}\nconsole_managed: true\ntags:\n  - 项目\n---\n\n# ${w.name}\n\n> 此页面由 APEX 控制台生成；再次更新会覆盖全文。\n\n[返回 APEX 控制台当前项目](${back})\n\n## 项目概览\n\n- 状态：${w.st}\n- 运行流程：${flowNameOf(w)}\n- 最近运行：${w.last}\n\n## 项目说明\n\n${w.desc || ''}\n\n## 项目任务\n\n${taskText}\n\n## 项目记录\n\n${noteText}\n`;
 }
 function newObsidianProject(id){
   const w = DATA.projects.find(x=>x.id===id); if (!w) return false;
@@ -619,7 +672,6 @@ function moveTaskZone(wid, tid, zone){
   } else return;
   render(true);
 }
-function promoteDevTask(wid, tid){ moveTaskZone(wid, tid, 'cur'); }
 /* 一致性清理：任务完成 / 删除后，把它从所有项目的当前任务区移除 */
 function pruneCurTasks(tid){
   Object.keys(S.devTask).forEach(wid => {
@@ -717,52 +769,174 @@ function addActivity(text, proj, icoName, color, kind){
   if (S.acts.length > 9) S.acts.pop();
 }
 
-/* ---------------- 总控台（首页） ---------------- */
-function activityDay(activity){
-  const stamped = activity && activity.at ? new Date(activity.at) : null;
-  if (stamped && !Number.isNaN(stamped.getTime())) return new Date(stamped.getFullYear(), stamped.getMonth(), stamped.getDate());
-  const label = String((activity && activity.time) || '');
-  const today = new Date();
-  if (/刚刚|分钟前|小时前|今天/.test(label)) return new Date(today.getFullYear(), today.getMonth(), today.getDate());
-  if (/昨天/.test(label)) return new Date(today.getFullYear(), today.getMonth(), today.getDate() - 1);
-  return null;
-}
-function dashboardHeatmapHTML(activities){
+/* ---------------- 总控台（首页）· 开发者活跃度热力图 ----------------
+   底色只表达一件事：在线时长（单一蓝色系五档，不掺红绿）；代码新增/删减只出现在悬停气泡里。
+   数据全部来自后端真实聚合：控制台在线分钟数（页面每分钟心跳上报）
+   + 全局代码目录 git 仓库的新增/删减行数，前端把 date→计数对齐到 13 周窗口。
+   布局是纯 CSS Grid 自适应卡宽（1fr 列 + 格子用 ::before 撑正方形），不由 JS 算格子尺寸：
+   格子宽度天然等于列宽，既不可能撑出横向滚动，月份刻度也与格子逐列对齐。
+   后端断开时如实显示不可用，不假装空数据。 */
+function heatWindowStart(){
   const dayMs = 24 * 60 * 60 * 1000;
-  const end = new Date(); end.setHours(0, 0, 0, 0);
-  const start = new Date(end.getTime() - dayMs * 83);
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const dow = (today.getDay() + 6) % 7;                          /* 周一 = 0 */
+  return new Date(today.getTime() - (dow + 364) * dayMs);        /* 52 周前的周一，共 53 列 */
+}
+const HEAT_CELLS = 371;          /* 后端窗口：53 周 = 371 天（对齐 /api/activity/daily?days=371） */
+const HEAT_CARD_COLS = 13;       /* 卡片可视窗：末尾 13 周（一个季度），1 列 = 1 周、1 格 = 1 天 */
+const HEAT_CARD_CELLS = HEAT_CARD_COLS * 7;
+const heatDayKey = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+const heatDayLabel = d => `${d.getMonth() + 1}月${d.getDate()}日`;
+function buildHeatPayload(rows){
   const counts = new Map();
-  (activities || []).forEach(activity => {
-    const day = activityDay(activity);
-    if (!day || day < start || day > end) return;
-    const key = day.toISOString().slice(0, 10);
-    counts.set(key, (counts.get(key) || 0) + 1);
+  const detail = {};
+  (rows || []).forEach(item => {
+    /* 底色只看在线时长：这里取 online（不再用后端的 count = online+adds+dels，
+       否则「当天没开控制台但提交了几万行代码」会被涂成最深的蓝，与「底色代表在线时长」相悖） */
+    counts.set(item.date, Number(item.online) || 0);
+    detail[item.date] = { online: Number(item.online) || 0, adds: Number(item.adds) || 0, dels: Number(item.dels) || 0 };
   });
-  const cells = Array.from({length:84}, (_, index) => {
-    const day = new Date(start.getTime() + index * dayMs);
-    const key = day.toISOString().slice(0, 10), count = counts.get(key) || 0;
-    const level = count === 0 ? 0 : Math.min(4, count);
-    return `<span class="heat-cell h${level}" aria-label="${key}：${count} 条活动"></span>`;
+  const dayMs = 24 * 60 * 60 * 1000;
+  const start = heatWindowStart();
+  const list = Array.from({length: HEAT_CELLS}, (_, i) => counts.get(heatDayKey(new Date(start.getTime() + i * dayMs))) || 0);
+  return { counts: list, detail };
+}
+function heatLevel(count){
+  /* 在线分钟对数五档：0 / 1-9 / 10-99 / 100-999 / 1000+（分钟跨度大，线性分档会糊成一片） */
+  return count > 0 ? Math.min(4, Math.floor(Math.log10(count)) + 1) : 0;
+}
+/* ---- 三口径聚合：输入卡片窗内「每天」的原始序列，输出每一格该上的数 ----
+   daily ：1 格 = 1 天，原样返回
+   weekly：1 格 = 1 周，取所在整列（周一到周日，窗口首列必为周一）7 天之和
+   total ：1 格 = 截至该日的累计，取窗口首日到该日的滚动和
+   —— 在线 / 新增 / 删减三个序列走同一套聚合，保证底色与气泡永远同口径 */
+function heatWeeklySeries(base){
+  return base.map((_, i) => {
+    const col = Math.floor(i / 7) * 7;
+    return base.slice(col, col + 7).reduce((a, b) => a + b, 0);
+  });
+}
+function heatCumulativeSeries(base){
+  let acc = 0;
+  return base.map(v => (acc += v));
+}
+function heatSeries(base, mode){
+  if (mode === 'weekly') return heatWeeklySeries(base);
+  if (mode === 'total') return heatCumulativeSeries(base);
+  return base.slice();
+}
+async function refreshHeatCounts(){
+  S.heatFetchedAt = Date.now();   /* 先记时间再拉：失败也节流，不逐帧重试 */
+  try {
+    const payload = await apiRequest('/activity/daily?days=371');
+    const next = buildHeatPayload(payload.days);
+    const changed = next.counts.join(',') !== (S.heatDays || []).join(',');
+    S.heatDays = next.counts;
+    S.heatDetail = next.detail;
+    if (changed && S.page === 'home') render(true);
+  } catch (_) { /* 拉取失败保持上一次真实数据；后端断开由全局 backendError 如实提示 */ }
+}
+function maybeRefreshHeat(){
+  if (!S.backendReady || Date.now() - S.heatFetchedAt < 60000) return;
+  void refreshHeatCounts();
+}
+/* 在线心跳：页面开着每 60 秒静默上报一次，切回可见时补一发；无任何界面呈现 */
+let heatHeartbeatTimer = null;
+function pushHeartbeat(){
+  if (!S.backendReady || (typeof document !== 'undefined' && document.hidden)) return;
+  apiRequest('/activity/heartbeat', { method: 'POST' }).catch(() => {});
+}
+function startHeartbeat(){
+  if (typeof document === 'undefined' || heatHeartbeatTimer) return;
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) pushHeartbeat(); });
+  heatHeartbeatTimer = setInterval(pushHeartbeat, 60000);
+}
+function dashboardHeatmapHTML(counts){
+  const dayMs = 24 * 60 * 60 * 1000;
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  if (!S.backendReady) return `<div class="heat-wrap"><div class="heat-empty">后端未连接 · 活跃度暂不可用</div></div>`;
+  const mode = S.heatMode || 'daily';
+  const full = Array.isArray(counts) && counts.length === HEAT_CELLS ? counts : new Array(HEAT_CELLS).fill(0);
+  /* 卡片窗取全窗末尾 13 周；窗口首列必为周一 —— 列与「周」严格一一对应 */
+  const cardStart = new Date(heatWindowStart().getTime() + (HEAT_CELLS - HEAT_CARD_CELLS) * dayMs);
+  const records = heatCardRecords(full.slice(HEAT_CELLS - HEAT_CARD_CELLS), cardStart);
+  /* 三口径同时作用在「在线 / 新增 / 删减」三路序列上，底色只用 online 那一路 */
+  const series = {
+    online: heatSeries(records.map(r => r.online), mode),
+    adds: heatSeries(records.map(r => r.adds), mode),
+    dels: heatSeries(records.map(r => r.dels), mode)
+  };
+  const todayIndex = HEAT_CARD_CELLS - 7 + (today.getDay() + 6) % 7;   /* 今天落在末列 */
+  const cells = records.map((rec, i) => {
+    /* 未来格：浅灰、不可交互、不生成气泡 —— 从结构上杜绝出现未来日期 */
+    if (rec.day > today) return `<span class="heat-cell future" aria-hidden="true"></span>`;
+    const label = `${heatDayLabel(rec.day)} · 在线${series.online[i]}分钟 · +${series.adds[i]} / -${series.dels[i]}`;
+    return `<span class="heat-cell h${heatLevel(series.online[i])}${i === todayIndex ? ' today' : ''}" aria-label="${label}">${heatTipHTML(rec, i, mode, series)}</span>`;
   }).join('');
-  const months = [0, 28, 56].map(offset => {
-    const day = new Date(start.getTime() + offset * dayMs);
-    return `<span>${day.getMonth() + 1}月</span>`;
-  }).join('');
-  const total = Array.from(counts.values()).reduce((sum, count) => sum + count, 0);
-  return `<div class="heat-wrap" role="img" aria-label="近十二周项目活动热力图，共 ${total} 条可按日统计的活动">
-    <div class="heat-months">${months}</div>
-    <div class="heat-body"><div class="heat-days" aria-hidden="true"><span>一</span><span></span><span>三</span><span></span><span>五</span><span></span><span>日</span></div><div class="heat-grid">${cells}</div></div>
-    <div class="heat-foot"><span>仅统计带时间的活动</span><span class="heat-legend" aria-hidden="true">少 <i class="h0"></i><i class="h1"></i><i class="h2"></i><i class="h3"></i><i class="h4"></i> 多</span></div>
+  /* 月份刻度：只在月份切换处打标，与格子共用同一套列模板（天然逐列对齐）。两道约束——
+     ①「残月」不打标：13 周窗的左端常是个只剩 1 列的月底，给它打标会把紧随的整月挤掉
+       （实测出现「6月 8月 9月」独缺 7月）；②两个标至少隔 3 列，否则窄窗下会糊成「3月4月」。
+     另外刻度串必须 join('')：直接拼数组会走 Array.join(',') 往每两个格子间塞一个逗号。 */
+  const colMonths = Array.from({length: HEAT_CARD_COLS}, (_, col) => new Date(cardStart.getTime() + col * 7 * dayMs).getMonth());
+  const runs = [];
+  colMonths.forEach((m, col) => {
+    const last = runs[runs.length - 1];
+    if (last && last.m === m) last.len++;
+    else runs.push({ m, col, len: 1 });
+  });
+  const marks = new Set();
+  let prevMark = -99;
+  runs.forEach(run => {
+    if (run.len >= 2 && run.col - prevMark >= 3) { marks.add(run.col); prevMark = run.col; }
+  });
+  const months = colMonths.map((m, col) => marks.has(col) ? `<span>${m + 1}月</span>` : '<span></span>').join('');
+  return `<div class="heat-wrap" role="img" aria-label="近三个月活跃度按日统计：底色为在线时长，悬停看代码新增删减行数">
+    <div class="heat-body">
+      <div class="heat-grid">${cells}</div>
+      <div class="heat-months" aria-hidden="true">${months}</div>
+    </div>
   </div>`;
 }
+function heatCardRecords(base, start){
+  /* 卡片窗内每一天的原始三元组：底色吃 online，气泡里的代码增删吃 adds / dels */
+  const dayMs = 24 * 60 * 60 * 1000;
+  const detail = S.heatDetail || {};
+  return base.map((online, i) => {
+    const day = new Date(start.getTime() + i * dayMs);
+    const d = detail[heatDayKey(day)] || {};
+    return { day, online: Number(online) || 0, adds: Number(d.adds) || 0, dels: Number(d.dels) || 0 };
+  });
+}
+function heatTipHTML(rec, i, mode, series){
+  /* 第一行：日期 · 在线时长；第二行：+ 新增 / - 删减（绿 / 红）。只给真实发生过的日期生成气泡。 */
+  let head;
+  if (mode === 'weekly'){
+    const dayMs = 24 * 60 * 60 * 1000;
+    const from = new Date(rec.day.getTime() - (i % 7) * dayMs);
+    const to = new Date(from.getTime() + 6 * dayMs);
+    head = `${heatDayLabel(from)}–${heatDayLabel(to)} · 在线${series.online[i]}分钟`;
+  } else if (mode === 'total'){
+    head = `截至${heatDayLabel(rec.day)} · 累计在线${series.online[i]}分钟`;
+  } else {
+    head = `${heatDayLabel(rec.day)} · 在线${series.online[i]}分钟`;
+  }
+  return `<span class="heat-tip" role="tooltip"><span class="heat-tip-l1">${head}</span>`
+    + `<span class="heat-tip-l2"><span class="heat-add">+${series.adds[i]}</span>`
+    + `<span class="heat-tip-sep">/</span><span class="heat-del">-${series.dels[i]}</span></span></span>`;
+}
+function heatTabHTML(key){
+  const on = (S.heatMode || 'daily') === key;
+  return `<button class="heat-tab${on ? ' on' : ''}" data-act="heatMode" data-v="${key}" aria-pressed="${on}">${key === 'daily' ? '每日' : key === 'weekly' ? '每周' : '累计'}</button>`;
+}
 function viewHome(){
+  maybeRefreshHeat();
   const acts = S.acts;
   const cur = DATA.projects.find(p=>p.id===S.proj) || DATA.projects[0];
   /* 兜底：总控台的当前项目信息与项目切换全部挂在「当前项目」上，一个项目都没有时不能取 cur.st。
      正常路径已被「至少保留一个项目」挡住，这里是第二道防线（外加自定义 URL 直接进来）。 */
   if (!cur) return `
   <div class="page-head"><div><h1>总控台</h1><p>还没有项目</p></div></div>
-  <section class="card tight">
+  <section class="card">
     <div class="empty">${IC.plus('currentColor')}<span>还没有项目，先新建一个再回到总控台</span>
       <button class="btn btn-primary btn-sm" data-act="newProject">${IC.plus('#fff')}新建项目</button></div>
   </section>`;
@@ -770,96 +944,39 @@ function viewHome(){
   const openTasks = S.todos.plan.filter(task => !task.done).length;
   const activeProjects = DATA.projects.filter(project => project.st !== '已暂停').length;
   const enabledModules = DATA.projects.reduce((sum, project) => sum + project.steps.filter(step => step.on).length, 0);
-  const currentTasks = projTasks(cur.name).filter(task => !task.done).length;
-  const currentModules = cur.steps.filter(step => step.on).length;
   const overviewCard = `
   <section class="card dashboard-overview">
     <div class="dashboard-overview-main">
-      <div class="hero-meta"><span class="chip ${projStCls(cur.st)}"><span class="dot" style="background:${projStColor(cur.st)}"></span>${esc(cur.st)}</span><span class="chip soft">更新于 ${esc(cur.updated)}</span></div>
-      <div><p class="dashboard-kicker">当前项目</p><h2>${esc(cur.name)}</h2><p class="dashboard-desc">${esc(cur.desc)}</p></div>
-      <div class="dashboard-context"><span><b>${currentModules}</b> 个模块已启用</span><span><b>${currentTasks}</b> 项待办待处理</span></div>
-      <div class="dashboard-actions"><button class="btn btn-primary" data-act="openWf" data-id="${cur.id}">${IC.chevR('#fff')}进入项目</button><button class="btn btn-ghost btn-sm" data-act="focusProj" data-id="${cur.id}">切换当前项目</button></div>
+      <div class="hero-meta"><span class="dashboard-kicker">当前项目</span><span class="chip ${projStCls(cur.st)}"><span class="dot" style="background:${projStColor(cur.st)}"></span>${esc(cur.st)}</span><span class="chip soft">更新于 ${esc(cur.updated)}</span></div>
+      <div><h2>${esc(cur.name)}</h2><p class="dashboard-desc">${esc(cur.desc)}</p></div>
+      <div class="dashboard-overview-foot"><div class="dashboard-actions"><button class="btn btn-primary" data-act="openWf" data-id="${cur.id}">${IC.chevR('#fff')}进入项目</button><button class="btn btn-ghost btn-sm" data-act="focusProj" data-id="${cur.id}">切换当前项目</button></div></div>
     </div>
     <div class="dashboard-kpis" aria-label="项目概览数据">
       <div><span>活跃项目</span><strong>${activeProjects}</strong><small>共 ${DATA.projects.length} 个</small></div>
-      <div><span>待处理</span><strong>${openTasks}</strong><small>项目内任务</small></div>
-      <div><span>启用模块</span><strong>${enabledModules}</strong><small>可执行单元</small></div>
-      <div><span>活动记录</span><strong>${acts.length}</strong><small>当前会话</small></div>
+      <div><span>待处理</span><strong>${openTasks}</strong></div>
+      <div><span>启用模块</span><strong>${enabledModules}</strong></div>
+      <div><span>活动记录</span><strong>${acts.length}</strong></div>
     </div>
   </section>`;
   const heatCard = `
-  <section class="card tight dashboard-heat">
-    <div class="card-head"><span class="ricon" style="color:var(--green)">${IC.grid('var(--green)')}</span><div class="card-title">项目活跃度<small>近 12 周 · 按日聚合</small></div></div>
-    ${dashboardHeatmapHTML(acts)}
+  <section class="card dashboard-heat">
+    <div class="card-head"><span class="ricon" style="color:var(--dash-heat-4)">${IC.grid('var(--dash-heat-4)')}</span><div class="card-title">活跃度</div><div class="right heat-tabs">${heatTabHTML('daily')}${heatTabHTML('weekly')}${heatTabHTML('total')}</div></div>
+    ${dashboardHeatmapHTML(S.heatDays)}
   </section>`;
   const projectsCard = `
-  <section class="card tight dashboard-projects">
-    <div class="card-head"><span class="ricon" style="color:var(--brand)">${IC.grid('var(--brand)')}</span><div class="card-title">项目总览<small>每个项目独立管理</small></div><div class="right"><button class="link" data-act="goPage" data-v="projects">管理项目</button></div></div>
+  <section class="card dashboard-projects">
+    <div class="card-head"><span class="ricon" style="color:var(--brand)">${IC.grid('var(--brand)')}</span><div class="card-title">项目总览</div><div class="right"><button class="link" data-act="goPage" data-v="projects">管理项目</button></div></div>
     <div class="dashboard-project-list">${DATA.projects.map(project => `<button class="dashboard-project-row ${project.id===cur.id?'on':''}" data-act="enterProj" data-id="${project.id}"><span class="dot" style="background:${projStColor(project.st)}"></span><span class="dashboard-project-name">${esc(project.name)}<small>${project.steps.filter(step => step.on).length} 个模块 · ${project.runs} 次运行</small></span><span class="dashboard-project-go">${IC.chevR('currentColor')}</span></button>`).join('')}</div>
   </section>`;
   const activityCard = `
-  <section class="card tight dashboard-activity">
-    <div class="card-head"><span class="ricon" style="color:var(--teal)">${IC.clock('var(--teal)')}</span><div class="card-title">最近活动<small>按项目追踪操作</small></div><div class="right"><button class="link" data-act="allActs">全部记录</button></div></div>
+  <section class="card dashboard-activity">
+    <div class="card-head"><span class="ricon" style="color:var(--teal)">${IC.clock('var(--teal)')}</span><div class="card-title">最近活动</div><div class="right"><button class="link" data-act="allActs">全部记录</button></div></div>
     <div class="dashboard-activity-list">${acts.length ? acts.slice(0, 4).map(activity => `<div class="row"><span class="ricon-box" style="color:${activity.c}">${IC[activity.ico](activity.c)}</span><span class="r-title">${esc(activity.text)}<small>${esc(activity.proj)}</small></span><span class="r-time">${esc(activity.time)}</span></div>`).join('') : `<div class="empty">${IC.clock('currentColor')}<span>暂无活动记录</span></div>`}</div>
   </section>`;
 
-  /* 专注视图：主卡占满，次级模块收起为摘要行，可逐个展开 / 单独收起 */
-  if (S.focus){
-    const focusHero = `
-    <section class="card hero focus-hero">
-      <div class="hero-main">
-        <div>
-          <div class="hero-meta">
-            <span class="chip" style="background:var(--green-bg);color:var(--green);border-color:transparent"><span class="dot" style="background:var(--green)"></span>${esc(cur.st)}</span>
-            <span class="chip soft">更新于 ${esc(cur.updated)}</span>
-          </div>
-          <div class="hero-title">${esc(cur.name)}</div>
-          <div class="hero-project-facts"><span>${currentModules} 个模块已启用</span><span>${currentTasks} 项待办待处理</span></div>
-        </div>
-        <div class="hero-actions">
-          <button class="btn btn-primary" data-act="openWf" data-id="${cur.id}">${IC.chevR('#fff')}进入项目</button>
-        </div>
-      </div>
-    </section>`;
-    const mods = [
-      {k:'projects',ico:'grid', c:C.brand, title:'项目总览', sum:`${DATA.projects.length} 个项目 · ${activeProjects} 个活跃`, card:projectsCard},
-      {k:'activity',ico:'clock', c:C.teal, title:'最近活动', sum:`${S.acts.length} 条更新`, card:activityCard}
-    ];
-    return `<div class="page-head">
-        <div><h1>总控台</h1><p>专注视图 · 主卡占满，次级模块收起为摘要行</p></div>
-        <div class="right"><button class="btn btn-ghost btn-sm" data-act="focus">${IC.list('var(--ink-2)')}退出专注视图</button></div>
-      </div>
-      <div class="focus-layout">
-        ${focusHero}
-        <div class="focus-mods">
-          ${mods.map(m => S.expanded[m.k]
-            ? `<div class="expanded-mod">
-                 <button class="collapse-trigger" data-act="collapseMod" data-k="${m.k}">
-                   <span class="c-ico" style="color:${m.c}">${IC[m.ico](m.c)}</span>
-                   <span class="c-title">${m.title}</span>
-                   <span class="c-sum">${m.sum}</span>
-                   <span class="c-open">收起
-                     <svg class="chev up" viewBox="0 0 14 14" fill="none" style="width:14px;height:14px"><path d="M3 9.2L7 5.2L11 9.2" stroke="var(--ink-3)" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
-                 </button>
-                 ${m.card}
-               </div>`
-            : `<button class="collapse-row" data-act="expandMod" data-k="${m.k}">
-                 <span class="c-ico" style="color:${m.c}">${IC[m.ico](m.c)}</span>
-                 <span class="c-title">${m.title}</span>
-                 <span class="c-sum">${m.sum}</span>
-                 <span class="c-open">展开
-                   <svg class="chev" viewBox="0 0 14 14" fill="none" style="width:14px;height:14px"><path d="M3 5.2L7 9.2L11 5.2" stroke="var(--ink-3)" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
-               </button>`).join('')}
-        </div>
-      </div>`;
-  }
-
   return `
     <div class="page-head dashboard-head">
-      <div><h1>项目仪表盘</h1><p>集中查看项目状态、待办概况与近期活跃</p></div>
-      <div class="right">
-        <span class="dashboard-period">当前会话</span><button class="btn btn-ghost btn-sm" data-act="focus">${IC.list('var(--ink-2)')}专注视图</button>
-      </div>
+      <div><h1>项目仪表盘</h1></div>
     </div>
     <div class="home-grid">
       ${overviewCard}
@@ -990,7 +1107,7 @@ function viewApps(){
       <div class="tabs">${cats.map(c => `<button class="tab ${S.appCat===c?'on':''}" data-act="appCat" data-v="${esc(c)}">${esc(c)}</button>`).join('')}</div>
     </div>
   </div>
-  <section class="card tight apps-panel${isGrid ? ' is-grid' : ''}">
+  <section class="card apps-panel${isGrid ? ' is-grid' : ''}">
     ${isGrid
       ? `<div class="apps wide" id="appGrid">${list.map(tile).join('')}</div>`
       : `<div class="apps-panel-body">
@@ -1435,7 +1552,7 @@ function viewModules(){
       <button class="btn btn-primary btn-sm" data-act="newModule">${IC.plus('#fff')}新增模块</button>
     </div>
   </div>
-  <section class="card tight">
+  <section class="card">
     <div class="card-head">
       <div class="card-title">执行模块<small>共 ${DATA.modules.length} 个 · 当前显示 ${list.length} 个</small></div>
     </div>
@@ -1530,6 +1647,13 @@ async function saveModule(){
     closeModal(); render(true); toast(`${editing ? '已保存' : '已新增'}网站模块「${name}」`);
   } catch (err){ modShowErr(err && err.message ? err.message : '网站模块保存失败', 'modEntry'); }
 }
+/* 后端时间串 → 可排序的毫秒数：解析失败 / 缺失一律 0（「从未运行」自然沉底）。
+   排序必须用这个，不能拿 backendTimeLabel 的文案排 ——「今天 00:03」和「9月22日 13:30」按字符串比毫无意义。 */
+function backendEpoch(value){
+  if (!value) return 0;
+  const t = new Date(value).getTime();
+  return Number.isNaN(t) ? 0 : t;
+}
 function backendTimeLabel(value){
   if (!value) return '—';
   const d = new Date(value);
@@ -1545,6 +1669,7 @@ function backendHistoryRow(run){
   const action = run && run.action === 'restart' ? '重启' : '运行';
   return {
     t:backendTimeLabel(run && run.started_at),
+    at:backendEpoch(run && run.started_at),      /* 给「最近使用」排序用；t 只负责显示 */
     d:status === 'succeeded' ? `${action}完成`
       : status === 'failed' ? (run && run.error) || `${action}失败` : `${action}中`,
     status
@@ -1873,6 +1998,7 @@ async function loadBackendState(){
       const executionInfo = executionMap.get(row.id) || {};
       p.runs = Number(runInfo.run_count) || 0;
       p.last = backendTimeLabel(runInfo.last_run_at);
+      p.lastTs = backendEpoch(runInfo.last_run_at);   /* 「常用项目」按它降序：最近跑过的排最前 */
       p.history = Array.isArray(runInfo.recent) ? runInfo.recent.map(backendHistoryRow) : [];
       p.execution = executionInfo.latest || null;
       return p;
@@ -1897,6 +2023,11 @@ async function loadBackendState(){
     const notes = (payload.notes || []).map(row => backendNoteFromApi(row, taskProjectMap)).filter(Boolean);
     S.notes.splice(0, S.notes.length, ...notes);
     BACKEND_NOTE_IDS.clear(); notes.forEach(note => BACKEND_NOTE_IDS.add(note.id));
+    const heat = buildHeatPayload(payload.activityDays);
+    S.heatDays = heat.counts;
+    S.heatDetail = heat.detail;
+    S.heatFetchedAt = Date.now();
+    startHeartbeat();
     S.devTask = {};
     REAL_PROJECT_IDS.clear();
     projects.filter(p => p.steps.length).forEach(p => REAL_PROJECT_IDS.add(p.id));
@@ -1976,6 +2107,13 @@ function wfIcon(k, c){
 const shortUrl = u => String(u).replace(/^https?:\/\//,'').replace(/\/$/,'');
 function now(){ return new Date().toLocaleTimeString('zh-CN',{hour12:false}); }
 function nowShort(){ return '今天 ' + now().slice(0,5); }
+/* 流程名是用户自己给项目起的名字：后端 projects 表没有这个字段，走控制台新建的项目也从未填过，
+   所以「没有名字」才是常态。以前模板里塞了一个看着像真名的占位流程名，它会跟着 JSON 深拷贝流到
+   项目卡、概览与命令面板上，看起来像真有这么个流程。占位符不许当数据用，缺失就如实说「未命名流程」。 */
+function flowNameOf(w){ return w && w.flowName ? String(w.flowName) : '未命名流程'; }
+/* 最近使用时间的展示口径：后端从未运行过的项目 last 是占位破折号，读作「从未运行」更直白，
+   也顺便解释了它为什么排在「常用项目」最后（排序键 lastTs 为 0）。 */
+function lastUsedLabel(w){ return w && w.last && w.last !== '—' ? String(w.last) : '从未运行'; }
 const curWf = () => DATA.projects.find(w=>w.id===S.wf) || DATA.projects[0];
 
 function stepRow(s, i, animate){
@@ -2035,12 +2173,6 @@ function larderItems(){
   const used = new Set(curWf().steps.map(s=>s.type+':'+s.ref));
   return items.map(i=>resItem(t, i.ref, i.label, i.note, i.icon, used.has(t+':'+i.ref), i.proj)).join('')
     || `<div class="empty">${IC.search('currentColor')}<span>没有匹配的执行模块</span></div>`;
-}
-
-/* ---------- 运行状态 ---------- */
-function runStateOf(id){
-  const r = S.running; if (!r || r.wfId!==S.wf || !r.states[id]) return '';
-  return {done:'ok', now:'now', wait:'wait', error:'error'}[r.states[id]] || '';
 }
 
 /* ---------- 预备检查 ---------- */
@@ -2221,7 +2353,7 @@ function projOverviewHTML(w){
         <div class="card-title">项目能力<small>${on.length}/${w.steps.length} 个执行模块启用</small></div>
       </div>
       <div class="d-lines ov-lines">
-        ${line('当前流程', `${esc(w.flowName)} · ${live ? '<span class="ov-live">运行中</span>' : '空闲'}` +
+        ${line('当前流程', `${esc(flowNameOf(w))} · ${live ? '<span class="ov-live">运行中</span>' : '空闲'}` +
           `<span class="ov-flow-note">${esc(w.flowDesc)}</span>`)}
       </div>
       <div class="ov-block">
@@ -2250,7 +2382,7 @@ function projOverviewHTML(w){
       </div>
       <div class="d-lines ov-lines">
         ${line('最近运行', esc(w.last))}
-        ${line('运行流程', `${w.steps.length} 个模块 · ${esc(w.flowName)}`)}
+        ${line('运行流程', `${w.steps.length} 个模块 · ${esc(flowNameOf(w))}`)}
       </div>
     </section>
   </div>`;
@@ -2390,7 +2522,7 @@ function projDevHTML(w){
       `拖入即设为${p}优先级`)).join('');
   /* 卡头已整体删除：原标题「继续开发 <项目名>」与页头 h1、概览卡 ov-name 三处重复，
      同行的 devContext.status 徽章也一并下线（该字段现在只在「编辑基本资料」弹窗的 nm-meta 里出现）。 */
-  return `<section class="card tight">
+  return `<section class="card">
     <div class="dev-cols">
       <div class="dev-col">
         ${task ? `<div class="d-line"><span class="d-k">本轮任务</span><span class="d-v">${esc(task.text)}</span></div>` : ''}
@@ -2550,7 +2682,7 @@ function projRunHTML(w, r, runOpen){
   }).join('');
   const hist = Array.isArray(w.history) ? w.history.slice(0, 3) : [];
   return `
-  <section class="card tight run-console">
+  <section class="card run-console">
     <div class="card-head">
       <div class="card-title">运行状态<small>${esc(w.name)} · ${on.length} 个启用模块</small></div>
       <div class="right">
@@ -2579,7 +2711,7 @@ function projSettingsHTML(w){
       <div class="s-txt"><div class="s-t">${label}</div><div class="s-d">${desc}</div></div>
       <button class="switch ${on?'on':''}" data-act="switch" data-k="${key}"><i></i></button>
     </div>`;
-  return `<section class="card tight">
+  return `<section class="card">
     <div class="card-head"><div class="card-title">项目设置<small>仅当前项目生效（Mock）</small></div></div>
     ${sw('运行完成后通知','项目运行流程跑完推送系统通知', true, 'pjNotify')}
     ${sw('失败自动重试','步骤失败后自动重试一次', false, 'pjRetry')}
@@ -2700,6 +2832,22 @@ function setProjStatus(id, st){
   addActivity(`项目「${w.name}」状态：${from} → ${s.v}`, '项目模块', 'check', s.c, '项目');
   toast(`「${w.name}」状态已切换为「${s.v}」`);
   return true;
+}
+
+/* 总控台 · 切换当前项目：按钮旁弹出项目清单浮层，点选即把该项目设为当前项目。
+   原 focusProj 直接把「切换」逻辑写在分支里，但按钮只出现在当前项目卡上，
+   data-id 恒等于 S.proj，`id !== S.proj` 恒假 —— 按钮永远没反应。 */
+function projSwitchPop(btn){
+  const r = btn.getBoundingClientRect();
+  openPop('projSwitchPop', r.left, r.bottom, `
+    <div class="pop-h">切换当前项目</div>
+    ${DATA.projects.map(p=>{
+      const c = projStColor(p.st);
+      return `<button class="pop-item" data-act="setCurProj" data-id="${p.id}">
+        <span class="dot" style="background:${c}"></span>
+        <span style="flex:1;${p.id===S.proj?'font-weight:500':''}">${esc(p.name)}</span>
+        ${p.id===S.proj?`<span style="width:15px;height:15px;display:block;color:${c}">${IC.check(c)}</span>`:''}
+      </button>`;}).join('')}`);
 }
 
 /* ---------------- 概览 · 身份卡：项目内容内联编辑窗口 ----------------
@@ -3068,7 +3216,7 @@ function projTileHTML(w){
         <span class="pjt-enter" aria-hidden="true">进入${IC.chevR('currentColor')}</span>
       </div>
       <div class="pjt-meta">
-        <span class="pjt-chip">${esc(w.flowName)}</span>
+        <span class="pjt-chip">${esc(flowNameOf(w))}</span>
         <span class="pjt-chip">${on}/${w.steps.length} 模块</span>
         <span class="pjt-chip">${w.runs} 次运行</span>
         ${parent ? `<span class="pjt-chip pjt-up" title="层级：归属「${esc(parent.name)}」">子项目 · 归属 ${esc(parent.name)}</span>` : ''}
@@ -3088,6 +3236,363 @@ function projTileHTML(w){
   </article>`;
 }
 
+/* ---------------- 项目选择页：卡片二维拖拽排序 ----------------
+   零额外 UI：没有手柄、没有指示线、没有占位卡。长按卡片空白处约 200ms 才起拖；
+   卡片内的按钮 / 链接长按不参与 —— 否则「运行项目」会被长按吃掉，点不动。
+   命中判定是**二维**的：只比「拖动卡片的中心离哪个槽位的中心最近」，所以左右换位、跨行、跨列都成立。
+   让位不走 CSS transition —— 卡片位移由 JS 的物理弹簧逐帧写 transform（与 initInertialScroll 同一套
+   半隐式欧拉 + 固定子步积分），松手后同一套积分把卡片收进槽位，因此没有瞬移与闪烁。
+   拖拽期间**不动 DOM**，只改 transform 模拟新顺序；落库成功后重渲染一次把布局落到真实位置
+   （此时真实位置与 transform 后的视觉位置一致，所以看不到跳变）。
+   窗口尺寸变化由 ResizeObserver 捕获：拖拽中变化 → 安全取消并归位。
+   层级约定：卡片顺序就是 projFlat() 的可见顺序，落库时按「视觉名次」重排 DATA.projects，
+   子项目仍紧随其父（父子不会被拖散）。 */
+const PROJ_SORT = {
+  holdMs:200,           // 长按多久起拖
+  tolerance:8,          // 起拖前的位移容差：超过就交回原生滚动 / 当点击
+  switchMargin:4,       // 换槽位前要比当前槽位近出的额外距离，压住等距处的抖动
+  stiffness:260,        // 弹簧刚度
+  damping:26,           // 弹簧阻尼
+  step:1/240,           // 积分子步
+  maxFrame:0.064,       // 单帧最多按 64ms 积分（掉帧保护，与惯性滚动同口径）
+  restEps:0.4,          // 判定静止的位移阈值（px）
+  restVel:14,           // 判定静止的速度阈值（px/s）
+};
+/* 起拖黑名单：只排除卡片内的真实控件。
+   刻意**不用** appScrollDragBlocked —— 它把 [data-act] 一并排掉，而整块 .pjt-main 就挂着
+   data-act="enterProj"，照搬会让整张卡都拖不起来。 */
+function projSortBlocked(target){
+  return !!(target && target.closest && target.closest('button,a,input,textarea,select'));
+}
+/* 重排本地项目顺序。入参是后端返回的项目行数组：**以后端成功返回为准**，失败时调用方不改本地列表。 */
+function applyProjectOrder(rows){
+  if (!Array.isArray(rows) || !rows.length) return false;
+  const rank = new Map(rows.map((row, index) => [row.id, index]));
+  const rankOf = item => rank.has(item.id) ? rank.get(item.id) : Number.MAX_SAFE_INTEGER;
+  DATA.projects.sort((a, b) => rankOf(a) - rankOf(b));
+  return true;
+}
+/* 二维命中：离拖动卡片中心最近的槽位就是目标槽位。
+   用「指针落在谁身上」在跨行 / 跨列时会漏判，一维顺序判定更是直接把跨行拖拽算错。
+   switchMargin 是滞回：新旧槽位距离差不多时先不换，压住等值线上的抖动。 */
+function projSortSlotAt(slots, cx, cy, current){
+  let best = current, bestD = Infinity, currentD = Infinity;
+  slots.forEach((slot, index) => {
+    const dx = slot.x + slot.w / 2 - cx, dy = slot.y + slot.h / 2 - cy;
+    const d = Math.sqrt(dx * dx + dy * dy);
+    if (index === current) currentD = d;
+    if (d < bestD){ bestD = d; best = index; }
+  });
+  return (best !== current && bestD > currentD - PROJ_SORT.switchMargin) ? current : best;
+}
+
+let projSortCtl = null;        // 当前看板的控制器（重渲染后解绑上一块）
+
+function initProjSort(){
+  if (projSortCtl) projSortCtl.destroy();
+  projSortCtl = null;
+
+  const board = $('#view .pjt-board');
+  if (!board || !board.addEventListener) return null;
+  const cards = $$('.pjt-card[data-id]', board);
+  if (cards.length < 2) return null;                    // 0 / 1 张卡没有可换的位置
+  const win = (typeof window !== 'undefined' && window && window.addEventListener) ? window : null;
+
+  const st = {
+    down:null, drag:null, hold:0, suppressClick:false, gone:false,
+    slots:[], order:[], springs:new Map(), raf:0, last:0, onRest:null,
+    lift:{ scale:1.03, tilt:1.2 }, observer:null, winResize:false,
+  };
+  const reduceMotion = !!(globalThis.matchMedia
+    && globalThis.matchMedia('(prefers-reduced-motion: reduce)').matches);
+
+  /* ---------- 几何：槽位测量与二维命中 ---------- */
+  const measure = () => {
+    const base = board.getBoundingClientRect();
+    st.slots = cards.map(el => {
+      const r = el.getBoundingClientRect();
+      return { el, id:el.dataset.id, x:r.left - base.left, y:r.top - base.top, w:r.width, h:r.height };
+    });
+    st.order = st.slots.map(slot => slot.id);
+  };
+
+  /* ---------- 弹簧积分与着色 ---------- */
+  const seek = (el, tx, ty, tlift) => {
+    let rec = st.springs.get(el);
+    if (!rec){
+      rec = { el, x:0, y:0, vx:0, vy:0, tx:0, ty:0, lift:0, liftV:0, tlift:0, follow:false };
+      st.springs.set(el, rec);
+    }
+    rec.tx = tx; rec.ty = ty;
+    if (typeof tlift === 'number') rec.tlift = tlift;
+    return rec;
+  };
+  const paint = rec => {
+    const el = rec.el;
+    if (!el || !el.style) return;
+    if (Math.abs(rec.x) < 0.01 && Math.abs(rec.y) < 0.01 && rec.lift < 0.001){
+      el.style.transform = '';                          // 完全归位就别留 transform：否则会吞掉悬停抬升
+      return;
+    }
+    const round = n => Math.round(n * 100) / 100;
+    let text = 'translate3d(' + round(rec.x) + 'px,' + round(rec.y) + 'px,0)';
+    if (rec.lift > 0.001){
+      const scale = 1 + (st.lift.scale - 1) * rec.lift;
+      text += ' scale(' + Math.round(scale * 1000) / 1000 + ') rotate(' + round(st.lift.tilt * rec.lift) + 'deg)';
+    }
+    el.style.transform = text;
+  };
+  const integrate = (rec, dt) => {
+    const k = PROJ_SORT.stiffness, c = PROJ_SORT.damping;
+    const steps = Math.max(1, Math.ceil(dt / PROJ_SORT.step));
+    const h = dt / steps;
+    for (let i = 0; i < steps; i++){
+      if (!rec.follow){
+        rec.vx += (-k * (rec.x - rec.tx) - c * rec.vx) * h; rec.x += rec.vx * h;
+        rec.vy += (-k * (rec.y - rec.ty) - c * rec.vy) * h; rec.y += rec.vy * h;
+      }
+      rec.liftV += (-k * (rec.lift - rec.tlift) - c * rec.liftV) * h; rec.lift += rec.liftV * h;
+    }
+  };
+  const resting = rec =>
+    Math.abs(rec.x - rec.tx) < PROJ_SORT.restEps && Math.abs(rec.y - rec.ty) < PROJ_SORT.restEps
+    && Math.abs(rec.vx) < PROJ_SORT.restVel && Math.abs(rec.vy) < PROJ_SORT.restVel
+    && Math.abs(rec.lift - rec.tlift) < 0.01 && Math.abs(rec.liftV) < 0.6;
+  const settleNow = () => st.springs.forEach(rec => {
+    rec.x = rec.tx; rec.y = rec.ty; rec.lift = rec.tlift; rec.vx = rec.vy = rec.liftV = 0; paint(rec);
+  });
+  const loop = now => {
+    st.raf = 0;
+    if (st.gone) return;
+    const dt = Math.min(PROJ_SORT.maxFrame, Math.max(0.001, (now - st.last) / 1000));
+    st.last = now;
+    let busy = false;
+    st.springs.forEach(rec => { integrate(rec, dt); paint(rec); if (!resting(rec)) busy = true; });
+    if (busy){ st.raf = _raf(loop); return; }
+    /* 落定：精确吸附到槽位。弹簧只在 0.4px 内判定静止，不收尾的话卡片会停在差一点点的位置。
+       跟指针走的那张（follow）不参与，否则会被拉回自己的槽位。 */
+    st.springs.forEach(rec => {
+      if (rec.follow) return;
+      rec.x = rec.tx; rec.y = rec.ty; rec.lift = rec.tlift; rec.vx = rec.vy = rec.liftV = 0; paint(rec);
+    });
+    const done = st.onRest; st.onRest = null;
+    if (done) done();
+  };
+  const flush = () => {
+    if (reduceMotion){
+      settleNow();
+      const done = st.onRest; st.onRest = null;
+      if (done) done();
+      return;
+    }
+    if (st.raf) return;
+    st.last = _now(); st.raf = _raf(loop);
+  };
+
+  /* ---------- 手势 ---------- */
+  const cancelHold = () => {
+    if (st.hold){ clearTimeout(st.hold); st.hold = 0; }
+    st.down = null;
+    board.classList.remove('is-arming');
+  };
+  const clearVisual = () => {
+    if (st.raf){ _caf(st.raf); st.raf = 0; }
+    st.onRest = null;
+    st.springs.forEach(rec => { if (rec.el && rec.el.style) rec.el.style.transform = ''; });
+    st.springs.clear();
+  };
+  const startDrag = () => {
+    const down = st.down;
+    if (!down || st.drag || st.gone) return;
+    measure();
+    const index = st.order.indexOf(down.id);
+    if (index < 0){ cancelHold(); return; }
+    st.down = null;
+    board.classList.remove('is-arming');
+    board.classList.add('is-sorting');
+    st.lift = readLiftTokens();
+    const rec = seek(down.el, 0, 0, 1);
+    rec.follow = true;                                  // 起拖阶段跟指针，不归位
+    st.drag = { el:down.el, id:down.id, slot:st.slots[index], pid:down.pid, ox:down.x, oy:down.y, dx:0, dy:0 };
+    down.el.classList.add('is-dragging');
+    flush();
+  };
+  /* 抬起 / 倾斜是视觉值，读 :root 令牌，不在 JS 里硬写 */
+  const readLiftTokens = () => {
+    const view = (globalThis.getComputedStyle) ? globalThis.getComputedStyle(board) : null;
+    const read = (name, fallback) => {
+      if (!view || !view.getPropertyValue) return fallback;
+      const value = parseFloat(view.getPropertyValue(name));
+      return isFinite(value) ? value : fallback;
+    };
+    return { scale:read('--pjt-lift-scale', 1.03), tilt:read('--pjt-lift-tilt', 1.2) };
+  };
+  /* 换位：把拖动卡片搬到 to，其余卡片按新顺序改目标位移，交回弹簧 */
+  const applyOrder = to => {
+    const from = st.order.indexOf(st.drag.id);
+    if (from < 0 || from === to) return;
+    st.order.splice(to, 0, st.order.splice(from, 1)[0]);
+    st.slots.forEach(slot => {
+      if (slot.el === st.drag.el) return;               // 被拖的那张跟指针，不归位
+      const target = st.slots[st.order.indexOf(slot.id)];
+      seek(slot.el, target.x - slot.x, target.y - slot.y);
+    });
+    flush();
+  };
+  /* 松手：所有卡片（含被拖的那张）一起收进各自槽位，落定后再提交 */
+  const endDrag = () => {
+    const drag = st.drag;
+    if (!drag) return;
+    st.drag = null;
+    st.suppressClick = true;                            // 拖过就不算「点卡片进入项目」
+    setTimeout(() => { st.suppressClick = false; }, 0);
+    drag.el.classList.remove('is-dragging');
+    board.classList.remove('is-sorting');
+    st.slots.forEach(slot => {
+      const target = st.slots[st.order.indexOf(slot.id)];
+      const rec = seek(slot.el, target.x - slot.x, target.y - slot.y);
+      rec.follow = false;
+      if (slot.el === drag.el) rec.tlift = 0;           // 落位同时去浮（缩放 / 倾斜回落到 1 / 0）
+    });
+    const changed = st.order.join('|') !== st.slots.map(slot => slot.id).join('|');
+    st.onRest = changed ? commit : null;                // 只抬起又放下：归位即可，不发请求
+    flush();
+  };
+  /* 安全取消：顺序回滚到本轮开始，视觉位置全部归零 */
+  const abortDrag = message => {
+    if (!st.down && !st.drag) return;
+    cancelHold();
+    const drag = st.drag;
+    st.drag = null;
+    if (drag && drag.el) drag.el.classList.remove('is-dragging');
+    board.classList.remove('is-sorting', 'is-arming');
+    st.order = st.slots.map(slot => slot.id);
+    st.slots.forEach(slot => {
+      const rec = seek(slot.el, 0, 0);
+      rec.follow = false; rec.tlift = 0;
+    });
+    st.onRest = null;
+    flush();
+    if (message) toast(message);
+  };
+  const commit = async () => {
+    if (st.gone) return;
+    const rank = new Map(st.order.map((id, index) => [id, index]));
+    const rankOf = item => rank.has(item.id) ? rank.get(item.id) : Number.MAX_SAFE_INTEGER;
+    const ids = DATA.projects.slice().sort((a, b) => rankOf(a) - rankOf(b)).map(item => item.id);
+    try {
+      const rows = await apiRequest('/projects/order', { method:'PUT', body:JSON.stringify({ project_ids:ids }) });
+      if (st.gone) return;
+      applyProjectOrder(rows);
+      render(true);                                     // 真实位置已与视觉位置一致，重渲染看不到跳变
+    } catch (err){
+      if (st.gone) return;
+      st.slots.forEach(slot => { const rec = st.springs.get(slot.el); if (rec){ rec.tx = 0; rec.ty = 0; } });
+      st.onRest = null;
+      flush();                                          // 弹回原位
+      toast(err && err.message ? err.message : '项目排序未保存');
+    }
+  };
+
+  /* ---------- 事件 ---------- */
+  const onDown = e => {
+    if (st.gone || st.down || st.drag) return;
+    if (e.button != null && e.button !== 0) return;      // 只认左键 / 触摸
+    st.suppressClick = false;
+    const target = e.target;
+    if (!target || !target.closest) return;
+    const card = target.closest('.pjt-card[data-id]');
+    if (!card || cards.indexOf(card) < 0) return;
+    if (projSortBlocked(target)) return;                 // 卡片内的控件长按不算拖拽
+    st.down = { el:card, id:card.dataset.id, x:e.clientX, y:e.clientY, pid:e.pointerId };
+    board.classList.add('is-arming');                    // 长按期间禁掉文本选择
+    st.hold = setTimeout(startDrag, PROJ_SORT.holdMs);
+  };
+  const onMove = e => {
+    if (st.down){
+      if (st.down.pid != null && e.pointerId != null && e.pointerId !== st.down.pid) return;
+      const dx = e.clientX - st.down.x, dy = e.clientY - st.down.y;
+      if (Math.abs(dx) > PROJ_SORT.tolerance || Math.abs(dy) > PROJ_SORT.tolerance){ cancelHold(); return; }
+      st.down.x = e.clientX; st.down.y = e.clientY;      // 起拖前的小抖动跟着走，起点更准
+      return;
+    }
+    const drag = st.drag;
+    if (!drag) return;
+    if (drag.pid != null && e.pointerId != null && e.pointerId !== drag.pid) return;
+    drag.dx = e.clientX - drag.ox; drag.dy = e.clientY - drag.oy;
+    const rec = st.springs.get(drag.el);
+    if (rec){ rec.x = drag.dx; rec.y = drag.dy; rec.vx = 0; rec.vy = 0; paint(rec); }
+    const to = projSortSlotAt(
+      st.slots,
+      drag.slot.x + drag.slot.w / 2 + drag.dx,
+      drag.slot.y + drag.slot.h / 2 + drag.dy,
+      st.order.indexOf(drag.id));
+    if (to !== st.order.indexOf(drag.id)) applyOrder(to);
+  };
+  const onUp = () => {
+    if (st.down){ cancelHold(); return; }
+    if (st.drag) endDrag();
+  };
+  const onAbort = () => { if (st.down) cancelHold(); if (st.drag) abortDrag(); };
+  const onContextMenu = e => { if ((st.down || st.drag) && e.preventDefault) e.preventDefault(); };
+  /* 拖拽期间锁住看板自身的滚动：不动 overflow（改了会改变列宽 / 触发重排），只吃掉滚动事件 */
+  const onBlockScroll = e => { if (st.drag && e.cancelable) e.preventDefault(); };
+  const onClick = e => {
+    if (!st.suppressClick) return;
+    st.suppressClick = false;
+    if (e.preventDefault) e.preventDefault();
+    if (e.stopPropagation) e.stopPropagation();
+  };
+  const onBoardResize = () => {
+    if (st.drag){ abortDrag('窗口尺寸已改变，已取消这次排序'); return; }
+    if (st.down) cancelHold();
+    if (st.springs.size) clearVisual();
+  };
+
+  board.addEventListener('pointerdown', onDown);
+  board.addEventListener('contextmenu', onContextMenu);
+  board.addEventListener('wheel', onBlockScroll, { passive:false });
+  board.addEventListener('touchmove', onBlockScroll, { passive:false });
+  board.addEventListener('click', onClick, true);
+  if (win){
+    win.addEventListener('pointermove', onMove);
+    win.addEventListener('pointerup', onUp);
+    win.addEventListener('pointercancel', onAbort);
+    win.addEventListener('blur', onAbort);
+  }
+  if (typeof globalThis.ResizeObserver === 'function'){
+    st.observer = new globalThis.ResizeObserver(onBoardResize);
+    if (st.observer.observe) st.observer.observe(board);
+  } else if (win){
+    win.addEventListener('resize', onBoardResize);       // 老环境兜底：没有 ResizeObserver 时监听窗口
+    st.winResize = true;
+  }
+
+  projSortCtl = {
+    board, cards, st, measure, applyOrder, endDrag, abortDrag, startDrag,
+    destroy(){
+      st.gone = true;
+      cancelHold();
+      clearVisual();
+      st.drag = null;
+      if (st.observer && st.observer.disconnect) st.observer.disconnect();
+      if (win){
+        win.removeEventListener('pointermove', onMove);
+        win.removeEventListener('pointerup', onUp);
+        win.removeEventListener('pointercancel', onAbort);
+        win.removeEventListener('blur', onAbort);
+        if (st.winResize) win.removeEventListener('resize', onBoardResize);
+      }
+      board.removeEventListener('pointerdown', onDown);
+      board.removeEventListener('contextmenu', onContextMenu);
+      board.removeEventListener('wheel', onBlockScroll);
+      board.removeEventListener('touchmove', onBlockScroll);
+      board.removeEventListener('click', onClick, true);
+    },
+  };
+  return projSortCtl;
+}
+
 function viewWorkflows(animate){
   const wf = curWf();
   /* 兜底：curWf() 在 0 项目时返回 undefined（它是 find(...) || projects[0]），
@@ -3100,7 +3605,7 @@ function viewWorkflows(animate){
       <p>还没有项目</p>
     </div>
   </div>
-  <section class="card tight">
+  <section class="card">
     <div class="empty">${IC.plus('currentColor')}<span>这个项目已经不存在了，回项目列表看看</span>
       <button class="btn btn-ghost btn-sm" data-act="backProj">返回项目列表</button></div>
   </section>`;
@@ -3158,7 +3663,7 @@ function viewWorkflows(animate){
     </section>
 
     <div class="wf-side">
-      <section class="card tight res-card">
+      <section class="card res-card">
         <div class="card-head">
           <div class="card-title">执行模块库<small>按类型筛选</small></div>
         </div>
@@ -3529,7 +4034,7 @@ function viewSettings(){
   return `
   <div class="page-head"><div><h1>设置</h1><p>外观、Obsidian、通用行为与快捷键</p></div></div>
   <div class="grid g-2">
-    <section class="card tight">
+    <section class="card">
       <div class="card-head"><div class="card-title">外观</div></div>
       <div class="set-row">
         <div class="s-txt"><div class="s-t">主题</div><div class="s-d">浅色 / 深色，跟随顶部按钮同步</div></div>
@@ -3541,27 +4046,30 @@ function viewSettings(){
       <div class="set-row">
         <div class="s-txt"><div class="s-t">强调色</div><div class="s-d">影响主按钮与高亮状态</div></div>
         <div style="display:flex;gap:8px">
-          ${[['#E8402A',1],['#2563EB',0],['#7C4DFF',0],['#0E8A3C',0]].map(([c,on])=>
-            `<button class="swatch ${on?'on':''}" data-act="accent" data-v="${c}" style="background:${c}"></button>`).join('')}
+          ${ACCENTS.map(c=>
+            `<button class="swatch ${c===S.accent?'on':''}" data-act="accent" data-v="${c}"
+              style="background:${c}" aria-label="强调色 ${c}" aria-pressed="${c===S.accent}"></button>`).join('')}
         </div>
       </div>
       <div class="set-row">
         <div class="s-txt"><div class="s-t">信息密度</div><div class="s-d">调整卡片内边距与行高</div></div>
-        <input class="slider" id="density" type="range" min="0" max="2" value="1" step="1">
+        <input class="slider" id="density" type="range" min="0" max="2" value="${S.density}" step="1"
+          aria-label="信息密度：紧凑 / 标准 / 宽松">
       </div>
       <div class="set-row">
         <div class="s-txt"><div class="s-t">玻璃质感</div><div class="s-d">关闭后卡片改为纯色底，降低渲染开销</div></div>
-        <button class="switch on" data-act="switch" data-k="glass"><i></i></button>
+        <button class="switch ${S.glass?'on':''}" data-act="switch" data-k="glass"
+          aria-label="${S.glass?'关闭':'开启'}玻璃质感"><i></i></button>
       </div>
     </section>
-    <section class="card tight">
+    <section class="card">
       <div class="card-head"><div class="card-title">通用</div></div>
       ${startupSwitch}
-      ${sw('桌面通知','脚本运行完成或失败时推送系统通知', true, 'notify')}
-      ${sw('自动保存','编辑中的文件每 30 秒自动落盘', true, 'save')}
-      ${sw('使用数据统计','匿名上报崩溃与性能数据', false, 'telemetry')}
+      ${sw('桌面通知','脚本运行完成或失败时推送系统通知', S.notify, 'notify')}
+      ${sw('自动保存','编辑中的文件每 30 秒自动落盘', S.save, 'save')}
+      ${sw('使用数据统计','匿名上报崩溃与性能数据', S.telemetry, 'telemetry')}
     </section>
-    <section class="card tight">
+    <section class="card">
       <div class="card-head">
         <div class="card-title">Obsidian 连接<small>本机保存 · 打开、新建与单向更新项目主页</small></div>
         <div class="right"><span class="badge ${S.obsidian.vault?'b-green':'b-slate'}">${S.obsidian.vault?'已配置':'未配置'}</span></div>
@@ -3589,17 +4097,17 @@ function viewSettings(){
       </div>
     </section>
   </div>
-  <section class="card tight">
+  <section class="card">
     <div class="card-head"><div class="card-title">快捷键</div><div class="right"><span class="metric">点击任意一行可重绑（原型演示）</span></div></div>
     <div class="list">
-      ${[['打开全局搜索','Ctrl','K'],['快速切换项目','Ctrl','P'],['切换专注视图','Ctrl','.'],['打开模块','Ctrl','M'],['打开设置','Ctrl',',']].map(([n,a,b])=>`
+      ${[['打开全局搜索','Ctrl','K'],['快速切换项目','Ctrl','P'],['打开模块','Ctrl','M'],['打开设置','Ctrl',',']].map(([n,a,b])=>`
         <div class="row" data-act="noop">
           <span class="r-title">${n}</span>
           <span class="kbd">${a}</span><span class="kbd">${b}</span>
         </div>`).join('')}
     </div>
   </section>
-  <section class="card tight">
+  <section class="card">
     <div class="card-head"><div class="card-title">账号</div></div>
     <div class="set-row">
       <span class="avatar"></span>
@@ -3662,6 +4170,7 @@ function render(keepScroll){
   $('#bellBadge').style.display = S.notices.some(n=>!n.read) ? 'block' : 'none';
   if (S.page === 'apps'){ fitAppList(); const ctl = initInertialScroll(); if (ctl) ctl.refresh(); }
   // 应用页：渲染后锁「一屏整数行」，滚动由自管物理惯性驱动（见 initInertialScroll）
+  if (S.page === 'projects') initProjSort();      // 看板每次重建都要重新绑定拖拽排序（见 initProjSort）
 }
 const go = (p, keep) => { S.page = p; clearObsidianHubFlow(false); S.obsidianReturnFocus = ''; location.hash = '#/'+p; closeNoteModal(); render(keep); };
 
@@ -3669,7 +4178,6 @@ const go = (p, keep) => { S.page = p; clearObsidianHubFlow(false); S.obsidianRet
 let palSel = 0, palItems = [];
 const PAL_CMD = [
   {t:'新增执行模块', k:'模块', act:()=>{ go('modules'); setTimeout(()=>newModule(), 260); }},
-  {t:'切换到专注视图', k:'视图', act:()=>{ S.page='home'; S.focus=true; location.hash='#/home'; render(); }},
   {t:'切换浅色 / 深色主题', k:'外观', act:()=>toggleTheme()},
   {t:'打开当前项目内容', k:'项目', act:()=>{ const p=DATA.projects.find(x=>x.id===S.proj)||DATA.projects[0]; if (!p){ toast('还没有项目'); return; } S.wf=p.id; go('workflows'); }}
 ];
@@ -3737,12 +4245,16 @@ function buildPalette(q){
   const groups = [];
   const hit = (s) => !kw || String(s).toLowerCase().includes(kw);
 
-  /* 「常用」由项目派生，不再写死项目 id —— 原来这两条是硬编码 id 的 startRun 调用，
+  /* 「常用项目」由项目派生，不再写死项目 id —— 原来这两条是硬编码 id 的 startRun 调用，
      项目删掉之后入口还挂在面板上，点下去会因为 startRun 的兜底静默跑到别的项目上。
-     分组为空时会被下面的 clean 过滤掉，所以删光了自然就不再出现。 */
-  groups.push({name:'常用', items:DATA.projects
-    .filter(w => w.flowName && hit('运行' + w.flowName))
-    .map(w=>({t:`运行「${w.flowName}」`, k:'项目', ico:'run', act:()=>startRun(w.id)}))});
+     分组为空时会被下面的 clean 过滤掉，所以删光了自然就不再出现。
+     排序 = 最近使用（lastTs 降序，从没跑过的 0 沉底），提示列显示同一个口径的「最近使用」，
+     顺序因此自己就能说明白。标签主体必须用项目名而不是流程名：没起过流程名的项目会拿到同一个
+     兜底文案，只写流程名就会出现多条一模一样的条目、看不出该点哪个。 */
+  groups.push({name:'常用项目', items:DATA.projects
+    .filter(w => hit('运行' + w.name + lastUsedLabel(w)))
+    .sort((a, b) => (Number(b.lastTs) || 0) - (Number(a.lastTs) || 0))
+    .map(w=>({t:`运行「${w.name}」`, k:lastUsedLabel(w), ico:'run', act:()=>startRun(w.id)}))});
   groups.push({name:'项目', items:DATA.projects.filter(w=>hit(w.name))
     .map(w=>({t:w.name, k:'运行项目', ico:'run', act:()=>startRun(w.id)}))});
   groups.push({name:'页面', items:Object.entries({home:'首页',apps:'应用',files:'文件',modules:'模块',workflows:'项目',settings:'设置'})
@@ -4041,24 +4553,6 @@ function todoMenu(id){
       <button class="btn btn-ghost btn-sm" data-act="closeModal">取消</button>`)}`, { form:true });
 }
 
-function openProject(id){
-  const p = DATA.projects.find(x=>x.id===id); if(!p) return;
-  openDrawer(`${dHead(p.name, p.desc)}
-    <div style="display:flex;gap:8px;flex-wrap:wrap">
-      <span class="badge ${p.stCls}">${esc(p.st)}</span>
-      ${p.tags.map(t=>`<span class="badge b-slate">${esc(t)}</span>`).join('')}
-    </div>
-    <div class="metrics" style="gap:24px">
-      <span class="metric">文件 <b>${p.files}</b></span>
-      <span class="metric">提交 <b>${p.commits}</b></span>
-      <span class="metric">更新 <b>${esc(p.updated.replace(' ',''))}</b></span>
-    </div>
-    <div style="display:flex;gap:8px">
-      <button class="btn btn-primary btn-sm" data-act="openWf" data-id="${p.id}">${IC.play('#fff')}进入项目</button>
-      <button class="btn btn-ghost btn-sm" data-act="toast" data-v="已归档 ${esc(p.name)}">归档项目</button>
-    </div>`);
-}
-
 function openTool(k){
   if (k==='sync'){
     openDrawer(`${dHead('云同步','3 个项目 · 上次同步 2 分钟前')}
@@ -4081,7 +4575,8 @@ function openTool(k){
 /* ---------------- 行为 ---------------- */
 function toggleTheme(){
   S.theme = S.theme==='light' ? 'dark' : 'light';
-  document.documentElement.dataset.theme = S.theme;
+  applyTheme(S.theme);            /* 顶栏按钮与设置页共用同一套 applier，避免两处写法分叉 */
+  persistPrefs();
   toast(S.theme==='light' ? '已切换到浅色主题' : '已切换到深色主题');
   if (S.page==='settings') render(true);
 }
@@ -4303,6 +4798,9 @@ function rememberBackendAttempt(wf, payload){
     wf.history = [item, ...(Array.isArray(wf.history) ? wf.history : [])].slice(0, 3);
   }
   wf.last = item.t;
+  /* 本次会话刚跑过 → 就地刷新排序键，不用等下次启动，「常用项目」的顺序立刻跟着变。
+     后端没给 started_at 时保留旧值，不要用 Date.now() 凭空造一个时间。 */
+  wf.lastTs = item.at || wf.lastTs || 0;
   wf.execution = payload;
 }
 function applyBackendRun(wf, token, payload){
@@ -4347,6 +4845,8 @@ function applyBackendRun(wf, token, payload){
       toast(`「${wf.name}」${closing ? '关闭' : restarting ? '重启' : '运行'}失败`);
     }
   }
+  /* 首次落到终态时刷新活跃度聚合：这次真实执行要立刻反映到色格上 */
+  if (r.settled && !r.heatBumped){ r.heatBumped = true; void refreshHeatCounts(); }
   /* 轮询每 ~150ms 拉一次执行状态；内容没变就不重绘 —— render 是全量重建 DOM，
      重建后鼠标下方卡片的 hover 上浮过渡与运行指示动画都会从头重播，
      观感就是卡片反复弹跳、闪烁。指纹相同（status/步骤/日志/结果均未变）时跳过。 */
@@ -4560,19 +5060,23 @@ document.addEventListener('click', e => {
   const v = t.dataset.v, id = t.dataset.id, k = t.dataset.k;
 
   switch(act){
-    case 'focusProj': {
-      if (id !== S.proj){
-        const cur = DATA.projects.find(p=>p.id===id); if (!cur) break;   // 项目可能刚被删掉
-        S.proj = id;
-        render(true);
-        toast(`已切换到「${cur.name}」`);
-        addActivity(`切换到项目 ${cur.name}`, cur.name, 'git', C.green, '项目');
-      }
+    case 'heatMode': {
+      if (S.heatMode === v) break;
+      S.heatMode = v;
+      render(true);
       break;
     }
-    case 'focus':    S.focus = !S.focus; if(!S.focus) S.expanded = {}; render(); toast(S.focus?'已进入专注视图':'已退出专注视图'); break;
-    case 'expandMod':   S.expanded[k] = true; render(true); break;
-    case 'collapseMod': delete S.expanded[k]; render(true); break;
+    case 'focusProj': projSwitchPop(t); break;
+    case 'setCurProj': {
+      closePops();
+      const p = DATA.projects.find(x=>x.id===id);
+      if (!p || id === S.proj) break;
+      S.proj = id;
+      render(true);
+      toast(`已切换到「${p.name}」`);
+      addActivity(`切换到项目 ${p.name}`, p.name, 'git', C.green, '项目');
+      break;
+    }
     case 'tick': {
       const t0 = S.todos.plan.find(x=>x.id===id); if (!t0) break;
       void updateBackendTask(t0, {done:!t0.done}).then(saved => {
@@ -4711,7 +5215,6 @@ document.addEventListener('click', e => {
     }
     case 'closeNoteModal': closeNoteModal(); break;
     case 'allActs':  toast(`共 ${S.acts.length} 条活动记录`); break;
-    case 'goApps':   go('apps'); break;
     case 'launch':   closePops(); launch(id); break;
     case 'addApp':   S.addName=''; S.addCat=''; S.addStep='form'; S.addPick=''; S.scanQuery=''; S.scanScroll=0; S.scanApps=[]; S.scanError=''; addApp(); void loadScannedApps(); break;
     case 'refreshAppScan': refreshAppScan(); break;
@@ -4732,42 +5235,35 @@ document.addEventListener('click', e => {
     case 'askRemove': closePops(); S.confirmRemove = id; render(true); break;      // 二次确认弹窗
     case 'cancelRemove': S.confirmRemove = ''; render(true); break;
     case 'confirmRemove': removeFromList(id); break;
-    case 'appCat':   S.appCat = v; S.more.apps = false; render(true); break;
+    case 'appCat':   S.appCat = v; render(true); break;
     case 'favOnly':  S.favOnly = !S.favOnly; render(true); break;   // 常用优先（索引条顶部置顶图标）：只看置顶为常用的应用
     case 'appView':  S.appView = v; render(true); break;
     case 'alphaJump': alphaJump(v); break;                          // 字母索引条：平滑滚动定位到该分组（列表内容不变）
-    case 'moreActs': S.more.acts = true; render(true); break;
-    case 'openProj': openProject(id); break;
-    case 'newProj':  toast('新建项目向导（原型演示）'); break;
-    case 'importProj': toast('已选择本地目录 D:/Projects（原型演示）'); break;
-    case 'play':     S.playerOn = !S.playerOn;
-                     toast(S.playerOn?`正在播放 ${DATA.tracks[S.track].name}`:'已暂停');
-                     render(true); break;
-    case 'next':     S.track = (S.track+1) % DATA.tracks.length; S.playerOn = true;
-                     toast(`下一首：${DATA.tracks[S.track].name}`); render(true); break;
     case 'askWorkflows': closePalette(); go('projects'); break;
-    case 'theme':    S.theme = v; document.documentElement.dataset.theme = v; toast(v==='light'?'已切换到浅色主题':'已切换到深色主题'); render(true); break;
+    case 'theme':    S.theme = v === 'dark' ? 'dark' : 'light'; applyTheme(S.theme); persistPrefs();
+                     toast(S.theme==='light'?'已切换到浅色主题':'已切换到深色主题'); render(true); break;
     case 'accent': {
-      document.documentElement.style.setProperty('--brand', v);
+      S.accent = v;
+      applyAccent(v);
       // 同步强调色选中态（不整页重渲染）
       if (t.parentElement) t.parentElement.querySelectorAll('.swatch').forEach(s => s.classList.toggle('on', s === t));
+      persistPrefs();
       toast('强调色已更新');
       break;
     }
     case 'switch': {
       if (k === 'auto') { void updateStartupSetting(S.startupEnabled !== true); break; }
-      t.classList.toggle('on');
-      if (k === 'glass'){
-        const on = t.classList.contains('on');
-        document.documentElement.classList.toggle('no-blur', !on);
-        toast(on ? '玻璃质感已开启' : '玻璃质感已关闭（卡片改为纯色底）');
-      } else if (k === 'notify'){
-        toast(t.classList.contains('on') ? '桌面通知已开启' : '桌面通知已关闭');
-      } else if (k === 'save'){
-        toast(t.classList.contains('on') ? '自动保存已开启（每 30 秒落盘）' : '自动保存已关闭');
-      } else {
-        toast('设置已保存');
-      }
+      /* 外观偏好是真状态：写进 S 并落 localStorage，重渲染后不弹回。
+         项目级开关（pjNotify / pjRetry 等）仍是原型演示，只切当次显示，不入偏好。 */
+      if (!PREF_KEYS.includes(k)){ t.classList.toggle('on'); toast('设置已保存'); break; }
+      S[k] = !S[k];
+      t.classList.toggle('on', S[k]);
+      applyGlass(S.glass);
+      persistPrefs();
+      toast(k === 'glass'  ? (S.glass     ? '玻璃质感已开启' : '玻璃质感已关闭（卡片改为纯色底）')
+          : k === 'notify' ? (S.notify    ? '桌面通知已开启' : '桌面通知已关闭')
+          : k === 'save'   ? (S.save      ? '自动保存已开启（每 30 秒落盘）' : '自动保存已关闭')
+          :                  (S.telemetry ? '使用数据统计已开启' : '使用数据统计已关闭'));
       break;
     }
     case 'obsidianSave':        saveObsidianSettings(); break;
@@ -4879,16 +5375,9 @@ document.addEventListener('click', e => {
     case 'stopVoice':  stopVoice(); closePops(); break;
     case 'useVoice':   useVoice(); break;
     /* ---- 项目 ---- */
-    case 'pickProj': {
-      if (id === S.proj) break;
-      S.proj = id; render(true);
-      toast(`已切换到「${DATA.projects.find(p=>p.id===id).name}」`); break;
-    }
-    case 'go':         closePalette(); if (v==='workflows') S.wfEdit = null; go(v); break;
     case 'noop':     break;
     /* 通用页内跳转：data-v 为 PAGES 键。 */
     case 'goPage':   { const p = t.dataset.v; if (PAGES[p]) go(p); break; }
-    case 'toast':    toast(v); break;
     case 'goSettings': closePops(); go('settings'); break;
     case 'readAll':  S.notices.forEach(n=>n.read = true); $('#bellBadge').style.display='none';
                      toast('已全部标为已读'); closePops(); break;
@@ -4899,7 +5388,7 @@ document.addEventListener('click', e => {
 $('#nav').addEventListener('click', e => {
   const b = e.target.closest('.nav-item'); if(!b) return;
   const p = b.dataset.page;
-  if (p){ if (p==='home') S.focus = false; if (p==='workflows') S.wfEdit = null; go(p); }
+  if (p){ if (p==='workflows') S.wfEdit = null; go(p); }
   if (b.dataset.tool) openTool(b.dataset.tool);
 });
 
@@ -4917,12 +5406,6 @@ $('#voiceBtn').addEventListener('click', e => {
   else startVoice();
 });
 $('#themeBtn').addEventListener('click', toggleTheme);
-$('#focusBtn').addEventListener('click', () => {
-  S.focus = !S.focus;
-  if (S.page!=='home'){ S.expanded = {}; go('home'); }
-  else { render(); }
-  toast(S.focus?'已进入专注视图':'已退出专注视图');
-});
 $('#miniBtn').addEventListener('click', () => { $('#app').classList.toggle('mini'); });
 $('#drawerMask').addEventListener('click', closeDrawer);
 const topmostBtn = $('#topmostBtn');
@@ -4954,6 +5437,7 @@ if (typeof window !== 'undefined' && window.addEventListener)
     fitAppList();
     const c = scrollCtl.get($('#appScroll')); if (c) c.refresh();
   });
+/* 活跃度热力图不再需要 resize 重算：格子尺寸由 CSS Grid 的 1fr 列 + 格子 ::before 撑正方形自己跟随卡宽 */
 
 /* 中文输入法兼容：组合输入（拼音候选）期间绝不重渲染，否则 IME 缓冲被打断导致无法上屏/重复字符 */
 /* 两个搜索框共用同一套规格：应用页 appSearch / 添加抽屉扫描列表 scanSearch——模糊匹配 + 150ms 输入防抖 + 组合结束立即上屏 */
@@ -5001,10 +5485,10 @@ document.addEventListener('input', e => {
     });
   }
   if (e.target.id==='density'){
-    const v = +e.target.value;
-    document.documentElement.style.setProperty('--pad', [14,18,24][v]+'px');
-    document.documentElement.style.setProperty('--gap', [12,16,22][v]+'px');
-    toast('信息密度已调整：' + ['紧凑','标准','宽松'][v]);
+    /* 拖动即生效：只写 :root 令牌 + 落偏好，不整页重渲染（重渲染会在拖动中重建滑块，看着像弹回去） */
+    const i = applyDensity(+e.target.value);
+    persistPrefs();
+    toast('信息密度已调整：' + DENSITY_LABELS[i]);
   }
 });
 
@@ -5114,7 +5598,6 @@ document.addEventListener('pointerup', () => { pzRz = null; });
 document.addEventListener('keydown', e => {
   const typing = /INPUT|TEXTAREA/.test(document.activeElement.tagName);
   if ((e.ctrlKey||e.metaKey) && e.key.toLowerCase()==='k'){ e.preventDefault(); openPalette(); return; }
-  if ((e.ctrlKey||e.metaKey) && e.key==='.' ){ e.preventDefault(); $('#focusBtn').click(); return; }
   if ((e.ctrlKey||e.metaKey) && e.key===','){ e.preventDefault(); go('settings'); return; }
   if (e.key==='Escape'){ closePalette(); closePops(); closeNoteModal(); closeDrawer(); return; }
 
@@ -5139,16 +5622,11 @@ function scrollPal(){
   const sel = $('.p-item.sel'); if (sel) sel.scrollIntoView({block:'nearest'});
 }
 
-/* 播放进度 */
-setInterval(()=>{
-  if (!S.playerOn) return;
-  S.prog = (S.prog + 0.6) % 100;
-  const bar = $('.pbar i'); if (bar) bar.style.width = S.prog + '%';
-}, 500);
-
 /* ---------------- 启动 ---------------- */
 (function init(){
   loadObsidianState();
+  loadPrefs();
+  applyPrefs();                /* 刷新后按上次的偏好还原主题 / 强调色 / 信息密度 / 玻璃质感 */
   if (globalThis.addEventListener){
     globalThis.addEventListener('hashchange', () => {
       const before = S.page + '|' + S.wf;

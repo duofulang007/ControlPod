@@ -183,6 +183,9 @@ def build_client(
     project_root = tmp_path / "external-project"
     project_root.mkdir(exist_ok=True)
     make_fake_module(modules_dir, project_root)
+    data_dir = tmp_path / "data"
+    data_dir.mkdir(exist_ok=True)
+    (data_dir / "activity_config.json").write_text(json.dumps({"codeDirs": []}), encoding="utf-8")
     app = create_app(
         db_path=tmp_path / "data" / "test.db",
         modules_dir=modules_dir,
@@ -331,6 +334,65 @@ def test_bootstrap_registers_real_module_project(tmp_path: Path) -> None:
         assert payload["projectModules"][0]["module_id"] == "fake-module"
 
 
+def test_project_order_is_saved_and_restored_after_restart(tmp_path: Path) -> None:
+    with build_client(tmp_path) as client:
+        for name in ("第二个项目", "第三个项目"):
+            created = client.post(
+                "/api/projects", json={"name": name, "description": "", "status": "正常"}
+            )
+            assert created.status_code == 201
+        ids = [item["id"] for item in client.get("/api/projects").json()]
+        assert len(ids) == 3
+        reversed_ids = list(reversed(ids))
+        response = client.put("/api/projects/order", json={"project_ids": reversed_ids})
+        assert response.status_code == 200
+        assert [item["id"] for item in response.json()] == reversed_ids
+
+    with build_client(tmp_path) as restarted:
+        assert [item["id"] for item in restarted.get("/api/projects").json()] == reversed_ids
+        assert [
+            item["id"] for item in restarted.get("/api/bootstrap").json()["projects"]
+        ] == reversed_ids
+
+
+def test_new_project_lands_after_the_saved_order(tmp_path: Path) -> None:
+    with build_client(tmp_path) as client:
+        first = client.post(
+            "/api/projects", json={"name": "第二个项目", "description": "", "status": "正常"}
+        ).json()
+        saved = [item["id"] for item in client.get("/api/projects").json()]
+        assert client.put(
+            "/api/projects/order", json={"project_ids": list(reversed(saved))}
+        ).status_code == 200
+        created = client.post(
+            "/api/projects", json={"name": "新加的项目", "description": "", "status": "正常"}
+        ).json()
+        assert created["id"] != first["id"]
+        order = [item["id"] for item in client.get("/api/projects").json()]
+        assert order[-1] == created["id"]
+        assert order[:-1] == list(reversed(saved))
+
+
+def test_project_order_rejects_partial_unknown_or_duplicate_lists(tmp_path: Path) -> None:
+    with build_client(tmp_path) as client:
+        client.post("/api/projects", json={"name": "第二个项目", "description": "", "status": "正常"})
+        ids = [item["id"] for item in client.get("/api/projects").json()]
+
+        assert client.put(
+            "/api/projects/order", json={"project_ids": ids[:1]}
+        ).status_code == 422
+        assert client.put(
+            "/api/projects/order", json={"project_ids": [*ids, "not-here"]}
+        ).status_code == 422
+        assert client.put(
+            "/api/projects/order", json={"project_ids": [ids[0], ids[0]]}
+        ).status_code == 422
+        assert client.put("/api/projects/order", json={"project_ids": []}).status_code == 422
+
+        # 整批拒绝之后顺序必须原样不动，不能写了一半
+        assert [item["id"] for item in client.get("/api/projects").json()] == ids
+
+
 def test_bootstrap_contract_restores_all_persisted_project_context(tmp_path: Path) -> None:
     project_file = tmp_path / "api-contract.txt"
     project_file.write_text("只用于接口契约测试", encoding="utf-8")
@@ -367,9 +429,11 @@ def test_bootstrap_contract_restores_all_persisted_project_context(tmp_path: Pat
 
         payload = client.get("/api/bootstrap").json()
         assert set(payload) == {
-            "projects", "tasks", "notes", "projectContexts", "projectFiles", "applications",
+            "projects", "tasks", "notes", "activityDays", "projectContexts", "projectFiles", "applications",
             "modules", "projectModules", "projectApplications", "projectRuns", "projectExecutions",
         }
+        assert len(payload["activityDays"]) == 371
+        assert set(payload["activityDays"][-1]) == {"date", "online", "adds", "dels", "count"}
         assert next(item for item in payload["projects"] if item["id"] == project_id) == project
         assert next(item for item in payload["tasks"] if item["id"] == task["id"])["kind"] == "fix"
         assert next(item for item in payload["notes"] if item["id"] == note["id"])["body"] == "后端契约"

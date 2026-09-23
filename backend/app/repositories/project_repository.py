@@ -14,7 +14,7 @@ class ProjectRepository:
         self.db = db
 
     def list_projects(self) -> list[dict[str, Any]]:
-        return self.db.fetch_all("SELECT * FROM projects ORDER BY created_at, id")
+        return self.db.fetch_all("SELECT * FROM projects ORDER BY sort_order, created_at, id")
 
     def find_project(self, project_id: str) -> dict[str, Any] | None:
         return self.db.fetch_one("SELECT * FROM projects WHERE id=?", (project_id,))
@@ -34,10 +34,19 @@ class ProjectRepository:
         status: str,
         now: str,
     ) -> None:
+        # 新项目排在末尾：拖拽排序决定的是已有项目的先后，不抢别人已经排好的位置
         self.db.execute(
-            "INSERT INTO projects(id,name,description,status,created_at,updated_at) VALUES(?,?,?,?,?,?)",
+            "INSERT INTO projects(id,name,description,status,created_at,updated_at,sort_order) "
+            "VALUES(?,?,?,?,?,?,(SELECT COALESCE(MAX(sort_order),-1)+1 FROM projects))",
             (project_id, name, description, status, now, now),
         )
+
+    @staticmethod
+    def set_project_order_in_transaction(
+        conn: sqlite3.Connection, ordered_ids: list[str]
+    ) -> None:
+        for index, project_id in enumerate(ordered_ids):
+            conn.execute("UPDATE projects SET sort_order=? WHERE id=?", (index, project_id))
 
     def update_project(self, project_id: str, name: str, description: str, status: str, now: str) -> None:
         self.db.execute(

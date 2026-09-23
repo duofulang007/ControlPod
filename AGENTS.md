@@ -1,7 +1,23 @@
 # AGENTS.md · 控制台项目接手说明书
 
 > 给任何要读 / 改这个项目的 agent：**先读这一份，再动代码**。它包含了术语、硬约束、架构、验证方式与全部已踩过的坑。
-> 最后更新：2026-09-21 · 测试基线：**前端 ALL_PASS + 后端 58 项通过**
+> 最后更新：2026-09-24 · 测试基线：**前端 ALL_PASS（714 项）+ 后端 58 项通过**
+>
+> 2026-09-24 死代码清扫轮（ponytail ultra —— 「没有触发点就是死的」）：①**播放器子系统从来没接过线**：`DATA.tracks` 种子、`S.playerOn / track / prog`、`case 'play' / 'next'`、每 500ms 跑一次的进度 `setInterval`（`$('.pbar i')`）与 `.player / .pbar / .play / .spacer` 样式，整套删。**`.play` 一直躲过孤儿护栏「428 个类」的检查**，原因是护栏用 `includes()` **子串**匹配而不是词边界 —— `playerOn` 里含 `player`，所以只要有个叫 `playerOn` 的状态字段，`.player` 就永远「有引用」。②**七个没有触发点的 `case`**：`goApps` / `moreActs` / `openProj` / `newProj` / `importProj` / `pickProj` / `go`（后几个是原型演示 toast / 切换项目 / 旧跳转），再加 `toast` —— 它的唯一触发点 `data-act="toast"` 就写在被删的 `openProject` 里。③**`openProject()`（项目详情右侧抽屉）整段删**：首页项目行早已改发 `data-act="enterProj"`，它只被 `case 'openProj'` 调用，纯死码；`runStateOf()` 与 `promoteDevTask()`（从未被调用的薄包装 `moveTaskZone(...,'cur')`）一并清，后者要**连 `smoke-test.js` 的 `__T` 导出清单一起改**，否则测试里 `T.promoteDevTask` 取到 `undefined`。④`S` 里只写不读的 `more` 删除，`case 'appCat'` 尾部那句 `S.more.apps = false` 顺手清。⑤样式表删掉零引用令牌 `--obs-focus-ring` 与**裸 `--purple`**（`var(--purple-bg)` 仍在用，**别连 `--purple-bg` 一起误删**）。测试侧同步：`viewSegs` 去掉已死的「项目详情」条目，两处 `seg()` 锚点从 `function openProject(` 改挂 `function openTool(`。测试 715 → **714 项**（少的就是那条「项目详情走抽屉」断言），体量净化：`app.js` 318→316 KB、`smoke-test.js` 192→191 KB、CSS 孤儿类 428→424。
+>
+> 2026-09-23 专注视图整轮删除：`S.focus` / `S.expanded` 两个状态字段、`viewHome()` 里的专注分支、顶栏 `#focusBtn`、命令面板项、`Ctrl+.` 快捷键、`case 'focus' / 'expandMod' / 'collapseMod'`，以及全部相关样式（`.focus-layout` / `.focus-mods` / `.collapse-row` / `.collapse-trigger` / `.expanded-mod` / `.chev` 与随之失去宿主的 `.hero` 大标题家族）一次性清空；总控台只剩「项目仪表盘」一种形态。**不要再引入收起 / 展开式的次级模块布局。**
+> 同日追加：总控台页头右侧的「当前会话」标签（`.dashboard-period`）也一并删除 —— 页头现在只有 `<h1>项目仪表盘</h1>`，没有任何右侧说明文字。
+>
+> 2026-09-23 活跃度热力图轮：底色改为**只表达在线时长**（弃用后端 `count`），删除 `sizeHeat()` / `--heat-cell` / 全屏放大窗 `#heatFull`，悬停气泡改两行（日期·在线 / +A / -D），默认口径改「每日」，今天之后的格子只作浅灰占位。网格是**纯 CSS Grid**（`1fr` 列 + 格子用 `.heat-cell::before{padding-top:100%}` 撑正方形，**禁用 `aspect-ratio`**）自适应卡宽。
+> 同日收尾：卡片可视窗定为**末尾 13 周（一个季度，91 格）**，方块随之撑到 ~21px 铺满卡宽 —— 26 周只有 ~10px，方块小、留白多、月份刻度还容易糊。改 `HEAT_CARD_COLS` 一处即可切密度。同时修掉月份刻度两个问题：①刻度串原本直接拼数组 → 走 `Array.join(',')` 往格子间塞逗号，改 `join('')`；②不足 2 列的「残月」不打标，否则 13 周窗左端那个 1 列的月底会把紧随的整月挤掉（实测出现「6月 8月 9月」独缺 7月）。详见 §6 的「活跃度」条。
+>
+> 2026-09-24 命令面板「常用项目」轮：分组原名「常用」，装的却是**全部项目**、顺序就是数据顺序 —— 既名不副实，也看不出「常」在哪。现在改名为 **「常用项目」**，并按**最近使用降序**排（最近跑过的排最前，从没跑过的沉底）。为此补一条排序键：`loadBackendState()` 新增 `p.lastTs = backendEpoch(runInfo.last_run_at)`，并新增 `backendEpoch()`（后端时间串 → 毫秒数，缺失 / 非法一律 `0`）—— **排序键必须是数值，不能拿 `backendTimeLabel()` 的展示文案排**（「今天 00:03」与「9月22日 13:30」按字符串比毫无意义）。`backendHistoryRow()` 相应多带一个 `at`；本项目内跑一次后由 `rememberBackendAttempt()` 就地刷新 `wf.lastTs`（后端没给 `started_at` 时保留旧值，**不要用 `Date.now()` 凭空造时间**），所以顺序不用等下次启动。提示列换成 `lastUsedLabel(w)`（= `w.last`，缺失读作「从未运行」），**排序键与提示列是同一个口径**，顺序自己就能说明白。测试 712 → **715 项**（新增第 36 块：`backendEpoch` 边界、`lastUsedLabel` 口径、塞三个只有 `lastTs` 不同的项目验证端到端顺序）。测试侧顺带补了一个坑：`palItems` 是 `let` 变量，直接导出只会快照成空数组，**必须用 `Object.defineProperty` 的 getter** 才能取实时值。
+>
+> 2026-09-24 流程名占位符轮：「命令面板『常用』里三条条目一模一样、且写着『运行『默认流程』』看不懂」——排查后是**占位符当数据用**。链条：①后端 `projects` 表**根本没有流程名字段**（`/api/bootstrap` 只发 `id/name/description/status/created_at/updated_at/sort_order`）；②`loadBackendState()` 对**没有 seed** 的项目统一走 `JSON.parse(JSON.stringify(DATA.projectTemplate))` 起底，而模板里预置了 `flowName:'默认流程'` → 该占位值跟着深拷贝流到项目卡 chip、概览「当前流程 / 运行流程」、Obsidian 项目主页与命令面板（当时 4 个项目里 3 个都是它，只有 `apex` 命中 seed 才拿到真名）；③命令面板「常用」组标签只写 `运行「${w.flowName}」`、**不带项目名**，于是三条长得完全一样，看不出指哪个项目。修法：模板 `flowName:''`，新增 `flowNameOf(w)`（有名字用名字，缺失返回「未命名流程」）作为**流程名的唯一出口**，四处渲染全部改走它；命令面板「常用」改为 `t:运行「项目名」` + `k:flowNameOf(w)`（项目名进主体、流程名退到右侧提示列），过滤词同时匹配项目名与流程名，按流程名搜索仍然有效。测试 705 → **712 项**，并加了一条反向断言：`app.js` 里不许再出现那个占位流程名的字面量（**注释里也不许写**，否则本文件同字面量会命中这类反向断言，见 §10.12）。
+>
+> 2026-09-24 外观偏好接线轮（同类缺陷清扫）：主题 / 强调色 / 玻璃质感 / 桌面通知 / 自动保存 / 使用数据统计这 6 个开关原本和「信息密度」是同一个毛病 —— 开关初值写死在 markup 里（`sw('桌面通知',...,true,'notify')`）、事件分支只改内联样式或 DOM class，既不进 `S` 也不落偏好，于是**重绘即弹回、刷新即丢**。现在全部接上状态：`S` 新增 `accent / glass / notify / save / telemetry`（共 **73 个字段**），偏好键 `apex-console.prefs.v1` 从 1 个字段扩到 **7 个**（`theme / accent / density / glass / notify / save / telemetry`），`normalizePrefs()` **逐字段白名单**（坏字段各自回默认值，不因为一个坏字段丢掉整份偏好），四个 applier `applyTheme / applyAccent / applyDensity / applyGlass` 只写 `<html>` 上的 `data-theme` / `--brand` / `--pad` / `--gap` / `no-blur`（组件里仍不硬写视觉值），由 `applyPrefs()` 在启动时一次回写；`case 'theme' / 'accent' / 'switch'` 与顶栏 `toggleTheme()` 统一走 applier + `persistPrefs()`，不再各写一套。`case 'switch'` 加了 `PREF_KEYS.includes(k)` 守卫：只有外观偏好算持久状态，项目级演示开关（`pjNotify` / `pjRetry`）既不污染偏好也不新增 `S` 字段。另删除**死类名 `tight`** —— `styles.css` 里 0 条规则、`app.js` markup 里却有 16 处 `class="card tight"`，属于「反向死代码」：现有的零引用类名护栏只查 CSS→markup 方向，查不出 markup 里挂着的空类名，所以已补一条反向断言。测试 687 → **705 项**。
+>
+> 2026-09-24 信息密度可调轮：设置页「外观 · 信息密度」原本是块**没接状态的装饰** —— 滑块 `value="1"` 写死、没有 `S.density`，拖动只往 `<html>` 写内联 `--pad/--gap`，于是任何重绘（包括进设置页时「开机自启动」的异步回填）都把滑块弹回「标准」，刷新更是全丢。现在接上 `S.density` + 新增 `apex-console.prefs.v1` 偏好键，启动时 `loadPrefs()` → `applyDensity()` 还原令牌；三档预设收敛到 `DENSITY_STEPS` 一处，标准档与 `:root` 的 `--pad:18px / --gap:16px` 同值。拖动分支**保持不整页重渲染**（重渲染会在拖动中重建滑块）。~~**同类缺陷仍在**：强调色 / 玻璃质感 / 主题同样没有状态与持久化，改它们前先照这套接线补~~ → 这几个**已在上一条「外观偏好接线轮」一次性清扫**，7 个外观偏好现在全部有状态、有持久化。
 >
 > 2026-09-16 后端接入轮目标：Apex Console 成为唯一前端；「APEX 启动」模块通过 APEX 常驻后端共享同一份 `ApexOneClickService` 状态，支持真实启动与一键关闭，不启动原 Vue/Vite 前端。禁止改回每次动作新建一个短命 service 的适配器，否则关闭动作拿不到启动状态。
 
@@ -23,10 +39,10 @@
 
 | 文件 | 体量 | 作用 |
 |---|---|---|
-| `index.html` | 18 KB | 入口骨架：侧栏 + 导航 + 顶栏 + `#view` + 三个全局宿主（详情抽屉 / 编辑弹窗 / 命令面板）+ 提示条 |
-| `styles.css` | 92 KB | 全部样式，设计令牌集中在顶部 `:root`（含 `[data-theme="dark"]`） |
-| `app.js` | 283 KB | 全部逻辑：数据种子 `DATA` → 运行时状态 `S` → `render()` 渲染器 → 底部大 `switch` 事件分发（163 个 `case`） |
-| `smoke-test.js` | 142 KB | 冒烟测试（629 项），**同时是本项目的活规格**：读它就知道每个功能的预期行为 |
+| `index.html` | 15 KB | 入口骨架：侧栏 + 导航 + 顶栏 + `#view` + 三个全局宿主（详情抽屉 / 编辑弹窗 / 命令面板）+ 提示条 |
+| `styles.css` | 89 KB | 全部样式，设计令牌集中在顶部 `:root`（含 `[data-theme="dark"]`） |
+| `app.js` | 316 KB | 全部逻辑：数据种子 `DATA` → 运行时状态 `S` → `render()` 渲染器 → 底部大 `switch` 事件分发（128 个 `case`） |
+| `smoke-test.js` | 191 KB | 冒烟测试（714 项），**同时是本项目的活规格**：读它就知道每个功能的预期行为 |
 | `AGENTS.md` | 本文件 | 接手说明书（术语 / 约束 / 架构 / 坑点 / 已删模块） |
 | `backend/` | 后端目录 | FastAPI 应用、可执行模块包、运行日志与后端测试 |
 
@@ -70,8 +86,11 @@ backend/.venv/Scripts/python.exe -m pytest backend/tests -q
 | 可选模块的资源卡片 | **执行模块库** | 原名「资源库」，2026-09 已改名，**勿回退**；指项目编辑态里那块选择面板，**不要**与导航项「模块」混为一谈 |
 | 执行整个流程 | **运行项目** | 页头主按钮；旧称「运行工作流」 |
 | 项目内容区 | **开发上下文** | 项目任务 / 项目记录 / Obsidian / 文件两栏布局 |
+| 项目那趟运行的名字 | **流程名**（`flowName`） | 由用户自己起。后端 `projects` 表**没有这个字段**，走控制台新建的项目也从未填过，所以「没有名字」是常态。**取它一律走 `flowNameOf(w)`**（唯一出口）：有名字用名字，缺失返回 **「未命名流程」**。禁止在渲染处直接读 `w.flowName`，也禁止用任何占位流程名顶替。 |
+| 命令面板首个分组 | **常用项目** | 由项目表派生，按**最近使用降序**（`lastTs`，从未运行 = `0` 沉底）；提示列显示 `lastUsedLabel(w)`，与排序键同一口径。原名「常用」，装的却是全部项目、顺序即数据顺序 |
 
 - **禁用词**：「菜谱」（历史遗留说法，禁止出现在界面文案与注释里）。
+- **禁用值**：任何看着像真名的**占位流程名**（它会被 `JSON.parse(JSON.stringify(DATA.projectTemplate))` 深拷贝复制到每一个没有 seed 的项目上，然后出现在项目卡、概览、命令面板里，看起来像真有这么个流程）。缺失就如实说「未命名流程」。
 - 界面文案一律中文；**不用 emoji**；**图标一律内联 SVG**（`IC.*` 或 `tIco()`）。
 
 ---
@@ -81,11 +100,11 @@ backend/.venv/Scripts/python.exe -m pytest backend/tests -q
 1. **不引入** React / Vue / Tailwind / 前端打包器。允许 `backend/` 中的本地 FastAPI 和同源真实请求，但必须只监听 `127.0.0.1`。
 2. **真实执行不得静默回退**：后端断开、模块缺失、权限被拒或执行失败时，保留原始错误并停在第一个失败步骤。
 3. 界面用词遵守第 4 节术语表。
-4. 总控台是**单屏 bento 网格，无纵向滚动**；`.hero` 背景保持纯渐变，**禁止挂图片**。
+4. 总控台是**单屏 bento 网格，无纵向滚动**；卡片背景保持**纯色 / 纯渐变**，**禁止挂图片**。
 5. 所有**删数据**的操作必须「**预演 + 二次确认**」；后端空库时允许 0 个项目，必须渲染真实空态。
 6. 视觉调整**只改 `styles.css` 顶部 `:root` 令牌**，不在组件里硬写 px（尺寸 / 圆角 / 间距 / 颜色一律走令牌）。
 7. **不新增宽度断点**：适配只有「标准窗口 / 全屏」两态（历史约定，测试里有断言）。
-8. 不留死代码：删功能要连数据、动作分支、样式、断言一起清（有一条全局护栏断言会检查 CSS 里的零引用类名）。
+8. 不留死代码：删功能要连数据、动作分支、样式、断言一起清（有一条全局护栏断言会检查 CSS 里的零引用类名）。**这条护栏是 `includes()` 子串匹配、不是词边界** —— 只要别处出现过含相同子串的标识符（如 `playerOn` 之于 `.player`），孤儿类就会被误判成「有引用」；判定孤儿类前先按子串实查一遍 `app.js` / `index.html`。
 
 ---
 
@@ -93,13 +112,14 @@ backend/.venv/Scripts/python.exe -m pytest backend/tests -q
 
 **状态**
 - `DATA`：全部种子数据，**共 13 类**：`projects / obsidian / apps / todosPlan / activities / notices / notes / sceneModes / tracks / devContext / projMeta / projectTemplate / modules`。
-- `S`：全部运行时状态（**54 个字段**）。除 `S.obsidian` 的仓库名 / 项目目录 / 项目绑定外，其余状态刷新即重置。常用的有：
-  `S.page` 当前页 · `S.proj` 当前项目 **id** · `S.wf` 当前打开的项目 **id** · `S.running` 运行态 `{token,wfId,i,done,total,states,log,order}` · `S.todos.plan` · `S.notes` · `S.noteSel` 正在编辑的项目记录 · `S.wfEdit` 编辑模式 · `S.zoneH` 任务区高度 · `S.more` 各页「展开全部」开关 · `S.modTab` / `S.modQ` 模块页筛选 · `S.obsidian` Obsidian 本机配置。
+- `S`：全部运行时状态（**72 个字段**；2026-09-24 清扫删掉 `playerOn` / `track` / `prog` / `more` 四个后实测，此前文档记的 73 已过时）。除 `S.obsidian`（Obsidian 本机配置）与 **7 个外观偏好** `S.theme / S.accent / S.density / S.glass / S.notify / S.save / S.telemetry`（凡在 `PREF_KEYS` 里的都**落到 localStorage**）之外，其余状态刷新即重置。常用的有：
+  `S.page` 当前页 · `S.proj` 当前项目 **id** · `S.wf` 当前打开的项目 **id** · `S.running` 运行态 `{token,wfId,i,done,total,states,log,order}` · `S.todos.plan` · `S.notes` · `S.noteSel` 正在编辑的项目记录 · `S.wfEdit` 编辑模式 · `S.zoneH` 任务区高度 · `S.more` 各页「展开全部」开关 · `S.modTab` / `S.modQ` 模块页筛选 · `S.obsidian` Obsidian 本机配置 · `S.density` 信息密度档位 0/1/2（紧凑 / 标准 / 宽松，预设收敛在 `DENSITY_STEPS`） · `S.accent` 强调色（必须取自 `ACCENTS` 四色板） · `S.theme` `light`/`dark` · `S.glass` 玻璃质感 · `S.notify` / `S.save` / `S.telemetry` 通用开关 · `S.heatDays` / `S.heatDetail` / `S.heatMode`（默认 `daily`）/ `S.heatFetchedAt` 活跃度 371 格**每日在线分钟**、按日明细、口径与拉取时间。
 - **`proj` 这个字段名装的是两种东西，改数据时务必分清**：`S.proj` / `S.wf` 装项目 **id**（`'apex'`）；而 `todos.plan[].proj` / `modules[].proj` / `notes[].proj` / `activities[].proj` 以及 `DATA.projMeta` / `DATA.devContext` 的**键**装的是项目 **名字**（`'APEX Automation'`）。按名字关联的这几处靠 `renameProjRefs()` 迁移、`purgeProjRefs()` 清理来维持一致。
-- Obsidian 配置使用浏览器 `localStorage` 的 `apex-console.obsidian.v1` 键保存；只允许 `vault/projectFolder/bindings` 三个字段，读取失败或脏数据时安全回退，不阻断页面。这是唯一的**浏览器本机持久化**；项目、任务、项目记录、项目文件关联、用户创建的网站模块、项目模块绑定与运行记录均由后端 SQLite 保存。
+- 浏览器本机持久化**只有两个键**：Obsidian 配置用 `apex-console.obsidian.v1`（只允许 `vault/projectFolder/bindings` 三个字段），界面偏好用 `apex-console.prefs.v1`（**恰好 7 个字段** `theme / accent / density / glass / notify / save / telemetry`，即 `PREF_KEYS`；新增偏好字段只能改这一份清单 + `normalizePrefs` 的白名单）。两者共用 `store` 包装（`get/set` + try/catch），读取失败、JSON 损坏、字段越界一律安全回退，不阻断页面。**不要再加第三个键**：其余一切（项目、任务、项目记录、项目文件关联、用户创建的网站模块、项目模块绑定与运行记录）都归后端 SQLite。
 - SQLite 结构版本使用 `PRAGMA user_version`，迁移集中在 `backend/app/db.py` 的 `MIGRATIONS` 中按版本顺序执行。新迁移只能追加，必须保留旧库数据并增加升级测试；数据库版本高于当前程序时必须拒绝启动，不得降级覆盖。
 - 任务数据库的 `kind` 与前端共用 `todo` / `fix` 两种内部值，旧任务升级后默认为 `todo`。启动时为后端任务重建 `S.todos.plan`；新建以 `POST /api/projects/{id}/tasks`、其余操作以 `PATCH/DELETE /api/tasks/{id}` 成功后的返回为准，失败不改本地列表。“当前任务”区的 `S.devTask` 仍是本轮不持久化的界面状态。
 - 项目记录使用 `notes` 表，以项目 id 关联并级联删除；`tag` 仅允许日常 / 技术 / 复盘 / 灵感，`links_json` 保存只读历史关联。启动时由 `/api/bootstrap` 重建 `S.notes`；新建、保存、标签、置顶和删除均以对应后端请求成功后的返回为准，失败不改本地列表。
+- 总控台「活跃度」是**开发者活跃度热力图**，数据全部真实：`GET /api/activity/daily`（默认 371 天 = 53 周）按**本机本地日**返回 `{online, adds, dels, count}`——online 来自 `POST /api/activity/heartbeat`（页面开着每 60s 静默上报一次，`activity_heartbeats` 表按日累加分钟，多标签页多算无妨，多弗朗点名不要去重花活）；adds/dels 来自扫描全局代码目录（`backend/data/activity_config.json` 的 `codeDirs`，缺省 `D:\Projects`）下各 git 仓库的 `git log --numstat`，按 5 分钟进程内缓存，非 git 目录忽略。`/api/bootstrap` 注入 `activityDays`。数据窗固定 53 周（今日下标 = `364 + (getDay()+6)%7`），**卡片只渲染末尾 13 周**（`S.heatDays` 切片，首列必为周一；91 格 = 13 列 × 7 行，格子约 21px 铺满卡宽，改 `HEAT_CARD_COLS` 一处即可切密度）。**底色只表达在线时长**：`buildHeatPayload` 取 `online`，不再用后端的 `count`（`count = online+adds+dels` 仍由后端返回、供接口兼容，前端已不读），否则「没开控制台但提交了几万行代码」会被涂成最深的蓝，与「底色代表在线时长」相悖。色阶对数五档 0 / 1-9 / 10-99 / 100-999 / 1000+，走单一蓝色系令牌 `--dash-heat-0..4`（未活跃 `#EBEDF0` → 最深 `#2563EB`），**严禁掺红绿**；代码增删只在悬停气泡里用色（+ 绿 `#10B981` / - 红 `#EF4444`）。右上角三口径 `S.heatMode` = `daily`（默认）/ `weekly` / `total`，由 `heatSeries()` 一套聚合同时作用在「在线 / 新增 / 删减」三路序列上（weekly = 整列 7 天之和，total = 窗口首日到该日的滚动和），所以底色与气泡永远同口径。布局是**纯 CSS Grid 自适应卡宽**：`1fr` 列平分卡宽，方格用百分比 padding（`.heat-cell::before{padding-top:100%}`，**禁用 `aspect-ratio`** —— 本仓库踩过它在 `auto` 行轨道下被 stretch 对齐忽略、整片棋盘塌成一条线的坑）撑正方形，格宽恒等于列宽，**不可能撑出横向滚动**；月份刻度与格子共用同一套列模板（逐列对齐）；打标规则三条 —— ①只在月份切换处打；②**不足 2 列的「残月」不打**（13 周窗左端那个 1 列的月底否则会把紧随的整月挤掉，实测会变成「6月 8月 9月」独缺 7月）；③**两个标至少隔 3 列**（否则窄窗下会糊成「3月4月」）。刻度串**必须 `join('')`** —— 直接拼数组会走 `Array.join(',')` 往每两个格子之间塞一个逗号。**`sizeHeat()` / `--heat-cell` / 全屏放大窗 `#heatFull` 已于 2026-09-23 全部删除**（卡片即唯一入口，不要再引入 JS 量尺寸或弹窗外壳）。**明细只进悬停两行气泡**（第一行「日期 · 在线 N 分钟」，第二行「+A / -D」），页面无任何统计卡 / 摘要行 / 表格；**今天之后的格子只作浅灰占位**（`heat-cell future`，`pointer-events:none` 且 JS 不生成气泡，未来日期不可能被悬停出来）；后端未就绪时如实显示「活跃度暂不可用」，不得渲染全零假象。在线分钟从部署当天开始积累，代码增删由 git 历史回填。
 - 「编辑基本资料」通过 `PUT /api/projects/{id}/basic-info` 一次提交开发字段、任务、项目记录与开发要求；后端在同一事务中校验、写入或删除，任一条目无效就整批回滚。成功响应才重建该项目的 `S.todos.plan`、`S.notes`、`DATA.devContext` 与 `S.projRules`，不得先改本地再假报保存成功。
 - 应用清单使用 `applications` 表保存名称、分类、图标、常用、占用展示、使用次数、最近启动、真实启动快捷方式与扫描来源；源码不再附带演示应用，也不再把原型清单迁入数据库。`GET /api/applications/scan` 合并 Windows 开始菜单快捷方式、已注册开始应用和 App Paths，只保留能由 Windows 重新验证的启动入口，并过滤网页、目录、卸载 / 修复 / 帮助入口；扫描结果与已保存的真实应用均通过 Windows Shell 提取原生图标。`POST /api/applications/from-scan` 必须按扫描 id 重新确认真实入口，前端不能提交任意程序路径。启动时后端再次确认快捷方式仍在本次扫描结果内，再调用 Windows 打开它；打开成功后才增加使用次数。旧的无启动入口记录保留在数据库但不进入前端清单，重新添加同名真实应用时原地升级。新增、标签、常用、最近启动与移除均以后端成功返回为准；“移除 / 卸载”只移出控制台清单，绝不删除本机安装目录。应用加入项目时复用现有 `modules → project_modules → runs` 执行链：后端创建隐藏的 `application` 适配模块，`projectApplications` 只向前端恢复应用绑定，适配模块不得出现在「模块」页。应用从清单移除时先解除项目绑定并停用适配模块，历史运行记录保留。
 
@@ -169,7 +189,7 @@ backend/.venv/Scripts/python.exe -m pytest backend/tests -q
 - 断言的描述要写「期望的行为」，不是实现细节；一条 `check` 一句话。
 - **改了结构就补 / 改断言**；删功能要补**负向断言**（「已彻底移除」）。
 - 避免脆弱匹配：用前缀或正则（如 `indexOf('class="page-head')`），别用整串精确匹配，否则加个类名就误报。
-- 现有全局护栏：「styles.css 里不得出现零引用类名」（**458 个类**当前全部有引用）。删功能时必须同步删样式，否则这条会红。
+- 现有全局护栏：「styles.css 里不得出现零引用类名」（**424 个类**当前全部有引用；子串匹配的坑见 §5 第 8 条）。删功能时必须同步删样式，否则这条会红。**但这条只查 CSS → markup 一个方向**：markup 里挂着 `styles.css` 中根本不存在的类名（如已删的 `card tight`）它查不出来，属于「反向死代码」。第 34 块测试里已补一条反向断言（`!app.js.includes('tight')`），删类名时两个方向一起清。
 
 ---
 
@@ -197,6 +217,12 @@ backend/.venv/Scripts/python.exe -m pytest backend/tests -q
 19. **`{console_root}` 在动作参数里也能用了（曾经不能）**：占位符以前只在 `projectRoot` 被替换，`actions.*.program` / `args` 里写它会在运行时抛 `模块参数包含未知占位符`，现场表现是「点一下模块就失败，日志里一行 ValueError」（`data/console-service.err.log` 里留过多次）。现在可用占位符统一由 `ModuleRunner._run_values()` 产出：`{module_dir}` `{project_root}` `{console_root}` `{run_dir}` `{result_path}` `{log_path}`；`{console_root}` 与 `ModuleRegistry.console_root` 同源。**跨项目模块（如 `runner-lab`）引用 console 自己的虚拟环境时必须写 `{console_root}`，不要写绝对路径**。回归由 `tests/test_module_project_metadata.py::test_action_placeholders_expand_to_an_existing_interpreter` 兜住。
 20. **模块要开窗口就用 `pythonw.exe` + `DETACHED_PROCESS`，不要等窗口关闭**：`runner-lab` 模块的 `run` 动作改为打开导入窗口（拖压缩包 + 输密码）。`ModuleRunner` 会尽量用 `CREATE_NO_WINDOW` 起子进程，所以窗口进程必须由 `runner.py` 自己用 `pythonw.exe` + `DETACHED_PROCESS` 拉起来，否则会跟着一起来一个黑框，且调用方退出时被连带回收。pid 记在 `%TEMP%\run-analytics\import-gui.pid`（`tempfile.gettempdir()`，仓库之外；2026-09-23 前记在 `D:\RunningData\import-gui.pid`，该目录已撤销、导入投放目录收敛进 run-analytics 项目内），`stop` / `restart` 靠它精确结束窗口；不要换成按镜像名 `taskkill /IM pythonw.exe`。无界面导入路径仍然保留（不带 `--gui` 即走它），供自动化调用。
 21. **模块项目是独立 git 仓库，放在 console 同级目录**：按「平台一个仓库、每个项目模块一个仓库」的约定，run-analytics 仓库在 `D:\Projects\run-analytics`（`..\run-analytics`），`module.json` 的 `projectRoot` 写相对路径 `..\run-analytics`，`module_registry` 会相对 console 根解析（不要改回按 cwd 解析，也不要写死盘符）。本仓库 `.gitignore` 排除 `run-analytics/` 整个目录，**两边提交互不混合**：改模块项目在它自己的仓库提交（含健康数据排除），改 `backend/modules/` 的接入层才在本仓库提交。
+22. **「设置页开关」这一类控件的通病是「看着能点、其实没接线」**：`data-act="switch"` 只翻转 DOM 上的 `on` 类，`sw(...,true,'notify')` 的初值写死在 markup 里 —— 点一下有 toast 反馈、看着像生效，但 `S` 里没有对应字段、`localStorage` 里也没落盘，**任何一次重绘就弹回写死的初值，刷新更是全丢**（用户报障的原话就是「调不了，刷新后就变回去了」）。信息密度滑块、主题、强调色、玻璃质感、桌面通知 / 自动保存 / 使用数据统计 7 个偏好都栽在同一个模式上。**修法固定三步**：①`S` 加字段 + 加进 `PREF_KEYS`/`normalizePrefs` 白名单；②写一个只操作 `<html>` 令牌 / 状态类的 applier，并在 `applyPrefs()` 里注册；③事件分支改成「改 `S` → 调 applier → `persistPrefs()` → `render(true)`」。**新增任何外观开关都照这三步走**，不要只加 markup + toast。
+23. **`classList` 也要进 DOM 桩**：`documentElement` 的桩若只有 `dataset` / `style`，`applyGlass()` 会在启动时直接抛 `Cannot read properties of undefined`，整份 app.js 加载失败（表现是 `LOAD_FAIL`，看起来跟你的改动毫不相干）。桩里的 `classList` 必须有**真实记忆**（`Set` 支撑 `add/remove/toggle/contains`），否则玻璃质感只能测「没抛错」，测不出到底开没开。
+24. **占位符不许当数据用（模板字段会被深拷贝到每个真实项目上）**：`DATA.projectTemplate` 是「新建项目」的深拷贝底板，而 `loadBackendState()` 里**没有 seed 的项目也走它** —— 模板里每个字段都会变成真实项目对象的字段。曾给它写过 `flowName:'默认流程'`，于是所有后端来的 / 控制台新建的项目都带上这个名字，项目卡 chip、概览「当前流程 / 运行流程」、Obsidian 项目主页、命令面板四处一起显示。**模板里只放真正的默认值**（空串 / 0 / 空数组）；要「兜底文案」就写成渲染期函数（`flowNameOf()`），不要塞进数据 —— 「用户没填」与「用户填了这个值」在数据层必须能区分。
+25. **「好几条一模一样」几乎总是「兜底值 + 标签缺主体」的组合**：命令面板「常用」组标签只写流程名、不带项目名，再叠上被深拷贝的占位流程名，就成了三条完全相同的「运行『…』」，用户只能问「这是什么意思」。排查口诀：**先问「这个字段缺省时是什么」，再看「这条标签里有没有能区分主体的信息」**。
+26. **排序键必须是数值，不能拿展示文案排**：`backendTimeLabel()` 输出的是「今天 00:03」/「9月22日 13:30」这种给人看的文案，按字符串比大小毫无意义（「9月…」恒大于「今…」）。要排序就在适配层**另存一个毫秒数**（后端时间串一律经 `backendEpoch()` 转，缺失 / 非法为 `0` 让「从未运行」自然沉底），文案只负责显示。另外：本地新增 / 更新数据时**要顺手刷新排序键**（`rememberBackendAttempt()` 就地为 `wf.lastTs` 赋值），否则刚跑完的项目顺序不动，看着像排序没生效；刷新时若源数据没有时间戳，**保留旧值，不要用 `Date.now()` 凭空造一个**。
+27. **测试里断言 `let` 变量的实时值，导出必须用 getter**：`globalThis.__T = { palItems }` 只在注入那一刻求值 —— `palItems` 是 `let`、`buildPalette()` 每次整体重写，直接导出只会快照成空数组，断言永远看到空列表还以为功能坏了。正确写法是 `Object.defineProperty(globalThis.__T, 'palItems', { get(){ return palItems; } })`，读的才是当场那份。
 
 ---
 
@@ -214,8 +240,9 @@ backend/.venv/Scripts/python.exe -m pytest backend/tests -q
   - **任务行格式收敛为 `N. [待办][优先级] 正文（截止）`（2026-09-15 四轮）**：①**类型徽章恒写「待办」**——「待修改」不再出现在任何输出里（`agentContextText` / 任务来源 / 删除预演 / `obsidianProjectNote` 全部改走新常量 `KIND_SHOW`），`TASK_KIND` 退居**数据词表**，只服务 `projTodos` / `projFixes` / `devCounts` 这几个内部分支；**`kind` 字段本身不动**，老数据仍可区分。②**优先级 高 / 中 / 低条条显式**——以前只有高 / 低带标记、中留空，现在三档全写，文本与界面的三档分组逐条对应。③**类型徽章刻意不参与解析**——`parseBasicInfoText()` 只回写 `pri` / 正文 / 截止，`applyBasicInfo()` 也不再写 `t.kind`；否则模板恒写「待办」会在保存时把 `fix` 条目**静默改成 `todo`**。**这条是硬约束**：新增任务由落库侧兜底成 `todo`。④「↳ 引用笔记」续行随之下线，`note.links` 至此**没有任何渲染宿主**。有正 / 负向断言（每条都带 `[高中低]`、解析结果无 `kind`、保存后 `fix` 仍为 `fix`、文本不含 `↳` / `下一步：` / `待修改`）。
 - **开发上下文卡头整行删除（2026-09-15）**：`projDevHTML()` 返回的 `<section class="card tight">` 里，`card-head` 整块已删——既包括原标题 `继续开发 <项目名>`（项目名在页头 `h1` 与概览卡 `ov-name` 已各有一处，属第三处重复），也包括同行的开发状态徽章 `<span class="badge b-blue">${d.status}</span>`。**卡片现在直接以 `<div class="dev-cols">` 开场，没有卡头、没有标题**——这是有意为之，不要「顺手」补一个标题或徽章回来。**连带后果**：`devContext.status` 在页面上已无宿主，只剩「编辑基本资料」弹窗的 `nm-meta`（`${w.name} · ${d.status} · …`）在显示它；`projDevHTML()` 里对 `DATA.devContext[w.name]` 的兜底对象也顺手去掉了 `status` 键（`{files:[], lastEdit:'—'}`）。**字段本身没删**（保留 `DATA.devContext` 与 `BI_FIELDS` 里的 `开发状态` 宽容解析），要彻底删字段是另一件事。有断言（整页不含 `继续开发`、卡头紧接 `dev-cols`、卡内无 `card-head` / `badge b-blue`）。
 - **任务编辑弹窗的「所属项目」选择器与「关联项目记录」整块（2026-09-15）**：两块连 UI 带动作一起清——`case 'todoSetProj'`（就地改任务归属）、`case 'todoNoteLink'`（建立 / 断开引用）、`toggleNoteLink()`（引用写入侧）全部删除，`todoMenu()` 里的 `projOpts` / `linkedNotes` / `pool` 局部变量一并去掉。**后果要清楚**：①任务创建后不能再改所属项目（所属项目只在弹窗标题下只读展示）；②任务 ↔ 记录的关联从两侧都无法再编辑（记录编辑器的任务清单早先已删），`note.links` 退化成**只读历史数据**——第四轮删掉「↳ 引用笔记」后它已无任何渲染宿主，只剩删除待办时的 `detachTodoRefs()` 兜底。**`notesLinkedTo` / `noteLinksOf` / `detachTodoRefs` 因此必须保留**——`detachTodoRefs()` 是唯一活着的消费者（两处调用：删除单条待办、保存基本资料时按文本差集删待办），不要连带删掉。有负向断言（`case 'todoSetProj'` / `case 'todoNoteLink'` / `toggleNoteLink` 零残留）。**遗留已确认（2026-09-16）**：`refBadgeOf` / `linkBadgeOf` / `notesLinkedTo` 三个纯展示函数**已无任何渲染宿主**，源码里只剩各自的定义与 `__T` 导出（`notesLinkedTo` 仅被 `refBadgeOf` 调用）——属**确认的死代码**。当前选择是**保留**（删它要连测试导出与断言一起改，收益低）；谁要清理，请连同 `smoke-test.js` 的导出清单一起改，别只删 app.js。
+- **专注视图（首页收起态）**：`S.focus` / `S.expanded`、`viewHome()` 的专注分支（`focusHero` / `focus-layout` / `focus-mods` / `collapse-row` / `collapse-trigger`）、顶栏 `#focusBtn` 图标按钮、命令面板「切换到专注视图」、设置页快捷键行、`Ctrl+.` 绑定、`case 'focus' / 'expandMod' / 'collapseMod'` 与全部相关样式一次性删除。**连带清理**：`.hero` / `.hero-main` / `.hero-title` / `.hero-actions` / `.hero-project-facts` / `.c-ico` / `.chev` 失去唯一宿主，一并从 `styles.css` 删除（`.hero-meta` 仍在项目仪表盘的当前项目卡里使用，**保留**）。有负向断言（源码无 `专注视图` / `S.focus` / `expandMod`、`index.html` 无 `focusBtn`、`viewHome()` 不含 `collapse-row`、孤儿类名护栏为 0）。
 - **历史副本与探针截图**：`backups/`、`.probe-*.png` 已删除，内容归档在 `../backups-2026-09-15.zip`。
-- **75 条孤儿 CSS 规则（50 个类名）**：早期卡片体系、播放器、旧项目卡等遗骸已清，**现零孤儿（458 个类全部有引用）**，且测试里有全局护栏断言锁定。
+- **75 条孤儿 CSS 规则（50 个类名）**：早期卡片体系、旧项目卡等遗骸已清，**现零孤儿（424 个类全部有引用）**，且测试里有全局护栏断言锁定。**注意「播放器」当时并未清干净**：`.player / .pbar / .play / .spacer` 四条规则一直留到 2026-09-24 才删（护栏的子串匹配放过了它们，见本轮变更）。
 - **三份文档**：`存储与信息层级-设计方案.md`（存储机制未定稿，说明一并撤下）、`README.md`（内容已并入本文件）、`资料库同步地址清单-2026-09-12.md`（过时）——全部移入 `../backups-2026-09-15.zip`。
 - **「脚本」页与运行终端（2026-09-16）**：整页取消，改为「模块」。同时清掉的还有 `viewScripts()` / `runScript()` / `tickTimer` / `.scripts` / `.script` / `.script .s-name` / `.script .s-meta` / `.caret` / `@keyframes blink`，以及动作分支 `run` / `clearTerm` / 无触发点的 `openScript`；样式里 `.terminal` / `.t-line` **保留**（应用详情、文件预览、运行流程卡的 `#termRun` 仍在用）。命令面板的「运行 start.sh」改为「新增执行模块」，设置页快捷键列表的「运行上次脚本 Ctrl+R」改为「打开模块 Ctrl+M」。**运行输出没有新宿主**——统一看项目「运行流程」卡的 `#termRun`，不要再为它加回一个终端。
 - **四份分散的模块数据（2026-09-16）**：`DATA.scripts` / `DATA.webLib` / `DATA.folderLib` / `DATA.cmdLib` 合并为一份 `DATA.modules`，旧键**已彻底删除**（有负向断言）。连带简化：`larderItems()` 的四个 if/else 分支收敛成一次 `filter(m => m.type === t)`；`addStep()` 的 web / folder / script / cmd 四分支收敛成一次 `find()`（`base.note = m.arg || m.desc`，保持脚本步骤仍显示参数）。**迁移点**：脚本类模块的 `ref` 从内部 id（`s1`…`s5`）改成脚本文件名（`start.sh`…），项目步骤里唯一的引用 `w1s4` 已同步改写；新增模块的入口不参与 `ref` 唯一性以外的校验。**应用类不并入**（有断言锁定），仍走 `S.apps`。
@@ -226,7 +253,7 @@ backend/.venv/Scripts/python.exe -m pytest backend/tests -q
 
 ## 12. 交接规则
 
-- **改完必跑 `node smoke-test.js`，末行 `ALL_PASS`**（当前 642 项）；改后端还必须跑 `backend/.venv/Scripts/python.exe -m pytest backend/tests -q`（当前 38 项）。结构变了补断言，删功能补负向断言。
+- **改完必跑 `node smoke-test.js`，末行 `ALL_PASS`**（当前 714 项）；改后端还必须跑 `backend/.venv/Scripts/python.exe -m pytest backend/tests -q`（当前 38 项）。结构变了补断言，删功能补负向断言。
 - **本目录没有 git**：动手前自行留退路（复制到目录外），**不要破坏性覆盖**。
 - **根目录只有原 5 个文件，后端统一进 `backend/`，源码是纯 LF**：别在根目录加东西；用脚本批量改写后必须复核 `b.count(b'\r\n') === 0`（见第 10 节第 11 条）。
 - 一次只做一个主题的改动，不顺手重构无关代码；需求不明确先问。

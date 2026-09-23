@@ -219,6 +219,31 @@ def _migration_8_application_launch_targets(conn: sqlite3.Connection) -> None:
     )
 
 
+def _migration_9_activity_heartbeats(conn: sqlite3.Connection) -> None:
+    """Persist per-day console presence minutes for the activity heatmap."""
+    conn.execute(
+        """CREATE TABLE IF NOT EXISTS activity_heartbeats (
+        day TEXT PRIMARY KEY,
+        minutes INTEGER NOT NULL DEFAULT 0,
+        updated_at TEXT NOT NULL
+    )"""
+    )
+
+
+def _migration_10_project_order(conn: sqlite3.Connection) -> None:
+    """Persist the card order chosen by dragging cards on the project selection page."""
+    columns = _columns(conn, "projects")
+    if not columns:
+        return
+    if "sort_order" not in columns:
+        conn.execute("ALTER TABLE projects ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0")
+    # 旧库按原有展示顺序（created_at, id）回填，升级前后看到的顺序保持一致
+    for index, row in enumerate(
+        conn.execute("SELECT id FROM projects ORDER BY created_at, id").fetchall()
+    ):
+        conn.execute("UPDATE projects SET sort_order=? WHERE id=?", (index, row[0]))
+
+
 Migration = Callable[[sqlite3.Connection], None]
 MIGRATIONS: tuple[tuple[int, Migration], ...] = (
     (1, _migration_1_baseline),
@@ -229,6 +254,8 @@ MIGRATIONS: tuple[tuple[int, Migration], ...] = (
     (6, _migration_6_project_files),
     (7, _migration_7_project_executions),
     (8, _migration_8_application_launch_targets),
+    (9, _migration_9_activity_heartbeats),
+    (10, _migration_10_project_order),
 )
 LATEST_SCHEMA_VERSION = MIGRATIONS[-1][0]
 
