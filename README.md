@@ -8,8 +8,9 @@
 
 - 项目管理：创建、复制、编辑、删除项目，并查看项目运行状态与历史。
 - 执行模块：维护可复用的网站模块与内置 APEX 启动模块，将模块组合到项目中运行。
-- 跑步数据看板（`runner-lab/`）：解析小米运动健康官方导出包，本地生成跑步数据分析
-  看板（训练负荷模型、跑姿体检、每日建议）；健康数据不出本机。
+- 跑步数据看板：解析小米运动健康官方导出包，本地生成跑步数据分析看板
+  （训练负荷模型、跑姿体检、每日建议）。看板是**独立仓库** `../runner-lab`，
+  总控台只负责接入与启动；健康数据不出本机。
 - 真实应用：识别 Windows 开始菜单、已注册应用与 App Paths 中的可启动程序；添加后可从控制台启动，并显示 Windows 原生图标。
 - 项目上下文：在项目内维护待办、项目记录、文件关联和 Obsidian 主页连接。
 - 本地运行：桌面入口可检查服务状态，打开独立窗口；源码变更后安全重启本地服务。
@@ -63,10 +64,6 @@ apex-console/
 ├─ app.js                     前端逻辑与页面渲染
 ├─ styles.css                 全站样式与设计令牌
 ├─ smoke-test.js              前端冒烟测试
-├─ runner-lab/                跑步数据看板子项目（详见其 README）
-│  ├─ index.html / app.js     看板页面与全部分析逻辑
-│  ├─ tools/                  导入器、导入窗口与双轨自检
-│  └─ data.js                 生成物：你的跑步数据（不入库）
 ├─ backend/
 │  ├─ app/                    FastAPI、数据访问与执行服务
 │  ├─ modules/                内置可执行模块（含 runner-lab 导入模块）
@@ -76,6 +73,20 @@ apex-console/
 │  └─ console_launcher.py     桌面一键入口
 └─ AGENTS.md                  项目约束与维护说明
 ```
+
+`runner-lab/`（跑步数据看板）是**独立 git 仓库**，按「每个项目模块一个仓库」的约定
+放在本仓库的同级目录（`D://Projects//runner-lab`），`backend/modules/runner-lab/module.json`
+的 `projectRoot` 用相对路径 `..\runner-lab` 指向它。总控台仓库不跟踪其任何文件。
+
+## 模块仓库约定
+
+平台（本仓库）与模块项目（如 runner-lab）分仓库管理：
+
+- 模块项目 clone 到 `D://Projects//<名称>`（与本仓库同级），在 `backend/modules/<模块>/module.json`
+  里用相对路径 `..\<名称>` 声明 `projectRoot`。
+- 提交口诀：改了模块项目 → 在模块仓库里 commit/push；改了总控台（含 `backend/modules/`
+  下的模块接入层）→ 在本仓库 commit/push。两边都改就两边各提交一次。
+- 自检跟着仓库走：模块项目跑它自己的 `tools/check.js`，总控台跑 `smoke-test.js` 与 pytest。
 
 ## 验证
 
@@ -93,9 +104,8 @@ backend\.venv\Scripts\python.exe -m pytest backend\tests -q
 
 - 运行数据保存在 `backend/data/`，包括本地 SQLite 数据库、运行记录与日志。
 - 这些本机数据、虚拟环境与测试缓存已被 `.gitignore` 排除，不会提交到仓库。
-- `runner-lab/data.js` 与 `data.prev.js` 是你的**跑步健康数据**（由导入器生成），同样
-  不入仓库；换机器后双击 `runner-lab\导入数据.cmd` 导入一次即可重建。仓库里只带代码与
-  一个假密码诱饵文件（用于验证导入器「不读密码文件」的设计）。
+- 跑步健康数据（`data.js`）在独立的 runner-lab 仓库里同样被它自己的 `.gitignore` 排除；
+  换机器后 clone 两个仓库、双击 `runner-lab\导入数据.cmd` 导入一次即可重建。
 - 应用扫描仅读取 Windows 已公开注册的启动入口；控制台不会上传扫描结果或项目数据。
 
 ## 现阶段范围

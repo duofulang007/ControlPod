@@ -1790,7 +1790,7 @@ try {
      `.git` 与 `.workbuddy` 都是工具自己写的元数据目录，不是产物，一并排除；
      不排除的话 WorkBuddy 一旦在根目录生成 .workbuddy/ 就会让这条断言无端测挂。 */
   const dirFiles = require('fs').readdirSync(__dirname).filter(name=>name!=='.git' && name!=='.workbuddy').sort();
-  const expectedFiles = ['.gitattributes', '.gitignore', '00-启动 APEX 总控台.lnk', 'AGENTS.md', 'README.md', 'app.js', 'backend', 'index.html', 'runner-lab', 'smoke-test.js', 'styles.css'].sort();
+  const expectedFiles = ['.gitattributes', '.gitignore', '00-启动 APEX 总控台.lnk', 'AGENTS.md', 'README.md', 'app.js', 'backend', 'index.html', 'smoke-test.js', 'styles.css'].sort();
   check(JSON.stringify(dirFiles) === JSON.stringify(expectedFiles),
     '根目录只保留源码、Git 配置和唯一启动入口（实际：' + dirFiles.join(', ') + '）');
   const n0 = T.DATA.notes.length;

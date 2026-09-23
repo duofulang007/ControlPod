@@ -6,7 +6,7 @@
   "projectDescription": "小米运动健康导出包 → 本地跑步看板。只读取跑步相关的两个成员，其余成员（含个人信息）一律不打开。",
   "name": "跑步数据导入",
   "version": "1.1.0",
-  "projectRoot": "{console_root}\\runner-lab",
+  "projectRoot": "..\\runner-lab",
   "requiresAdmin": false,
   "singleInstance": true,
   "timeoutSeconds": 900,
