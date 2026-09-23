@@ -9,7 +9,7 @@
 - 项目管理：创建、复制、编辑、删除项目，并查看项目运行状态与历史。
 - 执行模块：维护可复用的网站模块与内置 APEX 启动模块，将模块组合到项目中运行。
 - 跑步数据看板：解析小米运动健康官方导出包，本地生成跑步数据分析看板
-  （训练负荷模型、跑姿体检、每日建议）。看板是**独立仓库** `../runner-lab`，
+  （训练负荷模型、跑姿体检、每日建议）。看板是**独立仓库** `../run-analytics`，
   总控台只负责接入与启动；健康数据不出本机。
 - 真实应用：识别 Windows 开始菜单、已注册应用与 App Paths 中的可启动程序；添加后可从控制台启动，并显示 Windows 原生图标。
 - 项目上下文：在项目内维护待办、项目记录、文件关联和 Obsidian 主页连接。
@@ -74,13 +74,13 @@ apex-console/
 └─ AGENTS.md                  项目约束与维护说明
 ```
 
-`runner-lab/`（跑步数据看板）是**独立 git 仓库**，按「每个项目模块一个仓库」的约定
-放在本仓库的同级目录（`D://Projects//runner-lab`），`backend/modules/runner-lab/module.json`
-的 `projectRoot` 用相对路径 `..\runner-lab` 指向它。总控台仓库不跟踪其任何文件。
+`run-analytics/`（跑步数据看板）是**独立 git 仓库**，按「每个项目模块一个仓库」的约定
+放在本仓库的同级目录（`D:\Projects\run-analytics`），`backend/modules/run-analytics/module.json`
+的 `projectRoot` 用相对路径 `..\run-analytics` 指向它。总控台仓库不跟踪其任何文件。
 
 ## 模块仓库约定
 
-平台（本仓库）与模块项目（如 runner-lab）分仓库管理：
+平台（本仓库）与模块项目（如 run-analytics）分仓库管理：
 
 - 模块项目 clone 到 `D://Projects//<名称>`（与本仓库同级），在 `backend/modules/<模块>/module.json`
   里用相对路径 `..\<名称>` 声明 `projectRoot`。
@@ -104,8 +104,8 @@ backend\.venv\Scripts\python.exe -m pytest backend\tests -q
 
 - 运行数据保存在 `backend/data/`，包括本地 SQLite 数据库、运行记录与日志。
 - 这些本机数据、虚拟环境与测试缓存已被 `.gitignore` 排除，不会提交到仓库。
-- 跑步健康数据（`data.js`）在独立的 runner-lab 仓库里同样被它自己的 `.gitignore` 排除；
-  换机器后 clone 两个仓库、双击 `runner-lab\导入数据.cmd` 导入一次即可重建。
+- 跑步健康数据（`data.js`）在独立的 run-analytics 仓库里同样被它自己的 `.gitignore` 排除；
+  换机器后 clone 两个仓库、双击 `run-analytics\导入数据.cmd` 导入一次即可重建。
 - 应用扫描仅读取 Windows 已公开注册的启动入口；控制台不会上传扫描结果或项目数据。
 
 ## 现阶段范围

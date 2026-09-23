@@ -93,7 +93,7 @@ class ModuleRegistry:
         console_root = str(self.console_root)
         # projectRoot 支持三种写法：{console_root} 占位符、绝对路径、相对路径。
         # 相对路径相对 console 根解析（约定：模块项目仓库 clone 在 console 的同级目录，
-        # 如 "..\\runner-lab"）——这样模块可以是独立 git 仓库，而 manifest 不写死盘符。
+        # 如 "..\\run-analytics"）——这样模块可以是独立 git 仓库，而 manifest 不写死盘符。
         # 直接 resolve() 会相对服务进程的 cwd，那不是稳定基准（踩过：cwd 取决于谁拉起服务）。
         expanded = project_root_raw.replace("{console_root}", console_root)
         candidate = Path(expanded)

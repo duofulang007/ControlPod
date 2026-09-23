@@ -1,11 +1,11 @@
 # -*- coding: utf-8 -*-
 """「跑步数据导入」模块的执行入口。
 
-职责很窄：调用 runner-lab 里的导入器（唯一实现），把最新的小米导出包变成 data.js，
+职责很窄：调用 run-analytics 里的导入器（唯一实现），把最新的小米导出包变成 data.js，
 再打开本地看板。导入逻辑不在这里复制一份，避免两处口径漂移。
 
 契约（与 modules/apex-launcher/runner.py 一致）：
-    runner.py --action {run|stop|restart} --root <runner-lab 目录>
+    runner.py --action {run|stop|restart} --root <run-analytics 目录>
               --result-path <结果 json> --log-path <日志>
 期望写 {"ok": true, ...} 并退出 0；失败写 {"ok": false, "error": ...} 并退出 1。
 导入器的返回码（2/3/4/5/6/7）统一翻译成中文提示，见 EXIT_MESSAGES。
@@ -28,10 +28,10 @@ DASHBOARD = "index.html"
 IMPORT_TIMEOUT_SECONDS = 600
 
 # 窗口进程的 pid 存在系统临时目录（不进任何仓库），供 stop / restart 精确结束它。
-# 之前记在 D:\RunningData\import-gui.pid；2026-09-23 起导入投放目录收敛进 runner-lab
-# 项目内，pid 这种运行时产物改放 %TEMP%\runner-lab\——重启即清，清掉也无碍，
+# 之前记在 D:\RunningData\import-gui.pid；2026-09-23 起导入投放目录收敛进 run-analytics
+# 项目内，pid 这种运行时产物改放 %TEMP%\run-analytics\——重启即清，清掉也无碍，
 # 进程不在时本来就没人再读它。
-STATE_DIR = Path(tempfile.gettempdir()) / "runner-lab"
+STATE_DIR = Path(tempfile.gettempdir()) / "run-analytics"
 GUI_PID_FILE = STATE_DIR / "import-gui.pid"
 
 # 与 tools/import_zip.py 的返回码约定保持一致
@@ -125,7 +125,7 @@ def launch_gui(root: Path, log_path: Path) -> dict[str, Any]:
     """
     script = root / GUI_SCRIPT
     if not script.is_file():
-        raise RuntimeError(f"runner-lab 导入窗口不存在：{script}")
+        raise RuntimeError(f"run-analytics 导入窗口不存在：{script}")
     kill_gui(log_path)  # 避免开出第二个窗口
     STATE_DIR.mkdir(parents=True, exist_ok=True)
     command = [str(window_python()), str(script)]
@@ -143,7 +143,7 @@ def launch_gui(root: Path, log_path: Path) -> dict[str, Any]:
 def run_import(root: Path, log_path: Path) -> dict[str, Any]:
     script = root / IMPORT_SCRIPT
     if not script.is_file():
-        raise RuntimeError(f"runner-lab 导入器不存在：{script}")
+        raise RuntimeError(f"run-analytics 导入器不存在：{script}")
 
     write_log(log_path, f"[STEP] 运行导入器 {script}")
     try:
@@ -192,7 +192,7 @@ def open_dashboard(root: Path, log_path: Path) -> str:
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--action", choices=("run", "stop", "restart"), required=True)
-    parser.add_argument("--root", type=Path, required=True, help="runner-lab 项目目录")
+    parser.add_argument("--root", type=Path, required=True, help="run-analytics 项目目录")
     parser.add_argument("--result-path", type=Path, required=True)
     parser.add_argument("--log-path", type=Path, required=True)
     parser.add_argument(

@@ -113,10 +113,10 @@ def test_action_placeholders_expand_to_an_existing_interpreter() -> None:
 def test_project_root_supports_relative_path_next_to_console() -> None:
     """projectRoot 支持相对路径，且相对 console 根解析（不是相对服务进程 cwd）。
 
-    模块项目仓库约定 clone 在 console 的同级目录（如 "..\\runner-lab"），
+    模块项目仓库约定 clone 在 console 的同级目录（如 "..\\run-analytics"），
     这样模块可以是独立 git 仓库而 manifest 不写死盘符。相对路径若按
     cwd 解析，结果取决于谁拉起服务——不可接受，必须锚定 console 根。
     """
     registry = ModuleRegistry(ROOT / "backend" / "modules")
     module = registry.load()["runner-lab"]
-    assert module.project_root == (ROOT.parent / "runner-lab").resolve()
+    assert module.project_root == (ROOT.parent / "run-analytics").resolve()
