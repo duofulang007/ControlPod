@@ -895,6 +895,30 @@ try {
 } catch (e) { console.log('FAIL startRun → ' + e.message); fail++; }
 T.S.running = null;
 
+/* 4a. 真实项目轮询去重：执行状态没变不重复重绘（全量重建会让卡片 hover 反复弹跳、闪烁） */
+try {
+  const wfA = T.DATA.projects.find(p => T.REAL_PROJECT_IDS.has(p.id));
+  const savedPage = T.S.page, savedRunning = T.S.running, savedRender = ctx.render;
+  T.S.page = 'projects';
+  T.S.running = {token:9001, wfId:wfA.id, i:0, done:0, total:1, states:{}, log:[], order:[wfA.steps[0].id], real:true, action:'run', status:'running', runId:'exec-x'};
+  const pollPayload = {id:'exec-x', action:'run', status:'running', steps:[
+    {module_id:wfA.steps[0].moduleId, module_name:wfA.steps[0].label, action:'run', status:'running', run:{logs:['[STEP] local ops']}}
+  ]};
+  let paints = 0;
+  try {
+    ctx.render = () => { paints++; };
+    T.applyBackendRun(wfA, 9001, pollPayload);            // 首次上报：渲染
+    T.applyBackendRun(wfA, 9001, pollPayload);            // 内容未变：不渲染
+    const next = JSON.parse(JSON.stringify(pollPayload));
+    next.status = 'queued';                               // 状态推进：必须渲染
+    T.applyBackendRun(wfA, 9001, next);
+  } finally {
+    ctx.render = savedRender;
+    T.S.page = savedPage; T.S.running = savedRunning;
+  }
+  check(paints===2, '真实项目轮询去重：相同执行状态只重绘一次，状态变化才重绘（3 次轮询重绘 ' + paints + ' 次）');
+} catch (e) { console.log('FAIL 轮询去重 → ' + e.message); fail++; }
+
 /* 4b. 项目查看 / 编辑模式分离 */
 try {
   const w1 = T.DATA.projects[0];

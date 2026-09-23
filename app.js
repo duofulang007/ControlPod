@@ -4347,7 +4347,14 @@ function applyBackendRun(wf, token, payload){
       toast(`「${wf.name}」${closing ? '关闭' : restarting ? '重启' : '运行'}失败`);
     }
   }
-  if (S.page==='workflows' || S.page==='projects') render(true);
+  /* 轮询每 ~150ms 拉一次执行状态；内容没变就不重绘 —— render 是全量重建 DOM，
+     重建后鼠标下方卡片的 hover 上浮过渡与运行指示动画都会从头重播，
+     观感就是卡片反复弹跳、闪烁。指纹相同（status/步骤/日志/结果均未变）时跳过。 */
+  const appliedKey = JSON.stringify([r.status, payload.steps || null, payload.logs || null, payload.error || '', payload.result || null]);
+  if (appliedKey !== r.appliedKey){
+    r.appliedKey = appliedKey;
+    if (S.page==='workflows' || S.page==='projects') render(true);
+  }
   return r.status==='queued' || r.status==='running';
 }
 async function startBackendAction(wf, token, action){
