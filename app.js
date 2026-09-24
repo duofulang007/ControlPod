@@ -35,13 +35,10 @@ const IC = {
   ext:   c => sv('<rect x="3.5" y="4.5" width="17" height="12" rx="2" stroke="@s" stroke-width="1.8"/><path d="M8 20h8" stroke="@s" stroke-width="1.8" stroke-linecap="round"/>'.replace(/@s/g,c)),
   folder:c => sv('<path d="M3 7.5A2.5 2.5 0 0 1 5.5 5h3.2l2 2.5H18.5A2.5 2.5 0 0 1 21 10v7a2.5 2.5 0 0 1-2.5 2.5h-13A2.5 2.5 0 0 1 3 17V7.5z" stroke="@s" stroke-width="1.8" stroke-linejoin="round"/>'.replace(/@s/g,c)),
   play:  c => sv('<path d="M8 5.5l11 6.5-11 6.5V5.5z" fill="@s"/>'.replace(/@s/g,c)),
-  pause: c => sv('<rect x="7" y="5.5" width="3.6" height="13" rx="1.2" fill="@s"/><rect x="13.4" y="5.5" width="3.6" height="13" rx="1.2" fill="@s"/>'.replace(/@s/g,c)),
-  skip:  c => sv('<path d="M6 6l8 6-8 6V6z" fill="@s"/><rect x="15.5" y="6" width="2.6" height="12" rx="1.1" fill="@s"/>'.replace(/@s/g,c)),
   plus:  c => sv('<path d="M12 5.5v13M5.5 12h13" stroke="@s" stroke-width="2" stroke-linecap="round"/>'.replace(/@s/g,c)),
   check: c => sv('<path d="M5 12.5l4.6 4.6L19 7" stroke="@s" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/>'.replace(/@s/g,c)),
   close: c => sv('<path d="M6 6l12 12M18 6L6 18" stroke="@s" stroke-width="1.9" stroke-linecap="round"/>'.replace(/@s/g,c)),
   search:c => sv('<circle cx="11" cy="11" r="7" stroke="@s" stroke-width="1.8"/><path d="M16.2 16.2L21 21" stroke="@s" stroke-width="1.8" stroke-linecap="round"/>'.replace(/@s/g,c)),
-  down:  c => sv('<path d="M12 3.5v11" stroke="@s" stroke-width="1.8" stroke-linecap="round"/><path d="M7.5 10.5L12 15l4.5-4.5" stroke="@s" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><path d="M4 17.5v1a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-1" stroke="@s" stroke-width="1.8" stroke-linecap="round"/>'.replace(/@s/g,c)),
   cloud: c => sv('<path d="M7 18.5a4 4 0 0 1-.4-8A5.5 5.5 0 0 1 17.3 10a3.8 3.8 0 0 1-.3 8.5H7z" stroke="@s" stroke-width="1.8" stroke-linejoin="round"/>'.replace(/@s/g,c)),
   trash: c => sv('<path d="M5 7h14M10 7V5h4v2M7.5 7l.8 12.2A1.6 1.6 0 0 0 9.9 20.7h4.2a1.6 1.6 0 0 0 1.6-1.5L16.5 7" stroke="@s" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>'.replace(/@s/g,c)),
   pin:   c => sv('<path d="M9 4.5h6l-1 5 3 3v2H7v-2l3-3-1-5z" stroke="@s" stroke-width="1.7" stroke-linejoin="round"/><path d="M12 14.5V20" stroke="@s" stroke-width="1.7" stroke-linecap="round"/>'.replace(/@s/g,c)),
@@ -50,9 +47,6 @@ const IC = {
   term:  c => sv('<rect x="3" y="4.5" width="18" height="15" rx="2.6" stroke="@s" stroke-width="1.8"/><path d="M7 10l2.6 2.5L7 15" stroke="@s" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/><path d="M12.5 15h4.5" stroke="@s" stroke-width="1.7" stroke-linecap="round"/>'.replace(/@s/g,c)),
   clock: c => sv('<circle cx="12" cy="12" r="8.5" stroke="@s" stroke-width="1.8"/><path d="M12 7.6V12l3 1.9" stroke="@s" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>'.replace(/@s/g,c)),
   spark: c => sv('<path d="M12 3.5l1.9 4.9 4.9 1.9-4.9 1.9L12 17.1l-1.9-4.9L5.2 10.3l4.9-1.9L12 3.5z" stroke="@s" stroke-width="1.7" stroke-linejoin="round"/><path d="M18 15.5l.75 1.75L20.5 18l-1.75.75L18 20.5l-.75-1.75L15.5 18l1.75-.75L18 15.5z" stroke="@s" stroke-width="1.5" stroke-linejoin="round"/>'.replace(/@s/g,c)),
-  send:  c => sv('<path d="M4.5 12L20 4.5 15 20l-3.6-6.4L4.5 12z" stroke="@s" stroke-width="1.8" stroke-linejoin="round"/>'.replace(/@s/g,c)),
-  gear:  c => sv('<circle cx="12" cy="12" r="3.2" stroke="@s" stroke-width="1.8"/><path d="M19.4 14.5a2 2 0 0 0 .4 2.2l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a2 2 0 0 0-3.4 1.4v.2a2 2 0 1 1-4 0v-.1a2 2 0 0 0-3.5-1.4l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a2 2 0 0 0-1.4-3.4H4a2 2 0 1 1 0-4h.1A2 2 0 0 0 5.6 6l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a2 2 0 0 0 3.4-1.4V2a2 2 0 1 1 4 0v.1a2 2 0 0 0 3.4 1.4l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a2 2 0 0 0 1.4 3.4h.2a2 2 0 1 1 0 4h-.1a2 2 0 0 0-1.9 1.2z" stroke="@s" stroke-width="1.6"/>'.replace(/@s/g,c)),
-  chip:  c => sv('<rect x="6.5" y="6.5" width="11" height="11" rx="2.4" stroke="@s" stroke-width="1.8"/><path d="M10 3.5v3M14 3.5v3M10 17.5v3M14 17.5v3M3.5 10h3M3.5 14h3M17.5 10h3M17.5 14h3" stroke="@s" stroke-width="1.8" stroke-linecap="round"/>'.replace(/@s/g,c)),
   bell:  c => sv('<path d="M6 9.5a6 6 0 1 1 12 0v4.2l1.6 2.8H4.4L6 13.7V9.5z" stroke="@s" stroke-width="1.8" stroke-linejoin="round"/>'.replace(/@s/g,c)),
   reset: c => sv('<path d="M4.5 12a7.5 7.5 0 1 0 2.2-5.3" stroke="@s" stroke-width="1.8" stroke-linecap="round"/><path d="M4.5 4.5V9h4.5" stroke="@s" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>'.replace(/@s/g,c)),
   note:  c => sv('<path d="M6 3.5h8A3 3 0 0 1 17 6.5V18a3 3 0 0 1-3 3H6A2.5 2.5 0 0 1 3.5 18.5V6A2.5 2.5 0 0 1 6 3.5z" stroke="@s" stroke-width="1.8"/><path d="M8 8h6M8 12h6M8 16h4" stroke="@s" stroke-width="1.8" stroke-linecap="round"/>'.replace(/@s/g,c)),
@@ -153,7 +147,7 @@ const DATA = {
      只在项目开发上下文里按 proj 过滤展示。
      统一条目结构：{ id, text, kind, proj, due, urgent, done }（状态只有 done 一个布尔），
      kind 由 TASK_KIND 统一解释；新增条目必须带 kind，缺省按待办处理。
-     「被哪些笔记引用」不落在本表 —— 引用只存笔记侧 links，待办侧由 notesLinkedTo() 派生。 */
+     「被哪些笔记引用」不落在本表 —— 引用只存笔记侧 links，待办侧由 noteLinksOf() 派生。 */
   todosPlan: [
     {id:'t1', text:'完善自动化脚本的异常处理', proj:'APEX Automation', due:'今天',    urgent:true,  done:false, kind:'todo'},
     {id:'t2', text:'整理项目文档结构',        proj:'APEX Automation', due:'今天',    urgent:true,  done:false, kind:'todo'},
@@ -293,6 +287,8 @@ const S = {
   scanError:'',
   scanRequest:0,        // 扫描请求令牌：刷新时淘汰旧响应，关闭弹窗后不重新弹出
   startupEnabled:null,  // null=尚未从 Windows 启动项读取；其余值以接口读回结果为准
+  startupRegistered:null,  // Run 里是否登记了本该有的命令
+  startupApproved:null,    // Windows 侧（任务管理器那个开关）是否允许它启动
   startupLoading:false,
   startupUpdating:false,
   startupError:'',
@@ -339,7 +335,6 @@ const S = {
   projRules:{},        // 「开发要求」按项目覆盖（编辑基本资料保存时写入）：{projId:[5 条]}；缺省用 DEV_RULES
   basicPending:null,   // 编辑基本资料：待二次确认的保存（{id,text}），仅在预演链路里存在
   zoneH:{},            // 开发上下文区域高度（拖拽手柄调整，内存态不持久化）：{wid:{cur/高/中/低: px}}
-  prepOpen:{},         // 预备检查展开状态：按 workflowId 隔离，不持久化
   runOpen:{},          // 运行详情展开状态：按 workflowId 隔离，不持久化
   wfEdit:null,         // 当前处于编辑模式的 workflowId；null 表示查看模式
   projEdit:null,       // 「概览 · 身份卡」内联编辑窗口打开的项目 id；null 表示未打开
@@ -684,7 +679,6 @@ const allTodos   = () => S.todos.plan;
 const projTasks  = n => allTodos().filter(t => t.proj === n);
 const projTodos  = n => projTasks(n).filter(t => taskKindOf(t) === 'todo' && !t.done);
 const projFixes  = n => projTasks(n).filter(t => taskKindOf(t) === 'fix'  && !t.done);
-const noteIsIdea = n => n.tag === '灵感';
 const projNotes  = n => S.notes.filter(x => x.proj === n);
 /* 开发上下文三个计数的唯一来源：todo / fix 只数未完成项（待办=待处理），note 数全部 */
 const devCounts  = n => ({ todo: projTodos(n).length, fix: projFixes(n).length, note: projNotes(n).length });
@@ -704,24 +698,16 @@ const devTaskOf  = wid => {
 
 /* ---- 项目任务 ↔ 项目记录相互引用 ----
    引用只有一处存储：links 数组存在笔记一侧（note.links = [todoId,…]），
-   待办一侧的引用列表由 notesLinkedTo() 现场派生 —— 不在待办条目上存第二份，
+   待办一侧的引用列表由 noteLinksOf() 现场派生 —— 不在待办条目上存第二份，
    任何一侧编辑后另一侧自动一致（都是同一份 S 数据派生）。
    引用键 = 待办 id：待办改文案 / 切类型不影响引用；删除待办时用 detachTodoRefs 清理悬空。
    **注意**：两侧的关联入口（任务编辑的「关联项目记录」、记录编辑的任务清单）已先后删除，
-   2026-09-15 又删掉了「复制 Agent 上下文」里的「↳ 引用笔记」续行 —— links 现在没有任何渲染宿主，
-   只剩删除待办时的 detachTodoRefs 兜底，以及 refBadgeOf / linkBadgeOf 两个纯展示函数（同样无宿主）。 */
+   2026-09-15 又删掉了「复制 Agent 上下文」里的「↳ 引用笔记」续行 —— links 现在没有任何渲染宿主；
+   2026-09-24 清掉了随宿主消失的两个纯展示函数，引用功能只剩 detachTodoRefs 兜底。 */
 const noteLinksOf   = n => (n && Array.isArray(n.links)) ? n.links : [];
-const notesLinkedTo = tid => S.notes.filter(n => noteLinksOf(n).includes(tid));
 function detachTodoRefs(tid){
   S.notes.forEach(n => { const links = noteLinksOf(n); const i = links.indexOf(tid); if (i >= 0) links.splice(i, 1); });
 }
-/* 引用徽标：待办行 →「引用 N」（被 N 条笔记引用）；笔记行 →「关联 N」（引用 N 条待办）。
-   ⚠️ 已无宿主渲染（原「完整开发上下文」抽屉被删后就没入口了），目前只有测试在直接调；
-   关联入口也一并删除后，这两个函数已是纯遗留，待确认是否清理。 */
-const refBadgeOf  = t => { const c = notesLinkedTo(t.id).length;
-  return c ? `<span class="badge b-slate" title="被 ${c} 条笔记引用">引用 ${c}</span>` : ''; };
-const linkBadgeOf = n => { const c = noteLinksOf(n).length;
-  return c ? `<span class="badge b-slate" title="引用 ${c} 条待办 / 待修改">关联 ${c}</span>` : ''; };
 
 /* 复制到系统剪贴板：优先 Clipboard API，失败回退临时 textarea + execCommand。
    只返回 Promise<boolean>（成功/失败），不负责 toast。
@@ -1517,8 +1503,6 @@ function uninstallApp(id){
    用户只填名称、网站地址和描述，后端保存为可被任意项目选择的网站模块。
    APEX 等磁盘清单模块仍会显示，但不在这里改写其执行定义。 */
 const MOD_TABS = [['all','全部'],['web','网页'],['folder','目录'],['script','脚本'],['cmd','命令']];
-/* 「入口」在四类里含义不同，占位文案随类型切换 */
-const MOD_ENTRY_PH = {web:'入口：网址 URL', folder:'入口：目录路径', script:'入口：脚本文件', cmd:'入口：命令或命令行'};
 /* 模块唯一键 = 类型 + 入口。ref 里不允许出现「|」——拖拽载荷用「|」分隔类型与入口 */
 const moduleKey = (type, ref) => type + '|' + ref;
 const splitKey = k => { const i = k.indexOf('|'); return [k.slice(0, i), k.slice(i + 1)]; };
@@ -1596,7 +1580,7 @@ function validWebModuleUrl(value){
 }
 /* 新增模块：从模块页进入；网页执行器是后端内置模板，不为每个网站复制脚本。 */
 function newModule(){
-  S._modKey = ''; S._modId = '';
+  S._modKey = '';
   openModal(`${mHead('新增网站模块', '使用内置网页模板；保存后可在任意项目中添加')}
     ${moduleFormHTML({ nameId:'modName' })}
     ${mActs(`<button class="btn btn-primary btn-sm" data-act="saveModule">${IC.check('#fff')}保存</button>
@@ -1609,7 +1593,6 @@ function editModule(type, ref){
   const m = findModule(type, ref); if (!m) return;
   if (m.builtIn || m.type !== 'web'){ toast('内置执行模块不能在这里修改'); return; }
   S._modKey = moduleKey(m.type, m.ref);
-  S._modId = m.id;
   openModal(`${mHead('编辑网站模块', '保存后，所有使用它的项目都会读取新地址')}
     ${moduleFormHTML({ nameId:'modName', name:m.name, desc:m.desc, entry:m.ref })}
     ${mActs(`<button class="btn btn-primary btn-sm" data-act="saveModule">${IC.check('#fff')}保存</button>
@@ -1880,13 +1863,19 @@ async function loadScannedApps(){
     if (modal && modal.classList && modal.classList.contains('on')) addApp();
   }
 }
+/* 后端把「注册了没」和「Windows 允许它启动吗」分开回答：两者都成立，开机时它才
+   真的会跑起来。只认 enabled，被任务管理器禁用时开关仍是绿的 —— 那是假绿。 */
+function applyStartupState(state){
+  S.startupEnabled = !!state && state.enabled === true;
+  S.startupRegistered = !!state && state.registered === true;
+  S.startupApproved = !!state && state.approved !== false;
+}
 async function loadStartupSetting(){
   S.startupLoading = true; S.startupError = '';
   try {
-    const state = await apiRequest('/settings/startup');
-    S.startupEnabled = state && state.enabled === true;
+    applyStartupState(await apiRequest('/settings/startup'));
   } catch (err) {
-    S.startupEnabled = null;
+    S.startupEnabled = null; S.startupRegistered = null; S.startupApproved = null;
     S.startupError = err && err.message ? err.message : '无法读取 Windows 启动项';
   } finally {
     S.startupLoading = false;
@@ -1896,9 +1885,10 @@ async function updateStartupSetting(enabled){
   if (S.startupLoading || S.startupUpdating) return;
   S.startupUpdating = true; S.startupError = ''; render(true);
   try {
-    const state = await apiRequest('/settings/startup', {method:'PUT', body:JSON.stringify({enabled})});
-    S.startupEnabled = state && state.enabled === true;
-    toast(S.startupEnabled ? '开机自启动已开启，并已确认 Windows 启动项' : '开机自启动已关闭，并已确认 Windows 启动项已移除');
+    applyStartupState(await apiRequest('/settings/startup', {method:'PUT', body:JSON.stringify({enabled})}));
+    toast(S.startupEnabled
+      ? '开机自启动已开启，登录后将自动打开 APEX 总控台窗口'
+      : '开机自启动已关闭，Windows 启动项已移除');
   } catch (err) {
     S.startupError = err && err.message ? err.message : '无法更新 Windows 启动项';
     toast(`开机自启动未变更：${S.startupError}`);
@@ -2618,7 +2608,6 @@ function openProjectFiles(projectId){
 function requestProjectFileDelete(fileId){
   void apiRequest(`/project-files/${encodeURIComponent(fileId)}/delete-preview`)
     .then(preview => {
-      S.projectFileDeletePreview = preview;
       const item = preview && preview.file; if (!item) throw new Error('删除预演无效');
       openModal(`${mHead('移除项目文件关联', item.name)}
         <div class="hint-line">将只移除当前项目内的关联，不会删除电脑上的原文件。</div>
@@ -2631,7 +2620,7 @@ function requestProjectFileDelete(fileId){
 }
 function deleteProjectFile(fileId){
   void apiRequest(`/project-files/${encodeURIComponent(fileId)}`, {method:'DELETE'})
-    .then(() => { S.projectFiles = S.projectFiles.filter(file => file.id !== fileId); S.projectFileDeletePreview = null; closeModal(); render(true); toast('已移除项目文件关联，原文件未删除'); })
+    .then(() => { S.projectFiles = S.projectFiles.filter(file => file.id !== fileId); closeModal(); render(true); toast('已移除项目文件关联，原文件未删除'); })
     .catch(err => toast(err && err.message ? err.message : '移除项目文件关联失败'));
   return true;
 }
@@ -3161,7 +3150,7 @@ function refreshProj(id){
   const w = DATA.projects.find(x => x.id === id); if (!w) return false;
   if (projIsRunning(id) && S.running && S.running.real){ toast('真实模块正在执行，完成前不能刷新运行态'); return false; }
   if (projIsRunning(id)){ clearInterval(runTimer); S.running = null; }
-  delete S.prepOpen[id]; delete S.runOpen[id]; delete S.devTask[id];
+  delete S.runOpen[id]; delete S.devTask[id];
   if (S.projEdit === id) S.projEdit = null;
   if (S.wfEdit === id) S.wfEdit = null;
   const p = preflight(w);
@@ -4020,11 +4009,17 @@ function viewSettings(){
       <button class="switch ${on?'on':''}" data-act="switch" data-k="${key}"><i></i></button>
     </div>`;
   const startupBusy = S.startupLoading || S.startupUpdating;
+  /* 已登记但被 Windows 侧禁用：必须说清楚「开关为什么是关的、该去哪儿恢复」，
+     否则用户只看到一个关着的开关，会以为功能又坏了。 */
+  const startupBlocked = S.startupEnabled !== true
+    && S.startupRegistered === true && S.startupApproved === false;
   const startupDesc = S.startupError
     ? `未能读取或更新：${esc(S.startupError)}`
     : startupBusy
       ? (S.startupUpdating ? '正在更新 Windows 启动项…' : '正在读取 Windows 启动项…')
-      : '登录系统后通过 Windows 启动项在后台启动 APEX 总控台服务';
+      : startupBlocked
+        ? '已被 Windows 任务管理器的启动项开关禁用，重新打开即可恢复'
+        : '登录系统后自动打开 APEX 总控台窗口，并启动后台服务';
   const startupSwitch = `<div class="set-row">
       <div class="s-txt"><div class="s-t">开机自启动</div><div class="s-d">${startupDesc}</div></div>
       <button class="switch ${S.startupEnabled===true?'on':''}" data-act="switch" data-k="auto"

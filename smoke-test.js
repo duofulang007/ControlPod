@@ -73,11 +73,11 @@ src += `\nglobalThis.__T = { viewHome, viewApps, viewProjects, viewModules, view
   normalizeObsidianState, persistObsidianState, loadObsidianState,
   PREFS_STORE_KEY, DENSITY_STEPS, DENSITY_LABELS, normalizePrefs, persistPrefs, loadPrefs, applyDensity,
   THEME_VALUES, ACCENTS, PREF_KEYS, BOOL_PREF_DEFAULTS, isDensityStep, applyTheme, applyAccent, applyGlass, applyPrefs,
-  TASK_KIND, KIND_SHOW, taskKindOf, allTodos, projTasks, projTodos, projFixes, projNotes, noteIsIdea, devCounts, devTaskOf,
-  noteLinksOf, notesLinkedTo, detachTodoRefs, refBadgeOf, linkBadgeOf, newNote,
+  TASK_KIND, KIND_SHOW, taskKindOf, allTodos, projTasks, projTodos, projFixes, projNotes, devCounts, devTaskOf,
+  noteLinksOf, detachTodoRefs, newNote,
   priOf, moveTaskZone, pruneCurTasks, devTidsOf,
   PROJ_STS, projStDef, projStCls, projStColor, projStatusCtl, setProjStatus, projOverviewHTML,
-  flowNameOf, lastUsedLabel, backendEpoch,
+  flowNameOf, lastUsedLabel, backendEpoch, applyStartupState,
   projIdCardHTML, projEditFormHTML, projEditCheck, applyProjEdit, renameProjRefs, PE_LIMIT,
   projTileHTML, projFlat, projKids, projParentOf, unwrapProjKids,
   initProjSort, projSortBlocked, projSortSlotAt, applyProjectOrder, PROJ_SORT,
@@ -86,7 +86,7 @@ src += `\nglobalThis.__T = { viewHome, viewApps, viewProjects, viewModules, view
   addApp, appPopMenu, tagPop, setCat, newCatFor, removeFromList,
   scannedAppFromApi, loadScannedApps, pickScan, beginAdd, backToAdd, createFromScan,
   moduleFormHTML, modShowErr, newModule, editModule, saveModule, modDelete, modDeleteModalHTML,
-  moduleKey, splitKey, findModule, MOD_TABS, MOD_ENTRY_PH, larderItems, DEFAULT_PROJ, TYPE_META, tIco,
+  moduleKey, splitKey, findModule, MOD_TABS, larderItems, DEFAULT_PROJ, TYPE_META, tIco,
   validWebModuleUrl, webModuleFromApi, backendTaskFromApi, taskApiPayload, applyBackendTask,
   createBackendTask, updateBackendTask, deleteBackendTask, backendNoteFromApi, noteApiPayload, applyBackendNote,
   createBackendNote, updateBackendNote, deleteBackendNote, backendContextFromApi, ensureDevContext,
@@ -335,11 +335,11 @@ try {
   [c1, c2].forEach(x => { const i = T.DATA.projects.findIndex(p => p.id === x.id); if (i > -1){ delete T.DATA.projMeta[x.name]; T.DATA.projects.splice(i, 1); } });
 
   /* 刷新：非破坏性 —— 只清临时态 + 重算预备检查 */
-  T.S.prepOpen['ops'] = true; T.S.runOpen['ops'] = true; T.S.devTask['ops'] = { text:'x' };
+  T.S.runOpen['ops'] = true; T.S.devTask['ops'] = { text:'x' };
   T.S.projEdit = 'ops'; T.S.wfEdit = 'ops';
   const stepSig = JSON.stringify(apex.steps), runsBefore = apex.runs;
   check(T.refreshProj('ops') === true, '「刷新」返回成功');
-  check(!T.S.prepOpen['ops'] && !T.S.runOpen['ops'] && !T.S.devTask['ops']
+  check(!T.S.runOpen['ops'] && !T.S.devTask['ops']
         && T.S.projEdit === null && T.S.wfEdit === null,
     '刷新清空该项目的临时状态（展开态 / 编辑态）');
   check(JSON.stringify(apex.steps) === stepSig && apex.runs === runsBefore,
@@ -635,7 +635,7 @@ try {
   check(T.devCounts(w1.name).note === 4, 'APEX 派生计数：灵感 / 笔记 4');
   check(T.projNotes(w1.name).length > 0 && T.projNotes(w1.name).every(n => n.proj === w1.name),
     '项目笔记全部通过 proj 指向本项目');
-  check(T.noteIsIdea({tag:'灵感'}) && !T.noteIsIdea({tag:'技术'}), '灵感 = tag「灵感」的笔记（同一存储，不另立字段）');
+  check(T.S.notes.filter(n => n.tag === '灵感').length > 0, '灵感与项目记录共用同一份 S.notes（靠 tag 区分，不另立字段）');
   /* 3) 一处修改，处处一致：在待办侧完成一条待修改 */
   const before = T.projFixes(w1.name).length;
   const f1 = T.allTodos().find(x => x.id === 'f1');
@@ -682,16 +682,15 @@ try {
     '种子引用就位：架构备忘↔完善异常处理，UI Automation 灵感↔第二次启动状态判断');
   check(T.noteLinksOf({}).length === 0 && T.noteLinksOf({links:'x'}).length === 0
     && T.noteLinksOf(null).length === 0, 'links 缺失 / 脏数据 / null 一律按空引用处理（不抛异常）');
-  check(T.notesLinkedTo('t1').length === 1 && T.notesLinkedTo('t1')[0].id === 'n2',
-    '待办侧引用由笔记侧派生（同一引用只有一处存储）');
+  check(!/notesLinkedTo|refBadgeOf|linkBadgeOf/.test(require('fs').readFileSync(path.join(__dirname, 'app.js'), 'utf8')),
+    '待办侧引用派生函数与引用徽标已彻底移除（渲染宿主消失，零残留）');
   check(T.allTodos().find(x=>x.id==='t1').links === undefined,
     '待办条目不存第二份引用（避免多处维护）');
   /* 2) 待办改文案：引用按 id 不断；文本已不再输出「↳ 引用笔记」续行 */
   const t1 = T.allTodos().find(x=>x.id==='t1');
   const oldT1 = t1.text; t1.text = '换过措辞的待办';
-  check(T.notesLinkedTo('t1').length === 1
-    && !T.agentContextText(w1).includes('↳'),
-    '待办改文案：引用关系不断（Agent 文本已不再输出「↳ 引用笔记」续行）');
+  check(!T.agentContextText(w1).includes('↳'),
+    'Agent 文本不再输出「↳ 引用笔记」续行（引用已无渲染宿主）');
   const txtSaid = T.agentContextText(w1);
   t1.kind = 'fix';
   check(T.agentContextText(w1) === txtSaid
@@ -701,17 +700,19 @@ try {
   /* 3) 写入侧已移除：两侧关联入口删除后，links 变成只读历史数据，只剩 detachTodoRefs 兜底 */
   const n1 = T.S.notes.find(n=>n.id==='n1');
   n1.links = (n1.links || []).concat('t9');
-  check(T.notesLinkedTo('t9').length === 1, '引用仍由笔记侧 links 单一存储（派生正确）');
+  check(T.noteLinksOf(n1).includes('t9'), '引用仍由笔记侧 links 单一存储');
   T.detachTodoRefs('t9');
-  check(T.notesLinkedTo('t9').length === 0 && !T.noteLinksOf(n1).includes('t9'),
-    'detachTodoRefs：删除待办后笔记侧无悬空引用');
+  check(!T.noteLinksOf(n1).includes('t9'), 'detachTodoRefs：删除待办后笔记侧无悬空引用');
   const appSrcRef = require('fs').readFileSync(path.join(__dirname, 'app.js'), 'utf8');
   check(!/function toggleNoteLink/.test(appSrcRef) && !appSrcRef.includes("case 'todoNoteLink'"),
     '关联写入动作已删除（toggleNoteLink / todoNoteLink 零残留）');
-  /* 4) 引用徽标（纯展示，不带跳转 act）：宿主视图随「完整开发上下文」移除，改为直接断言派生函数 */
-  check(T.refBadgeOf(T.allTodos().find(x=>x.id==='t1')).includes('引用 1')
-    && T.linkBadgeOf(T.S.notes.find(n=>n.id==='n2')).includes('关联 1'),
-    '引用徽标：任务行「引用 N」/ 笔记行「关联 N」（纯展示文案，不跳转）');
+  /* 4) 死代码清扫（2026-09-24）：宿主消失后留存的纯展示函数、占位映射与只写不读字段已彻底移除 */
+  check(!/notesLinkedTo|refBadgeOf|linkBadgeOf|noteIsIdea|MOD_ENTRY_PH/.test(appSrcRef),
+    '无宿主的引用派生 / 灵感判定 / 四类入口占位映射已彻底移除（零残留）');
+  check(!/S\._modId|S\.prepOpen\b|S\.projectFileDeletePreview/.test(appSrcRef) && !/\bprepOpen\s*:/.test(appSrcRef),
+    '只写不读的状态字段已清除（模块 id / 预备检查展开态 / 文件删除预演缓存）');
+  check(!/^ {2}(pause|skip|down|send|gear|chip):\s+c => sv\(/m.test(appSrcRef),
+    '生产零引用的图标键已清除（IC 只保留有宿主的图标）');
   const devCtx = T.projDevHTML(w1);
   check((devCtx.match(/data-act="gotoTodo"/g) || []).length === T.projTasks(w1.name).filter(t=>!t.done).length
     && (devCtx.match(/data-act="gotoNote"/g) || []).length === T.projNotes(w1.name).length,
@@ -1511,16 +1512,27 @@ try {
 
 /* 18. Obsidian：设置连接 + 项目绑定 + 打开 / 新建 / 单向更新（不伪造同步） */
 try {
-  T.S.startupEnabled = true; T.S.startupLoading = false; T.S.startupUpdating = false; T.S.startupError = '';
+  T.S.startupEnabled = true; T.S.startupRegistered = true; T.S.startupApproved = true;
+  T.S.startupLoading = false; T.S.startupUpdating = false; T.S.startupError = '';
   const settings = T.viewSettings();
   const startupSrc = fs.readFileSync(path.join(__dirname, 'app.js'), 'utf8');
-  check(settings.includes('开机自启动') && settings.includes('Windows 启动项')
+  check(settings.includes('开机自启动') && settings.includes('登录系统后自动打开 APEX 总控台窗口')
     && settings.includes('class="switch on"') && !settings.includes('开机自启动已开启'),
     '开机自启动显示后端读回状态，不再只展示前端假成功提示');
+  /* 后端把「注册了没」（registered）和「Windows 允许它启动吗」（approved）分开回答：
+     只认 enabled 的话，被任务管理器禁用时开关仍是绿的 —— 那是假绿。 */
+  T.applyStartupState({ enabled: false, registered: true, approved: false });
+  check(T.S.startupEnabled === false && T.viewSettings().includes('已被 Windows 任务管理器的启动项开关禁用'),
+    '启动项被任务管理器禁用时开关不显示假绿，并说清该去哪儿恢复');
+  T.applyStartupState({ enabled: true, registered: true, approved: true });
+  check(T.S.startupEnabled === true && T.S.startupApproved === true
+    && T.viewSettings().includes('登录系统后自动打开 APEX 总控台窗口'),
+    'Windows 侧为启用态时开关如实点亮');
   check(startupSrc.includes("apiRequest('/settings/startup')")
     && startupSrc.includes("apiRequest('/settings/startup', {method:'PUT'")
+    && startupSrc.includes('startupRegistered') && startupSrc.includes('startupApproved')
     && startupSrc.includes('updateStartupSetting(S.startupEnabled !== true)'),
-    '开机自启动开关读取并更新真实后端启动项，不再只切换 CSS 类');
+    '开机自启动开关读取并更新真实后端启动项（含 Windows 侧禁用状态），不再只切换 CSS 类');
   check(settings.includes('Obsidian 连接') && settings.includes('打开、新建与单向更新项目主页'),
     '设置页说明当前只提供 URI 打开、新建与单向更新');
   check(settings.includes('本机保存'), '设置页明确 Obsidian 配置会保存在当前浏览器本机');
@@ -1674,7 +1686,7 @@ try {
   T.S.obsidian = oldObs;
   T.S.obsidianHubOpen = ''; T.S.obsidianBindEdit = ''; T.S.obsidianUpdateArm = '';
   T.S.obsidianUnbindArm = ''; T.S.obsidianReturnFocus = '';
-  T.S.startupEnabled = null;
+  T.S.startupEnabled = null; T.S.startupRegistered = null; T.S.startupApproved = null;
   delete storageData[T.OBSIDIAN_STORE_KEY];
   delete ctx.__stubVals;
 

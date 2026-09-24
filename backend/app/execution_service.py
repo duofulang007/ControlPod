@@ -8,9 +8,6 @@ from .db import Database, utc_now
 from .module_runner import ModuleRunner, RUNNING_STATES
 
 
-ACTIVE_STATES = {"queued", "running"}
-
-
 class ExecutionService:
     """Create and run an ordered project plan while retaining each raw module run."""
 

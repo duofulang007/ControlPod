@@ -1,9 +1,16 @@
 # AGENTS.md · 控制台项目接手说明书
 
 > 给任何要读 / 改这个项目的 agent：**先读这一份，再动代码**。它包含了术语、硬约束、架构、验证方式与全部已踩过的坑。
-> 最后更新：2026-09-24 · 测试基线：**前端 ALL_PASS（714 项）+ 后端 58 项通过**
+> 最后更新：2026-09-24 · 测试基线：**前端 ALL_PASS（718 项）+ 后端 90 项通过（另有 4 项 `test_apex_launcher` 既存失败，见下）**
+>
+> 2026-09-24 开机自启动轮（「功能其实是好的，坏的是它看不见」）：多弗朗报「设置里的开机自启动也没实现」，**排查结论是它早就实现了、而且当天开机后就真的跑起来了**。三条证据：①`HKCU\Software\Microsoft\Windows\CurrentVersion\Run\APEX Console` 存在；②`HKCU\...\Explorer\StartupApproved\Run\APEX Console` = `02…`（**02 = 启用，03 = 被任务管理器禁用**）；③`backend/data/console-launcher.log` 有 `[2026-09-24 13:34:20] decision=start` → `ready pid=…`，而当机 uptime 只有 0.3 小时（开机 13:33:42）→ **开机后 38 秒启动项就执行了**。误判根因是注册命令带了 **`--no-open`**：开机只把服务悄悄放进后台、**一个窗口都不弹**，屏幕上零反馈。判据很硬 —— 那条日志**没有** `profile at launch …` 行，而只有 `--no-open` 的调用才会这样（`start.ps1` 直连 uvicorn，根本不写这个日志）。本轮两处修：①**注册命令去掉 `--no-open`**（`WindowsStartupManager._launcher_command()`），开机直接把控制台窗口拉起来，设置页文案同步改成「登录系统后自动打开 APEX 总控台窗口，并启动后台服务」；②**补上第二个注册表位置** —— 原先 `status()` 只看 `Run`，**完全不读 `StartupApproved\Run`**，用户在「任务管理器 → 启动应用」里禁用之后 `Run` 值仍在，开关会继续亮绿（**假绿**）。现在 `status()` 分开返回 `registered` / `approved`，`enabled = registered && approved`；`set_enabled()` 写完 `Run` 再同步那个开关（开 = 写 12 字节 `b"\x02" + 8×0`，关 = 删掉这条记录），**否则「开启」会被上一次的禁用记录压过去、开关自己弹回去**。前端新增 `S.startupRegistered / startupApproved` 与 `applyStartupState()`，被禁用时文案改为「已被 Windows 任务管理器的启动项开关禁用，重新打开即可恢复」。`--no-open` 现在**只剩手动调试用途，别写回启动项**。测试 714 → **716 项**；后端新增 3 条，其中 `FakeStartupRegistry` 必须改为**按子键路径分流**（`Run` 与 `StartupApproved\Run` 共用一个字典就测不出「禁用记录压过 Run 值」这条路径）。
+>
+> 2026-09-24 **后端测试基线的真相**：`backend/tests` 当前是 **90 通过 + 4 项既存失败**（`test_apex_launcher.py` 调 `launcher.backend_compatible()`，而 `backend/modules/apex-launcher/runner.py` **从来没有这个函数**，只有 `request_json` / `worker_healthy` / `worker_port_occupied`）。旧文写的「后端 58 项通过」早就不对了。这 4 项与开机自启动轮无关，但**在修掉它之前，别把「后端全绿」当成改动的验收前提**。
+> 本机环境备忘：**`reg.exe` 被安全策略拉黑**（Program Blacklist，不可绕过），且 PowerShell 工具的 stdout 不回传。要读注册表一律走 Python `winreg`，输出靠 bash 里 node / python 的 stdout 回传。
 >
 > 2026-09-24 死代码清扫轮（ponytail ultra —— 「没有触发点就是死的」）：①**播放器子系统从来没接过线**：`DATA.tracks` 种子、`S.playerOn / track / prog`、`case 'play' / 'next'`、每 500ms 跑一次的进度 `setInterval`（`$('.pbar i')`）与 `.player / .pbar / .play / .spacer` 样式，整套删。**`.play` 一直躲过孤儿护栏「428 个类」的检查**，原因是护栏用 `includes()` **子串**匹配而不是词边界 —— `playerOn` 里含 `player`，所以只要有个叫 `playerOn` 的状态字段，`.player` 就永远「有引用」。②**七个没有触发点的 `case`**：`goApps` / `moreActs` / `openProj` / `newProj` / `importProj` / `pickProj` / `go`（后几个是原型演示 toast / 切换项目 / 旧跳转），再加 `toast` —— 它的唯一触发点 `data-act="toast"` 就写在被删的 `openProject` 里。③**`openProject()`（项目详情右侧抽屉）整段删**：首页项目行早已改发 `data-act="enterProj"`，它只被 `case 'openProj'` 调用，纯死码；`runStateOf()` 与 `promoteDevTask()`（从未被调用的薄包装 `moveTaskZone(...,'cur')`）一并清，后者要**连 `smoke-test.js` 的 `__T` 导出清单一起改**，否则测试里 `T.promoteDevTask` 取到 `undefined`。④`S` 里只写不读的 `more` 删除，`case 'appCat'` 尾部那句 `S.more.apps = false` 顺手清。⑤样式表删掉零引用令牌 `--obs-focus-ring` 与**裸 `--purple`**（`var(--purple-bg)` 仍在用，**别连 `--purple-bg` 一起误删**）。测试侧同步：`viewSegs` 去掉已死的「项目详情」条目，两处 `seg()` 锚点从 `function openProject(` 改挂 `function openTool(`。测试 715 → **714 项**（少的就是那条「项目详情走抽屉」断言），体量净化：`app.js` 318→316 KB、`smoke-test.js` 192→191 KB、CSS 孤儿类 428→424。
+>
+> 2026-09-24 **第二轮死代码清扫（ponytail ultra）**：上一轮已把「有触发点才算活」扫过一遍，本轮换口径 ——「**有渲染宿主 / 有读取方才算活**」，专找只剩定义与测试引用的残骸。①**引用展示层整簇死码**：`notesLinkedTo()` / `refBadgeOf()` / `linkBadgeOf()` 的宿主是早已删除的「完整开发上下文」抽屉，`notesLinkedTo` 只被 `refBadgeOf` 调用 —— **互相引用成闭包，单看「出现次数」永远看不出死**，必须做可达性分析（我的第一版脚本就栽在这：减掉自身定义后剩 1 次引用，以为是活的）。**`noteLinksOf()` / `detachTodoRefs()` 是活的，别连坐**（前者被后者调用，后者仍在「删除待办」「保存基本资料」两条链路上）。②`noteIsIdea()`（灵感判定，只有测试在调）、`MOD_ENTRY_PH`（四类入口占位映射，模块页已只剩 `web` 一种类型）。③**`IC` 的 6 个零引用图标键**（`pause` / `skip` / `down` / `send` / `gear` / `chip`）—— 判定难点是 `IC[activity.ico]` 是**动态查表**，必须核对 `addActivity()` 实参传的图标名（实测只有 trash/close/check/pen/plus/copy/reset/ext/play/git）与 `ico:` 种子值，否则会把活图标误删。④**三个只写不读的状态字段**：`S._modId`（写两次、读零次）、`S.prepOpen`（只被 `delete`，来源是被删的「预备检查卡」）、`S.projectFileDeletePreview`（删除预演只走 `data-id`，这份缓存从没人读）。⑤后端：删掉 `backend/_rename_tmp.py`（一次性更名脚本，**硬编码的 `D:\Projects\runner-lab` 已不存在，重跑必崩**）、`execution_service.ACTIVE_STATES`（零引用，同一字面量在 SQL 里内联写死）、`startup_manager.py` 里未使用的 `from pathlib import Path`。测试 716 → **718 项**（三条负向断言锁死：零残留 / 只写不读字段 / 零引用图标键）。**两条方法论坑**：ⓐ「已定义但零 `var()` 引用」的令牌不一定是死的 —— `--pjt-lift-scale` / `--pjt-lift-tilt` 是用 `getComputedStyle().getPropertyValue()` 读的，只扫 `var()` 会误判；ⓑ「markup 类名在 `styles.css` 里没有规则」属**反向死代码**（护栏只查 CSS→markup 一个方向），但删掉它们只会让 markup 变哑、收益≈0，**按「疑似缺失样式」看待，本轮不动** —— 最可疑的是 `.btn-danger`（弹窗动作区惯例是 `m-danger`，「确认移除关联」那颗按钮因此一直是默认色而非红色）。
 >
 > 2026-09-23 专注视图整轮删除：`S.focus` / `S.expanded` 两个状态字段、`viewHome()` 里的专注分支、顶栏 `#focusBtn`、命令面板项、`Ctrl+.` 快捷键、`case 'focus' / 'expandMod' / 'collapseMod'`，以及全部相关样式（`.focus-layout` / `.focus-mods` / `.collapse-row` / `.collapse-trigger` / `.expanded-mod` / `.chev` 与随之失去宿主的 `.hero` 大标题家族）一次性清空；总控台只剩「项目仪表盘」一种形态。**不要再引入收起 / 展开式的次级模块布局。**
 > 同日追加：总控台页头右侧的「当前会话」标签（`.dashboard-period`）也一并删除 —— 页头现在只有 `<h1>项目仪表盘</h1>`，没有任何右侧说明文字。
@@ -41,8 +48,8 @@
 |---|---|---|
 | `index.html` | 15 KB | 入口骨架：侧栏 + 导航 + 顶栏 + `#view` + 三个全局宿主（详情抽屉 / 编辑弹窗 / 命令面板）+ 提示条 |
 | `styles.css` | 89 KB | 全部样式，设计令牌集中在顶部 `:root`（含 `[data-theme="dark"]`） |
-| `app.js` | 316 KB | 全部逻辑：数据种子 `DATA` → 运行时状态 `S` → `render()` 渲染器 → 底部大 `switch` 事件分发（128 个 `case`） |
-| `smoke-test.js` | 191 KB | 冒烟测试（714 项），**同时是本项目的活规格**：读它就知道每个功能的预期行为 |
+| `app.js` | 314 KB | 全部逻辑：数据种子 `DATA` → 运行时状态 `S` → `render()` 渲染器 → 底部大 `switch` 事件分发（128 个 `case`） |
+| `smoke-test.js` | 193 KB | 冒烟测试（718 项），**同时是本项目的活规格**：读它就知道每个功能的预期行为 |
 | `AGENTS.md` | 本文件 | 接手说明书（术语 / 约束 / 架构 / 坑点 / 已删模块） |
 | `backend/` | 后端目录 | FastAPI 应用、可执行模块包、运行日志与后端测试 |
 
@@ -248,12 +255,13 @@ backend/.venv/Scripts/python.exe -m pytest backend/tests -q
 - **四份分散的模块数据（2026-09-16）**：`DATA.scripts` / `DATA.webLib` / `DATA.folderLib` / `DATA.cmdLib` 合并为一份 `DATA.modules`，旧键**已彻底删除**（有负向断言）。连带简化：`larderItems()` 的四个 if/else 分支收敛成一次 `filter(m => m.type === t)`；`addStep()` 的 web / folder / script / cmd 四分支收敛成一次 `find()`（`base.note = m.arg || m.desc`，保持脚本步骤仍显示参数）。**迁移点**：脚本类模块的 `ref` 从内部 id（`s1`…`s5`）改成脚本文件名（`start.sh`…），项目步骤里唯一的引用 `w1s4` 已同步改写；新增模块的入口不参与 `ref` 唯一性以外的校验。**应用类不并入**（有断言锁定），仍走 `S.apps`。
 - **「找不到就顶上第一个」的静默兜底（2026-09-16）**：`startRun()` 原为 `find(...) || curWf()`，项目被删后会**静默拿第一个项目顶上**（用户以为跑的是自己点的那个）；命令面板「常用」还写死了两个项目 id。两者已改：`startRun` 明确判存在并提示，常用分组改由 `DATA.projects` 派生。**这类兜底一律不要**——它把「失败」变成「做了另一件事」，比崩溃更难发现。
 - **0 项目白屏（2026-09-16）**：`viewHome` 的 `cur.st` 与 `viewWorkflows` 的 `curWf().steps` 在 `DATA.projects` 为空时抛异常，异常发生在 `#view.innerHTML` 赋值**之前**，页面会停在上一屏、之后点任何导航都没反应（看起来像卡死）。现为两层防护：`projDeleteAsk` / `projDelete` 拦掉「删除最后一个项目」，两个页面各留一层空态。**记住这个模式**：`render()` 里任何在返回 HTML 之前就取属性的写法，抛错都会造成「页面冻结」而不是报错。
+- **无宿主的引用展示层 + 只写不读的状态字段（2026-09-24 第二轮清扫）**：前端删 `notesLinkedTo` / `refBadgeOf` / `linkBadgeOf`（闭包死码，宿主是已删的「完整开发上下文」抽屉）、`noteIsIdea`、`MOD_ENTRY_PH`、`IC` 的 6 个零引用键、`S._modId` / `S.prepOpen` / `S.projectFileDeletePreview`；后端删 `_rename_tmp.py` / `ACTIVE_STATES` / 未用的 `Path` 导入。**有负向断言锁定，不要加回来**。要重新加「任务 ↔ 记录」的可视关联，先想清楚宿主放哪 —— 关联入口两侧早已删除，`note.links` 现在是只读历史数据，只有 `detachTodoRefs()` 兜底。
 
 ---
 
 ## 12. 交接规则
 
-- **改完必跑 `node smoke-test.js`，末行 `ALL_PASS`**（当前 714 项）；改后端还必须跑 `backend/.venv/Scripts/python.exe -m pytest backend/tests -q`（当前 38 项）。结构变了补断言，删功能补负向断言。
+- **改完必跑 `node smoke-test.js`，末行 `ALL_PASS`**（当前 718 项）；改后端还必须跑 `backend/.venv/Scripts/python.exe -m pytest backend/tests -q`（当前 90 通过 + 4 项 `test_apex_launcher` 既存失败，见第 12 节开头与文首）。结构变了补断言，删功能补负向断言。
 - **本目录没有 git**：动手前自行留退路（复制到目录外），**不要破坏性覆盖**。
 - **根目录只有原 5 个文件，后端统一进 `backend/`，源码是纯 LF**：别在根目录加东西；用脚本批量改写后必须复核 `b.count(b'\r\n') === 0`（见第 10 节第 11 条）。
 - 一次只做一个主题的改动，不顺手重构无关代码；需求不明确先问。

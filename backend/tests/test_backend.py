@@ -206,7 +206,12 @@ class FakeStartupManager:
         self.command = '"C:\\APEX\\pythonw.exe" "C:\\APEX\\console_launcher.py"'
 
     def status(self) -> dict[str, object]:
-        return {"enabled": self.enabled, "command": self.command}
+        return {
+            "enabled": self.enabled,
+            "registered": self.enabled,
+            "approved": True,
+            "command": self.command,
+        }
 
     def set_enabled(self, enabled: bool) -> dict[str, object]:
         self.enabled = enabled
@@ -214,7 +219,10 @@ class FakeStartupManager:
 
 
 class FakeStartupRegistryKey:
-    def __enter__(self):
+    def __init__(self, path: str) -> None:
+        self.path = path
+
+    def __enter__(self) -> "FakeStartupRegistryKey":
         return self
 
     def __exit__(self, *_args) -> None:
@@ -222,30 +230,54 @@ class FakeStartupRegistryKey:
 
 
 class FakeStartupRegistry:
+    """最小 winreg 替身，**按子键路径分流**。
+
+    启动项由两处组成（Run 里放命令、StartupApproved\\Run 里放任务管理器那个开关的
+    状态），共用一个字典就测不出「禁用记录压过 Run 值」这条路径，所以按路径分开存。
+    """
+
     HKEY_CURRENT_USER = object()
     KEY_READ = 1
     KEY_SET_VALUE = 2
     KEY_QUERY_VALUE = 4
     REG_SZ = 1
+    REG_BINARY = 3
 
     def __init__(self) -> None:
-        self.values: dict[str, str] = {}
+        # 真实机器上 Run 键必然存在；StartupApproved 允许不存在（不存在 = 默认启用）。
+        self.keys: dict[str, dict[str, object]] = {WindowsStartupManager.registry_path: {}}
 
-    def OpenKey(self, *_args) -> FakeStartupRegistryKey:
-        return FakeStartupRegistryKey()
+    @property
+    def values(self) -> dict[str, object]:
+        return self.keys[WindowsStartupManager.registry_path]
 
-    def QueryValueEx(self, _key, name: str) -> tuple[str, int]:
-        if name not in self.values:
+    def store(self, path: str) -> dict[str, object]:
+        return self.keys.setdefault(path, {})
+
+    def OpenKey(self, _root, path: str, *_args) -> FakeStartupRegistryKey:
+        if path not in self.keys:
+            raise FileNotFoundError(path)
+        return FakeStartupRegistryKey(path)
+
+    def CreateKeyEx(self, _root, path: str, _reserved: int = 0, _access: int = 0) -> FakeStartupRegistryKey:
+        self.store(path)
+        return FakeStartupRegistryKey(path)
+
+    def QueryValueEx(self, key: FakeStartupRegistryKey, name: str) -> tuple[object, int]:
+        store = self.store(key.path)
+        if name not in store:
             raise FileNotFoundError(name)
-        return self.values[name], self.REG_SZ
+        value = store[name]
+        return value, self.REG_BINARY if isinstance(value, bytes) else self.REG_SZ
 
-    def SetValueEx(self, _key, name: str, _reserved: int, _kind: int, value: str) -> None:
-        self.values[name] = value
+    def SetValueEx(self, key: FakeStartupRegistryKey, name: str, _reserved: int, _kind: int, value: object) -> None:
+        self.store(key.path)[name] = value
 
-    def DeleteValue(self, _key, name: str) -> None:
-        if name not in self.values:
+    def DeleteValue(self, key: FakeStartupRegistryKey, name: str) -> None:
+        store = self.store(key.path)
+        if name not in store:
             raise FileNotFoundError(name)
-        del self.values[name]
+        del store[name]
 
 
 class FakeConsoleWindowManager:
@@ -281,27 +313,71 @@ def test_startup_setting_reads_back_the_windows_registration(tmp_path: Path) -> 
     with build_client(tmp_path, startup_manager=manager) as client:
         assert client.get("/api/settings/startup").json() == {
             "enabled": False,
+            "registered": False,
+            "approved": True,
             "command": manager.command,
         }
         enabled = client.put("/api/settings/startup", json={"enabled": True})
         assert enabled.status_code == 200
-        assert enabled.json() == {"enabled": True, "command": manager.command}
+        assert enabled.json() == {
+            "enabled": True,
+            "registered": True,
+            "approved": True,
+            "command": manager.command,
+        }
         assert manager.enabled is True
 
         disabled = client.put("/api/settings/startup", json={"enabled": False})
         assert disabled.status_code == 200
-        assert disabled.json() == {"enabled": False, "command": manager.command}
+        assert disabled.json() == {
+            "enabled": False,
+            "registered": False,
+            "approved": True,
+            "command": manager.command,
+        }
         assert manager.enabled is False
 
 
 def test_windows_startup_manager_writes_then_reads_back_registration() -> None:
     registry = FakeStartupRegistry()
-    manager = WindowsStartupManager(command='"C:\\APEX\\pythonw.exe" "C:\\APEX\\console_launcher.py" --no-open', registry=registry)
-    assert manager.status()["enabled"] is False
-    assert manager.set_enabled(True)["enabled"] is True
+    manager = WindowsStartupManager(command='"C:\\APEX\\pythonw.exe" "C:\\APEX\\console_launcher.py"', registry=registry)
+    assert manager.status() == {
+        "enabled": False, "registered": False, "approved": True, "command": manager.command,
+    }
+    state = manager.set_enabled(True)
+    assert state["enabled"] is True and state["registered"] is True and state["approved"] is True
     assert registry.values[manager.value_name] == manager.command
+    assert registry.store(manager.approved_path)[manager.value_name] == manager.approved_enabled_value
+
     assert manager.set_enabled(False)["enabled"] is False
     assert manager.value_name not in registry.values
+    assert manager.value_name not in registry.store(manager.approved_path)
+
+
+def test_windows_startup_manager_reports_task_manager_disablement() -> None:
+    """任务管理器禁用后 Run 值仍然在：必须如实报成未启用，且再次开启要覆盖那条禁用记录。
+
+    只比对 Run 值的旧实现会在这里返回 enabled=True —— 也就是开关亮绿、Windows 却
+    根本不启动它，白白让人以为功能坏了。
+    """
+    registry = FakeStartupRegistry()
+    manager = WindowsStartupManager(command='"C:\\APEX\\pythonw.exe" "C:\\APEX\\console_launcher.py"', registry=registry)
+    manager.set_enabled(True)
+    # 模拟用户在「任务管理器 → 启动应用」里点禁用：03 那条记录留下，Run 值不动。
+    registry.store(manager.approved_path)[manager.value_name] = b"\x03" + b"\x00" * 11
+
+    assert manager.status() == {
+        "enabled": False, "registered": True, "approved": False, "command": manager.command,
+    }
+    assert manager.set_enabled(True)["enabled"] is True
+    assert registry.store(manager.approved_path)[manager.value_name] == manager.approved_enabled_value
+
+
+def test_windows_startup_command_opens_the_console_window() -> None:
+    """启动项不许带 --no-open：带了就是登录后只悄悄起服务、一个窗口都不出现。"""
+    command = WindowsStartupManager._launcher_command()
+    assert "--no-open" not in command
+    assert "console_launcher.py" in command
 
 
 def test_console_window_topmost_setting_uses_the_fixed_window_manager(tmp_path: Path) -> None:
