@@ -65,7 +65,7 @@ src += `\nglobalThis.__T = { viewHome, viewApps, viewProjects, viewModules, view
   projRunHTML,
   projDevHTML, projSettingsHTML, projDelete, requestProjectDelete, applyProjectDelete, createProject, setNewProjectStatus, agentContextText, copyText, wfFlowItems,
   basicInfoModalHTML, basicInfoPreflightHTML, parseBasicInfoText, basicInfoParsedHasBody,
-  basicInfoDropList, applyBasicInfo, openBasicInfo, closeBasicInfo, saveBasicInfo, confirmBasicInfo,
+  basicInfoDropList, openBasicInfo, closeBasicInfo, saveBasicInfo, confirmBasicInfo,
   cleanObsidianPath, obsidianUri, obsidianSuggestedPath, obsidianProjectPath, consoleProjectUrl, readObsidianSettings,
   saveObsidianSettings, testObsidianConnection, bindObsidianProject, openObsidianProject,
   obsidianProjectNote, newObsidianProject, updateObsidianProject, obsidianHubHTML,
@@ -491,34 +491,7 @@ try {
     '文本少掉的尾部条目进入删除预演（尾部任务 + 尾部记录各 1 条）');
   check(T.basicInfoDropList('__nope__', p) === null, '未知项目：预演返回 null，不抛异常');
 
-  /* 非破坏落库：只回写字段与正文，不动数据条数；优先级无损 */
-  const snapPlan = JSON.parse(JSON.stringify(T.S.todos.plan));
-  const snapNotesAll = JSON.parse(JSON.stringify(T.S.notes));
-  const snapNext = d1.next, snapModule = d1.module, snapRules = T.S.projRules[w1.id];
-  p.fields.next = '改过的下一步'; p.tasks[4].text = '把优先级无损往返';
-  const r = T.applyBasicInfo(w1.id, p, false);
-  const after = T.S.todos.plan.filter(t => t.proj === w1.name && !t.done);
-  check(r && d1.next === '改过的下一步' && d1.module === snapModule
-    && T.S.todos.plan.length === snapPlan.length && T.S.notes.length === snapNotesAll.length,
-    '保存（不删条目）：只回写字段与条目正文，不改数据条数');
-  check(after[3].pri === '高' && after[4].pri === '低' && after[4].text === '把优先级无损往返',
-    '高 / 低优先级经「编辑 → 保存」无损保留（不会统一写成「中」）');
-  check(after[3].kind === 'fix' && after[4].kind === 'fix',
-    '保存不动任务内部类型：模板恒写「待办」，fix 条目也不会被静默改成 todo');
 
-  /* 破坏性落库：二次确认后按序号 splice 掉多余尾部 */
-  const beforeT = T.S.todos.plan.filter(t => t.proj === w1.name && !t.done).length;
-  const beforeN = T.projNotes(w1.name).length;
-  T.applyBasicInfo(w1.id, pDrop, true);
-  check(T.S.todos.plan.filter(t => t.proj === w1.name && !t.done).length === beforeT - 1
-    && T.projNotes(w1.name).length === beforeN - 1,
-    '确认后真正删除：文本里没有的尾部任务与记录被清理');
-
-  /* 还原（本块对全局数据是破坏性探测，深拷贝回滚，不污染后续用例） */
-  T.S.todos.plan.splice(0, T.S.todos.plan.length, ...snapPlan);
-  T.S.notes.splice(0, T.S.notes.length, ...snapNotesAll);
-  d1.next = snapNext;
-  if (snapRules === undefined) delete T.S.projRules[w1.id]; else T.S.projRules[w1.id] = snapRules;
 } catch (e) { console.log('FAIL 基本资料解析回写 → ' + e.message); fail++; }
 
 /* 3d. 「复制 Agent 上下文」入口 + Agent Context 文本生成 */
@@ -740,7 +713,7 @@ try {
   check(skel.indexOf('>截止</div>') > -1 && skel.indexOf('>截止</div>') < skel.indexOf('>优先级</div>'),
     '共用骨架字段顺序：标题 → 截止 → 优先级');
   check(!skel.includes('<small>'), '共用骨架不带灰字说明（保持与新建一致的干净版式）');
-  const editForm = appSrc2.slice(appSrc2.indexOf('function todoMenu('), appSrc2.indexOf('function openTool('));
+  const editForm = appSrc2.slice(appSrc2.indexOf('function todoMenu('), appSrc2.indexOf('function toggleTheme('));
   check(!editForm.includes('<small>') && !editForm.includes('hint-line'),
     '编辑弹窗去掉全部灰字说明（含已失效的「其余记录可从项目记录编辑窗口关联」）');
   check(editForm.includes('保存</button>') && editForm.includes('删除</button>')
@@ -1932,6 +1905,12 @@ try {
     '无孤儿样式类（' + cssClasses.length + ' 个类全部有引用）' + (orphans.length ? '，残留：' + orphans.join(', ') : ''));
   check(!/\.(wf-card|statusbar|larder-item|proj-tab|ov-ready|st-chip|lead-card|pc-top|album|big-run|run-panel)\b/.test(cssNo),
     '本轮删除的 50 个历史遗骸类名不再出现在样式表');
+  /* 死代码清扫（2026-09-26 第四轮）：子串护栏拦不住的伪装类 + 无生产宿主的抽屉 / 落库函数 */
+  check(!/\.chat\b|\.msg\b|\.typing\b|@keyframes bob|\.anim\{|\.larder\{|\.track\{|\.metrics\{|\.split\{|\.cnt\.warn|\.cnt\.live|\.app-tile\.add|\.cat-chip\.ghost|\.metric b/.test(cssNo),
+    '第四轮清理的孤儿规则不再出现在样式表（对话气泡 / 打字动画 / 云同步 / 旧栅格壳）');
+  check(!appNo.includes('function openTool(') && !appNo.includes("case 'syncNow'") && !appNo.includes('dataset.tool')
+    && !appNo.includes('function applyBasicInfo('),
+    '无生产宿主的抽屉与本地落库兜底已清除（保存一律以后端成功为准）');
   /* 交接说明书：给外部 agent 的入口，不能被静默删掉 */
   const agentsMd = require('fs').readFileSync(path.join(__dirname, 'AGENTS.md'), 'utf8');
   check(agentsMd.includes('术语') && agentsMd.includes('硬约束') && agentsMd.includes('ALL_PASS')
@@ -2012,7 +1991,7 @@ try {
   /* 编辑类：不再出现 openDrawer */
   const editSegs = {
     '新建项目任务': seg('function newTodo(', 'function todoMenu('),
-    '项目任务编辑': seg('function todoMenu(', 'function openTool('),
+    '项目任务编辑': seg('function todoMenu(', 'function toggleTheme('),
     '新建项目': seg('function newProjectDrawer(', 'function createProject('),
     '添加应用·选择': seg('function addApp(', 'function addAppConfirm('),
     '添加应用·命名': seg('function addAppConfirm(', 'function stashAddForm('),
@@ -2027,8 +2006,7 @@ try {
 
   /* 纯查看类：仍走右侧抽屉 */
   const viewSegs = {
-    '应用详情': seg('function appDetail(', 'function toggleAppPin('),
-    '云同步': seg('function openTool(', 'function addApp(')
+    '应用详情': seg('function appDetail(', 'function toggleAppPin(')
   };
   Object.keys(viewSegs).forEach(k => check(viewSegs[k].includes('openDrawer('),
     '纯查看类仍用右侧抽屉：' + k));

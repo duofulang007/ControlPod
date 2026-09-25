@@ -72,7 +72,7 @@ async function apiRequest(path, options){
 const sv = (inner, c) => `<svg viewBox="0 0 24 24" fill="none">${inner.replace(/@/g, c)}</svg>`;
 const C = {
   blue:'#2563EB', purple:'#7C4DFF', teal:'#0B8F8F', amber:'#B0700F',
-  green:'#0E8A3C', indigo:'#6366F1', ink3:'#8A909C', ink2:'#5C6270', brand:'#E8402A'
+  green:'#0E8A3C', indigo:'#6366F1'
 };
 const IC = {
   file:  c => sv('<path d="M6.5 3.5h7l4.5 4.5v12a1.5 1.5 0 0 1-1.5 1.5h-10A1.5 1.5 0 0 1 5 20V5a1.5 1.5 0 0 1 1.5-1.5z" stroke="@s" stroke-width="1.8" stroke-linejoin="round"/><path d="M13.5 3.5V8H18" stroke="@s" stroke-width="1.8" stroke-linejoin="round"/>'.replace(/@s/g,c)),
@@ -87,7 +87,6 @@ const IC = {
   check: c => sv('<path d="M5 12.5l4.6 4.6L19 7" stroke="@s" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/>'.replace(/@s/g,c)),
   close: c => sv('<path d="M6 6l12 12M18 6L6 18" stroke="@s" stroke-width="1.9" stroke-linecap="round"/>'.replace(/@s/g,c)),
   search:c => sv('<circle cx="11" cy="11" r="7" stroke="@s" stroke-width="1.8"/><path d="M16.2 16.2L21 21" stroke="@s" stroke-width="1.8" stroke-linecap="round"/>'.replace(/@s/g,c)),
-  cloud: c => sv('<path d="M7 18.5a4 4 0 0 1-.4-8A5.5 5.5 0 0 1 17.3 10a3.8 3.8 0 0 1-.3 8.5H7z" stroke="@s" stroke-width="1.8" stroke-linejoin="round"/>'.replace(/@s/g,c)),
   trash: c => sv('<path d="M5 7h14M10 7V5h4v2M7.5 7l.8 12.2A1.6 1.6 0 0 0 9.9 20.7h4.2a1.6 1.6 0 0 0 1.6-1.5L16.5 7" stroke="@s" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>'.replace(/@s/g,c)),
   pin:   c => sv('<path d="M9 4.5h6l-1 5 3 3v2H7v-2l3-3-1-5z" stroke="@s" stroke-width="1.7" stroke-linejoin="round"/><path d="M12 14.5V20" stroke="@s" stroke-width="1.7" stroke-linecap="round"/>'.replace(/@s/g,c)),
   tag:   c => sv('<path d="M4.5 11.2V6A1.5 1.5 0 0 1 6 4.5h5.2a2 2 0 0 1 1.4.6l6.3 6.3a2 2 0 0 1 0 2.8l-4.7 4.7a2 2 0 0 1-2.8 0l-6.3-6.3a2 2 0 0 1-.6-1.4z" stroke="@s" stroke-width="1.7" stroke-linejoin="round"/><circle cx="8.8" cy="8.8" r="1.3" fill="@s"/>'.replace(/@s/g,c)),
@@ -340,7 +339,7 @@ const S = {
   startupLoading:false,
   startupUpdating:false,
   startupError:'',
-  windowState:{available:false, topmost:false, width:990, height:700},
+  windowState:{available:false, topmost:false},
   windowUpdating:false,
   windowError:'',
   appCat:'全部',
@@ -1945,9 +1944,7 @@ async function updateStartupSetting(enabled){
 function applyConsoleWindowState(state){
   S.windowState = {
     available:state && state.available === true,
-    topmost:state && state.topmost === true,
-    width:Number(state && state.width) || 990,
-    height:Number(state && state.height) || 700
+    topmost:state && state.topmost === true
   };
   syncConsoleWindowControl();
 }
@@ -3815,7 +3812,7 @@ function parseBasicInfoText(text){
         if (dm){ body = dm[1]; due = dm[2]; }
         /* m[2] 是类型徽章（模板恒写「待办」，老文本可能是「待修改」）—— 刻意不解析：
            解析端一旦回写 kind，同一份文本就会在保存时把 fix 静默改成 todo。
-           回写只认优先级与正文；新条目的 kind 由 applyBasicInfo 兜底成 todo。 */
+           回写只认优先级与正文；新条目的 kind 由 basicInfoApiPayload 兜底成 todo。 */
         tasks.push({ pri:TASK_PRI.includes(m[3]) ? m[3] : '中', text:body.trim(), due });
       }
       return;                                              // 其余续行（如历史文本里的「↳ 引用笔记」）一律忽略
@@ -3848,53 +3845,6 @@ function basicInfoDropList(id, parsed){
   const dropNotes = projNotes(w.name).slice(parsed.notes.length)
     .map(n => ({ kind:'记录', text:n.title }));
   return { w, drop:dropTasks.concat(dropNotes) };
-}
-
-/* 落库（无 DOM 依赖）：只改数据。dropExtras=false 时保持现有条目不被删除 */
-function applyBasicInfo(id, parsed, dropExtras){
-  const w = DATA.projects.find(x => x.id === id); if (!w) return null;
-  const name = w.name;
-  const d = DATA.devContext[name] || (DATA.devContext[name] = {
-    projectId:w.id, module:'', moduleId:'', modulePath:'', files:[], status:'开发中', next:'', lastEdit:'—' });
-  const f = parsed.fields;
-  ['module','moduleId','modulePath','status','next'].forEach(k => { if (f[k] != null) d[k] = f[k]; });
-  if (f.files != null) d.files = f.files.split(/\s+/).filter(Boolean);
-  d.lastEdit = '刚刚';
-
-  const curTasks = projTasks(name).filter(t => !t.done);
-  parsed.tasks.forEach((nt, i) => {
-    const t = curTasks[i];
-    if (t){
-      if (nt.text) t.text = nt.text;
-      /* kind 不回写：模板里的类型徽章恒为「待办」，若跟着回写会把 fix 静默改成 todo */
-      t.pri = nt.pri;
-      t.due = nt.due;
-    } else {
-      allTodos().push({ id:'b' + Date.now().toString(36) + i, text:nt.text, proj:name,
-                        due:nt.due, urgent:false, done:false, kind:'todo', pri:nt.pri });
-    }
-  });
-  if (dropExtras) curTasks.slice(parsed.tasks.length).forEach(t => {
-    const i = allTodos().indexOf(t);
-    if (i >= 0) allTodos().splice(i, 1);
-    detachTodoRefs(t.id);            // 引用只在记录侧存，条目没了要一并断干净
-    pruneCurTasks(t.id);             // 当前任务区里的选区同步清理
-  });
-
-  const curNotes = projNotes(name);
-  parsed.notes.forEach((nn, i) => {
-    const n = curNotes[i];
-    if (n){ if (nn.tag) n.tag = nn.tag; if (nn.title) n.title = nn.title; }
-    else S.notes.push({ id:'b' + Date.now().toString(36) + 'n' + i, title:nn.title,
-                        tag:nn.tag || '日常', proj:name, pinned:false, time:'刚刚', body:'' });
-  });
-  if (dropExtras) curNotes.slice(parsed.notes.length).forEach(n => {
-    const i = S.notes.indexOf(n);
-    if (i >= 0) S.notes.splice(i, 1);
-  });
-
-  if (parsed.rules.length) S.projRules[w.id] = parsed.rules.slice();
-  return { name, tasks:parsed.tasks.length, notes:parsed.notes.length, rules:parsed.rules.length };
 }
 
 /* 弹窗本体：与项目记录编辑共用 #noteModal 宿主，样式完全沿用居中弹窗那一套 */
@@ -4591,25 +4541,6 @@ function todoMenu(id){
     ${mActs(`<button class="btn btn-primary btn-sm" data-act="saveTodoEdit" data-id="${t.id}">${IC.check('#fff')}保存</button>
       <button class="btn btn-ghost btn-sm" data-act="delTodoItem" data-id="${t.id}">${IC.trash('var(--ink-2)')}删除</button>
       <button class="btn btn-ghost btn-sm" data-act="closeModal">取消</button>`)}`, { form:true });
-}
-
-function openTool(k){
-  if (k==='sync'){
-    openDrawer(`${dHead('云同步','3 个项目 · 上次同步 2 分钟前')}
-      <div class="track"><i style="width:68%"></i></div>
-      <div class="metrics" style="gap:24px">
-        <span class="metric">已用空间 <b>4.8 GB</b></span>
-        <span class="metric">文件 <b>68</b></span>
-        <span class="metric">冲突 <b>0</b></span>
-      </div>
-      <div class="list">
-        ${DATA.projects.map(p=>`
-          <div class="row"><span class="ricon">${IC.cloud('var(--ink-2)')}</span>
-            <span class="r-title">${esc(p.name)}</span><span class="badge b-green">已同步</span>
-            <span class="r-time">${esc(p.updated)}</span></div>`).join('')}
-      </div>
-      <button class="btn btn-primary btn-sm" data-act="syncNow">${IC.cloud('#fff')}立即同步</button>`);
-  }
 }
 
 /* ---------------- 行为 ---------------- */
@@ -5424,7 +5355,6 @@ document.addEventListener('click', e => {
     case 'goSettings': closePops(); go('settings'); break;
     case 'readAll':  S.notices.forEach(n=>n.read = true); $('#bellBadge').style.display='none';
                      toast('已全部标为已读'); closePops(); break;
-    case 'syncNow':  toast('云同步已启动'); break;
   }
 });
 
@@ -5432,7 +5362,6 @@ $('#nav').addEventListener('click', e => {
   const b = e.target.closest('.nav-item'); if(!b) return;
   const p = b.dataset.page;
   if (p){ if (p==='workflows') S.wfEdit = null; go(p); }
-  if (b.dataset.tool) openTool(b.dataset.tool);
 });
 
 $('#searchBox').addEventListener('click', openPalette);
