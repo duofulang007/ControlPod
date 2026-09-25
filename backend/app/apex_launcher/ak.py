@@ -3,7 +3,6 @@
 import os
 import threading
 import time
-import uuid
 from datetime import datetime, timezone
 
 from . import config as config_module
@@ -19,7 +18,6 @@ except Exception:
 
 AK_EXE, AK_WINDOW = "AK.exe", "AK加速器"
 AK_PROCESSES = [AK_EXE, "AKPlatform.exe"]
-AUTOMATION_REVISION = "window-focus-v7"
 ACCELERATING, IDLE, PAUSED, UNKNOWN = "accelerating", "idle", "paused", "unknown"
 TEMPLATES = {
     "accelerate": "accelerate.png",
@@ -107,59 +105,6 @@ def _write_image(path, image) -> bool:
 def _ak_process_ids(cfg: dict) -> set[int]:
     install_dir = os.path.dirname(cfg.get("ak_path", "")) or None
     return set(proc.find_related_pids(AK_PROCESSES, install_dir))
-
-
-def _find_ak_window(cfg: dict):
-    process_ids = _ak_process_ids(cfg)
-    return proc.find_window(AK_WINDOW, process_ids=process_ids) if process_ids else None
-
-
-def _wait_ak_handle(cfg: dict, timeout: float):
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
-        handle = _find_ak_window(cfg)
-        if handle:
-            return handle
-        time.sleep(0.25)
-    return None
-
-
-def _wait_ak_window(cfg: dict, log, timeout: float, settle: float = 0) -> bool:
-    if _wait_ak_handle(cfg, timeout):
-        proc.activate_window(AK_WINDOW, process_ids=_ak_process_ids(cfg))
-        if settle:
-            time.sleep(settle)
-        return True
-    _set_failure("AK_WINDOW_TIMEOUT")
-    log.error("AK 窗口未出现，已安全停止")
-    return False
-
-
-def ensure_ak_running(cfg: dict, log) -> bool:
-    log.step("AK 检查")
-    proc.set_dpi_aware()
-    timeout, settle = float(cfg.get("ak_window_timeout", 10)), float(cfg.get("ak_page_settle_seconds", 3))
-    path = cfg.get("ak_path", "")
-    if not path or not os.path.exists(path):
-        _set_failure("MISSING_AK_PATH")
-        log.error(f"未找到 AK 加速器: {path}")
-        return False
-    if ak_running():
-        handle = _wait_ak_handle(cfg, min(timeout, 1.5))
-        if handle:
-            log.info("AK 已在运行，窗口已找到并激活")
-            proc.activate_window(AK_WINDOW, process_ids=_ak_process_ids(cfg))
-            if settle:
-                time.sleep(settle)
-            return True
-        log.info("AK 进程在后台但窗口未显示，重新执行 AK.exe 唤出界面")
-    log.info(f"执行 AK 启动命令: {path}")
-    if not proc.start_process(path):
-        _set_failure("AK_START_FAILED")
-        log.error("AK 启动命令执行失败；请检查路径或 Windows 权限")
-        return False
-    log.info("AK 启动命令已执行，正在等待窗口出现")
-    return _wait_ak_window(cfg, log, timeout, settle)
 
 
 def _capture_window_bgr(cfg: dict):
@@ -371,6 +316,30 @@ def observe_state(cfg: dict, log) -> str:
 
 
 def _click_visual(cfg: dict, which: str, log, action_id: str, found=None) -> bool:
+    """定位 → 移动 → 点击，并把「瞬时失败」和「确定性失败」分开处理。
+
+    实测（2026-09-25）：本机指针绝对定位会**偶发**被系统拒绝——`SetCursorPos` 返回 0、
+    指针纹丝不动，而 pyautogui 不看这个返回值，于是只表现为「读回来的坐标对不上」。
+    这类瞬时失败重试几次就过去了；而「模板没找到」「状态识别不出」这种确定性失败重试也没用，
+    必须直接停。旧启动器一直带 `ak_click_retries` 这道重试（core/config.py 里就是 3 次 / 0.35s），
+    移植到这一版时丢了，所以现在一次抖动就把整条流程卡在第一步、后面的步骤再也走不到。
+    """
+    attempts = max(1, int(cfg.get("ak_click_retries", 3)))
+    interval = max(0.0, float(cfg.get("ak_click_interval", 0.35)))
+    transient = {"AK_MOUSE_CONTROL_UNAVAILABLE", "AK_CLICK_INJECTION_BLOCKED"}
+    for attempt in range(1, attempts + 1):
+        # 重试时重新定位（found=None），不要拿着上一次那份已经过期的坐标反复点
+        if _click_visual_once(cfg, which, log, action_id, found if attempt == 1 else None):
+            return True
+        code = last_failure().get("code")
+        if code not in transient or attempt >= attempts:
+            return False
+        log.warn(f"[{which}] 第 {attempt}/{attempts} 次点击未被系统接受（{code}）；{interval}s 后重新定位重试")
+        time.sleep(interval)
+    return False
+
+
+def _click_visual_once(cfg: dict, which: str, log, action_id: str, found=None) -> bool:
     _failure.capture_code = None
     proc.activate_window(AK_WINDOW, process_ids=_ak_process_ids(cfg))
     locate_started = time.monotonic()
@@ -399,12 +368,23 @@ def _click_visual(cfg: dict, which: str, log, action_id: str, found=None) -> boo
         input_result = proc.last_input_result()
         raw_actual = input_result.get("actual")
         actual = tuple(raw_actual) if isinstance(raw_actual, list) and len(raw_actual) == 2 else proc.get_cursor_pos()
-        if actual == (int(x), int(y)):
+        reason = str(input_result.get("reason") or input_result.get("error") or "")
+        log.info("输入助手返回：" + str({
+            key: input_result[key] for key in
+            ("driver", "returncode", "error", "error_detail", "stderr", "elapsed_seconds")
+            if input_result.get(key) not in (None, "")
+        }))
+        if reason == "pointer_move_rejected":
+            code = "AK_MOUSE_CONTROL_UNAVAILABLE"
+            message = (f"系统拒绝了指针绝对定位（mouse_event 与 SetCursorPos 都没生效），"
+                       f"指针还停在 ({actual[0]},{actual[1]})，目标 ({x},{y})；未执行点击")
+        elif actual == (int(x), int(y)):
             code = "AK_CLICK_INJECTION_BLOCKED"
             message = f"鼠标已到目标 ({actual[0]},{actual[1]})，但 Windows 未确认左键按下/抬起；点击未执行"
         else:
             code = "AK_MOUSE_CONTROL_UNAVAILABLE"
-            message = f"鼠标未到视觉目标：目标 ({x},{y})，实际 ({actual[0]},{actual[1]})；点击未执行"
+            detail = f"（输入助手原因：{reason}）" if reason else ""
+            message = f"鼠标未到视觉目标：目标 ({x},{y})，实际 ({actual[0]},{actual[1]}){detail}；点击未执行"
         _set_failure(code, _diagnostic(cfg, f"mouse-{which}"))
         log.error(message)
         return False
@@ -413,76 +393,6 @@ def _click_visual(cfg: dict, which: str, log, action_id: str, found=None) -> boo
     if cooldown:
         time.sleep(cooldown)
     return True
-
-
-def test_mouse_move(cfg: dict, log) -> dict:
-    """Start AK when needed, find the start button, and move only (never click)."""
-    log.step("AK 鼠标移动测试")
-    if not ak_running() and not ensure_ak_running(cfg, log):
-        return {"ok": False, "code": last_failure()["code"], "message": "AK 未能启动", "target": None, "actual": None, "score": None, "diagnostic_path": last_failure()["diagnostic_path"]}
-    if not _wait_ak_window(cfg, log, float(cfg.get("ak_window_timeout", 10))):
-        return {"ok": False, "code": last_failure()["code"], "message": "未找到 AK 窗口", "target": None, "actual": None, "score": None, "diagnostic_path": last_failure()["diagnostic_path"]}
-    found = find_visual(cfg, "accelerate")
-    if not found:
-        path = _diagnostic(cfg, "missing-accelerate-test")
-        _set_failure("AK_TEMPLATE_NOT_FOUND", path)
-        log.error("未找到红色“加速游戏”按钮；未移动鼠标")
-        return {"ok": False, "code": "AK_TEMPLATE_NOT_FOUND", "message": "未识别到红色“加速游戏”按钮", "target": None, "actual": None, "score": None, "diagnostic_path": path}
-    x, y, score = found
-    moved = proc.move_mouse(x, y)
-    raw_actual = proc.last_input_result().get("actual")
-    actual = tuple(raw_actual) if isinstance(raw_actual, list) and len(raw_actual) == 2 else proc.get_cursor_pos()
-    if not moved:
-        path = _diagnostic(cfg, "mouse-move-test")
-        _set_failure("AK_MOUSE_CONTROL_UNAVAILABLE", path)
-        log.error("鼠标未移动到视觉目标；未执行点击")
-        return {"ok": False, "code": "AK_MOUSE_CONTROL_UNAVAILABLE", "message": "鼠标未移动到按钮中心", "target": [x, y], "actual": list(actual), "score": score, "diagnostic_path": path}
-    log.ok(f"鼠标已移动到按钮中心 ({x}, {y})，未执行点击")
-    return {"ok": True, "code": None, "message": "鼠标已移动到按钮中心；未执行点击", "target": [x, y], "actual": list(actual), "score": score, "diagnostic_path": None}
-
-
-def start_acceleration_for_ui(cfg: dict, log) -> dict:
-    """Run the real AK-only start sequence; Steam and the game are never touched here."""
-    ok = start_acceleration(cfg, log)
-    failure = last_failure()
-    messages = {
-        **CAPTURE_FAILURE_MESSAGES,
-        "MISSING_AK_PATH": "没有找到配置中的 AK.exe，请检查 AK 路径",
-        "AK_START_FAILED": "Windows 未能启动 AK.exe，请检查路径或权限",
-        "AK_WINDOW_TIMEOUT": "AK 启动后没有检测到窗口，请查看 AK 是否弹出更新或登录界面",
-        "AK_VISION_UNAVAILABLE": "视觉识别依赖不可用",
-        "AK_STATE_UNRECOGNIZED": "无法识别当前 AK 页面，未执行点击",
-        "AK_TEMPLATE_NOT_FOUND": "没有识别到需要点击的 AK 按钮，未执行点击",
-        "AK_MOUSE_CONTROL_UNAVAILABLE": "鼠标没有到达识别目标，未执行点击",
-        "AK_CLICK_INJECTION_BLOCKED": "鼠标已到按钮，但 Windows 阻止了左键输入，请检查 AK 与启动台权限是否一致",
-        "AK_STATE_CONFIRMATION_TIMEOUT": "点击后没有确认到小方形停止图标，加速未确认",
-    }
-    return {
-        "ok": ok,
-        "code": None if ok else failure["code"],
-        "message": "已确认 AK 正在加速 APEX" if ok else messages.get(failure["code"], "AK 加速未完成，请查看步骤日志"),
-        "state": ACCELERATING if ok else (UNKNOWN if failure["code"] in CAPTURE_FAILURE_MESSAGES else observe_state(cfg, log)),
-        "diagnostic_path": None if ok else failure["diagnostic_path"],
-    }
-
-
-def pause_and_close_for_ui(cfg: dict, log) -> dict:
-    """Run the real AK-only stop sequence; Steam and the game are never touched here."""
-    ok = pause_and_close_ak(cfg, log)
-    failure = last_failure()
-    messages = {
-        **CAPTURE_FAILURE_MESSAGES,
-        "AK_CLOSE_FAILED": "会员计时已确认暂停，但 AK 窗口或后台进程未能退出",
-        "AK_CLICK_INJECTION_BLOCKED": "鼠标已到按钮，但 Windows 阻止了左键输入，请检查 AK 与启动台权限是否一致",
-        "AK_STATE_CONFIRMATION_TIMEOUT": "操作后没有确认到目标状态，已停止后续步骤",
-    }
-    return {
-        "ok": ok,
-        "code": None if ok else failure["code"],
-        "message": "已确认会员计时暂停，AK 已关闭" if ok else messages.get(failure["code"], "AK 暂停或关闭未完成，请查看步骤日志"),
-        "state": PAUSED if ok else (observe_state(cfg, log) if failure["code"] not in CAPTURE_FAILURE_MESSAGES and ak_running() else UNKNOWN),
-        "diagnostic_path": None if ok else failure["diagnostic_path"],
-    }
 
 
 def _wait_any_state(cfg: dict, log, expected: tuple[str, ...]) -> str | None:
@@ -510,83 +420,6 @@ def _wait_any_state(cfg: dict, log, expected: tuple[str, ...]) -> str | None:
     _set_failure("AK_STATE_CONFIRMATION_TIMEOUT", _diagnostic(cfg, f"wait-{expected}"))
     log.error("AK 状态确认超时；未重复点击")
     return None
-
-
-def _wait_state(cfg: dict, log, expected: str) -> bool:
-    return _wait_any_state(cfg, log, (expected,)) == expected
-
-
-def start_acceleration(cfg: dict, log) -> bool:
-    log.step("AK 加速确认")
-    if not ensure_ak_running(cfg, log):
-        return False
-    state = observe_state(cfg, log)
-    if state == ACCELERATING:
-        log.ok("已视觉确认 APEX 正在加速，跳过点击")
-        return True
-    # AK 的未加速页面会同时显示绿色“恢复”和红色“加速游戏”。
-    # “恢复”仅用于停止流程的会员计时确认；启动统一从“加速游戏”进入，
-    # 以随后出现的小方形停止图标作为唯一成功条件。
-    if state not in (IDLE, PAUSED):
-        return False
-    if not _click_visual(cfg, "accelerate", log, uuid.uuid4().hex[:8]):
-        return False
-    if _wait_state(cfg, log, ACCELERATING):
-        log.ok("已视觉确认 APEX 加速成功")
-        return True
-    return False
-
-
-def pause_and_close_ak(cfg: dict, log) -> bool:
-    log.step("AK 暂停并关闭")
-    if not ak_running():
-        log.info("AK 未运行，先打开界面确认会员计时状态")
-    if not ensure_ak_running(cfg, log):
-        return False
-    state = observe_state(cfg, log)
-    paused_confirmed = False
-    if state == ACCELERATING:
-        if not _click_visual(cfg, "pause", log, uuid.uuid4().hex[:8]):
-            return False
-        state = _wait_any_state(cfg, log, (IDLE, PAUSED))
-        if state is None:
-            return False
-        paused_confirmed = state == PAUSED
-    if state == IDLE:
-        log.info("加速已停止，继续暂停会员计时")
-        if not _click_visual(cfg, "member_pause", log, uuid.uuid4().hex[:8]):
-            return False
-        if not _wait_state(cfg, log, PAUSED):
-            return False
-    elif state != PAUSED:
-        return False
-    elif not paused_confirmed and not _wait_state(cfg, log, PAUSED):
-        return False
-    log.ok("已视觉确认会员计时暂停")
-    install_dir = os.path.dirname(cfg.get("ak_path", "")) or None
-    log.info("会员计时已暂停，直接强制结束 AK 及安装目录内后台进程")
-    if not proc.kill_processes([AK_EXE, "AKPlatform.exe"], grace=5, install_dir=install_dir, graceful=False):
-        _set_failure("AK_CLOSE_FAILED")
-        log.error("AK 窗口或安装目录内的后台进程仍未退出")
-        return False
-    log.ok("AK 窗口和安装目录内的后台进程均已退出")
-    return True
-
-
-def capture_template(which: str, cfg: dict, log) -> bool:
-    if which not in TEMPLATES or not HAVE_VISION:
-        return False
-    x, y = proc.get_cursor_pos()
-    try:
-        with mss.mss() as sct:
-            shot = sct.grab({"left": max(0, x - 48), "top": max(0, y - 48), "width": 96, "height": 96})
-            if not _write_image(template_path(which), cv2.cvtColor(np.array(shot), cv2.COLOR_BGRA2BGR)):
-                raise OSError("模板图片写入失败")
-        log.ok(f"已保存视觉模板 {template_path(which).name}")
-        return True
-    except Exception as exc:
-        log.error(f"截图失败: {exc}")
-        return False
 
 
 def calibrated(cfg: dict, which: str) -> bool:

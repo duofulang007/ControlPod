@@ -35,6 +35,11 @@ DEFAULT_CONFIG = {
     "ak_state_poll_interval": 0.05,
     "ak_stable_samples": 2,
     "ak_action_cooldown": 0.05,
+    # 点击重试：旧启动器（core/config.py）里就是这两个值，移植时丢了。
+    # 视觉点击撞上系统对指针定位的瞬时拒绝（实测 SetCursorPos 会返回 0）时，
+    # 重新定位再点一次，而不是一次抖动就中断整条流程。
+    "ak_click_retries": 3,
+    "ak_click_interval": 0.35,
     "wait_steam_after_launch": 6,
     "wait_game_process": 120,
     "game_process_poll_interval": 0.25,
@@ -104,9 +109,3 @@ def load_config() -> dict:
     cfg["ak_control"] = "vision"
     return cfg
 
-
-def save_config(cfg: dict) -> None:
-    path = config_path()
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("w", encoding="utf-8") as handle:
-        json.dump(cfg, handle, ensure_ascii=False, indent=2)

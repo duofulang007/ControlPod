@@ -75,38 +75,6 @@ def wait_game_active(cfg: dict, log, cancel_flag=None) -> bool:
     return False
 
 
-def launch_game(cfg: dict, log, cancel_flag=None) -> bool:
-    if not start_game(cfg, log):
-        return False
-    return wait_game_active(cfg, log, cancel_flag=cancel_flag)
-
-
-def close_game(cfg: dict, log) -> bool:
-    started = time.monotonic()
-    log.step("游戏关闭")
-    if not game_active():
-        log.info("游戏未在运行，跳过")
-        return True
-    log.info("向游戏窗口发送关闭请求")
-    for name in GAME_PROCESSES:
-        for pid in proc.find_pids_by_name(name):
-            proc.send_wm_close_to_pid(pid)
-    deadline = time.monotonic() + max(0.0, float(cfg.get("game_close_grace", 2.0)))
-    poll_interval = max(0.05, float(cfg.get("game_close_poll_interval", 0.1)))
-    while True:
-        if not game_active():
-            log.ok(f"游戏已关闭，耗时 {time.monotonic() - started:.2f}s")
-            return True
-        if time.monotonic() >= deadline:
-            break
-        time.sleep(poll_interval)
-    log.warn("游戏未响应，强制结束")
-    proc.kill_processes(GAME_PROCESSES, grace=1)
-    if game_active():
-        log.error("游戏进程仍存在")
-        return False
-    log.ok(f"游戏已关闭，耗时 {time.monotonic() - started:.2f}s")
-    return True
 
 
 def force_close_game(cfg: dict, log) -> bool:

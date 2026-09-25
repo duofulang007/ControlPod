@@ -1,7 +1,6 @@
 # -*- coding: utf-8 -*-
 """Steam smart-start and graceful shutdown."""
 import os
-import subprocess
 import time
 
 from . import processes as proc
@@ -35,41 +34,6 @@ def ensure_steam_running(cfg: dict, log) -> bool:
     log.warn("Steam 未在限定时间内出现，继续后续步骤")
     return True
 
-
-def close_steam(cfg: dict, log) -> bool:
-    started = time.monotonic()
-    log.step("Steam 关闭")
-    if not proc.is_process_running("steam.exe"):
-        log.info("Steam 未在运行，跳过")
-        return True
-    steam = cfg.get("steam_path", "")
-    if steam and os.path.exists(steam):
-        log.info("调用 steam -shutdown 优雅退出")
-        try:
-            subprocess.Popen(
-                [steam, "-shutdown"],
-                creationflags=subprocess.CREATE_NO_WINDOW if proc.is_windows() else 0,
-            )
-        except Exception as exc:
-            log.warn(f"优雅退出调用失败: {exc}")
-        deadline = time.monotonic() + max(
-            0.0, min(float(cfg.get("steam_close_wait", 2.0)), 8.0)
-        )
-        poll_interval = max(
-            0.05, float(cfg.get("steam_close_poll_interval", 0.1))
-        )
-        while proc.is_process_running("steam.exe") and time.monotonic() < deadline:
-            time.sleep(poll_interval)
-    if not proc.is_process_running("steam.exe"):
-        log.ok(f"Steam 已优雅退出，耗时 {time.monotonic() - started:.2f}s")
-        return True
-    log.warn("Steam 未退出，强制结束")
-    proc.kill_processes(["steam.exe", "steamservice.exe"], grace=1)
-    if proc.is_process_running("steam.exe"):
-        log.error("Steam 仍未能关闭")
-        return False
-    log.ok(f"Steam 已关闭，耗时 {time.monotonic() - started:.2f}s")
-    return True
 
 
 def force_close_steam(cfg: dict, log) -> bool:
