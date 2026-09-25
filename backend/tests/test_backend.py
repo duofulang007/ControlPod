@@ -373,11 +373,23 @@ def test_windows_startup_manager_reports_task_manager_disablement() -> None:
     assert registry.store(manager.approved_path)[manager.value_name] == manager.approved_enabled_value
 
 
-def test_windows_startup_command_opens_the_console_window() -> None:
-    """启动项不许带 --no-open：带了就是登录后只悄悄起服务、一个窗口都不出现。"""
+def test_windows_startup_command_opens_the_console_window(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """启动项不许带 --no-open：登录后必须出窗口。
+
+    现役契约：指向 WinUI 壳 exe —— 壳自己开总控台窗口，并托管后端（探测 8765，
+    没跑就静默拉起 uvicorn）。壳还没构建时回退 console_launcher（同样开窗）。
+    两种形态都不允许「只悄悄起服务、屏幕零反馈」的静默启动。
+    """
     command = WindowsStartupManager._launcher_command()
     assert "--no-open" not in command
-    assert "console_launcher.py" in command
+    assert "ApexShell.exe" in command
+
+    # 壳没构建的环境（比如刚 clone 没编译）：回退旧方案，功能不倒退
+    import app.config as config
+    monkeypatch.setattr(config, "PROJECT_DIR", tmp_path / "no-shell-here")
+    fallback = WindowsStartupManager._launcher_command()
+    assert "--no-open" not in fallback
+    assert "console_launcher.py" in fallback
 
 
 def test_console_window_topmost_setting_uses_the_fixed_window_manager(tmp_path: Path) -> None:

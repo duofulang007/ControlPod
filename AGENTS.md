@@ -1,85 +1,64 @@
 # AGENTS.md · 控制台项目接手说明书
 
-> 给任何要读 / 改这个项目的 agent：**先读这一份，再动代码**。它包含了术语、硬约束、架构、验证方式与全部已踩过的坑。
-> 最后更新：2026-09-24 · 测试基线：**前端 ALL_PASS（718 项）+ 后端 90 项通过（另有 4 项 `test_apex_launcher` 既存失败，见下）**
+> 给任何要读 / 改这个项目的 agent：**先读这一份，再动代码**。术语、硬约束、架构、验证方式与全部已踩过的坑都在这里。
+> 最后更新：2026-09-25 · 测试基线：**前端 `node smoke-test.js` ALL_PASS（728 项）+ 后端 `pytest backend/tests -q` 98 通过（另有 4 项 `test_apex_launcher` 既存失败，见 §10 末）+ 壳自测 `ApexShell.exe --selftest`（238 项）**
 >
-> 2026-09-24 开机自启动轮（「功能其实是好的，坏的是它看不见」）：多弗朗报「设置里的开机自启动也没实现」，**排查结论是它早就实现了、而且当天开机后就真的跑起来了**。三条证据：①`HKCU\Software\Microsoft\Windows\CurrentVersion\Run\APEX Console` 存在；②`HKCU\...\Explorer\StartupApproved\Run\APEX Console` = `02…`（**02 = 启用，03 = 被任务管理器禁用**）；③`backend/data/console-launcher.log` 有 `[2026-09-24 13:34:20] decision=start` → `ready pid=…`，而当机 uptime 只有 0.3 小时（开机 13:33:42）→ **开机后 38 秒启动项就执行了**。误判根因是注册命令带了 **`--no-open`**：开机只把服务悄悄放进后台、**一个窗口都不弹**，屏幕上零反馈。判据很硬 —— 那条日志**没有** `profile at launch …` 行，而只有 `--no-open` 的调用才会这样（`start.ps1` 直连 uvicorn，根本不写这个日志）。本轮两处修：①**注册命令去掉 `--no-open`**（`WindowsStartupManager._launcher_command()`），开机直接把控制台窗口拉起来，设置页文案同步改成「登录系统后自动打开 APEX 总控台窗口，并启动后台服务」；②**补上第二个注册表位置** —— 原先 `status()` 只看 `Run`，**完全不读 `StartupApproved\Run`**，用户在「任务管理器 → 启动应用」里禁用之后 `Run` 值仍在，开关会继续亮绿（**假绿**）。现在 `status()` 分开返回 `registered` / `approved`，`enabled = registered && approved`；`set_enabled()` 写完 `Run` 再同步那个开关（开 = 写 12 字节 `b"\x02" + 8×0`，关 = 删掉这条记录），**否则「开启」会被上一次的禁用记录压过去、开关自己弹回去**。前端新增 `S.startupRegistered / startupApproved` 与 `applyStartupState()`，被禁用时文案改为「已被 Windows 任务管理器的启动项开关禁用，重新打开即可恢复」。`--no-open` 现在**只剩手动调试用途，别写回启动项**。测试 714 → **716 项**；后端新增 3 条，其中 `FakeStartupRegistry` 必须改为**按子键路径分流**（`Run` 与 `StartupApproved\Run` 共用一个字典就测不出「禁用记录压过 Run 值」这条路径）。
->
-> 2026-09-24 **后端测试基线的真相**：`backend/tests` 当前是 **90 通过 + 4 项既存失败**（`test_apex_launcher.py` 调 `launcher.backend_compatible()`，而 `backend/modules/apex-launcher/runner.py` **从来没有这个函数**，只有 `request_json` / `worker_healthy` / `worker_port_occupied`）。旧文写的「后端 58 项通过」早就不对了。这 4 项与开机自启动轮无关，但**在修掉它之前，别把「后端全绿」当成改动的验收前提**。
-> 本机环境备忘：**`reg.exe` 被安全策略拉黑**（Program Blacklist，不可绕过），且 PowerShell 工具的 stdout 不回传。要读注册表一律走 Python `winreg`，输出靠 bash 里 node / python 的 stdout 回传。
->
-> 2026-09-24 死代码清扫轮（ponytail ultra —— 「没有触发点就是死的」）：①**播放器子系统从来没接过线**：`DATA.tracks` 种子、`S.playerOn / track / prog`、`case 'play' / 'next'`、每 500ms 跑一次的进度 `setInterval`（`$('.pbar i')`）与 `.player / .pbar / .play / .spacer` 样式，整套删。**`.play` 一直躲过孤儿护栏「428 个类」的检查**，原因是护栏用 `includes()` **子串**匹配而不是词边界 —— `playerOn` 里含 `player`，所以只要有个叫 `playerOn` 的状态字段，`.player` 就永远「有引用」。②**七个没有触发点的 `case`**：`goApps` / `moreActs` / `openProj` / `newProj` / `importProj` / `pickProj` / `go`（后几个是原型演示 toast / 切换项目 / 旧跳转），再加 `toast` —— 它的唯一触发点 `data-act="toast"` 就写在被删的 `openProject` 里。③**`openProject()`（项目详情右侧抽屉）整段删**：首页项目行早已改发 `data-act="enterProj"`，它只被 `case 'openProj'` 调用，纯死码；`runStateOf()` 与 `promoteDevTask()`（从未被调用的薄包装 `moveTaskZone(...,'cur')`）一并清，后者要**连 `smoke-test.js` 的 `__T` 导出清单一起改**，否则测试里 `T.promoteDevTask` 取到 `undefined`。④`S` 里只写不读的 `more` 删除，`case 'appCat'` 尾部那句 `S.more.apps = false` 顺手清。⑤样式表删掉零引用令牌 `--obs-focus-ring` 与**裸 `--purple`**（`var(--purple-bg)` 仍在用，**别连 `--purple-bg` 一起误删**）。测试侧同步：`viewSegs` 去掉已死的「项目详情」条目，两处 `seg()` 锚点从 `function openProject(` 改挂 `function openTool(`。测试 715 → **714 项**（少的就是那条「项目详情走抽屉」断言），体量净化：`app.js` 318→316 KB、`smoke-test.js` 192→191 KB、CSS 孤儿类 428→424。
->
-> 2026-09-24 **第二轮死代码清扫（ponytail ultra）**：上一轮已把「有触发点才算活」扫过一遍，本轮换口径 ——「**有渲染宿主 / 有读取方才算活**」，专找只剩定义与测试引用的残骸。①**引用展示层整簇死码**：`notesLinkedTo()` / `refBadgeOf()` / `linkBadgeOf()` 的宿主是早已删除的「完整开发上下文」抽屉，`notesLinkedTo` 只被 `refBadgeOf` 调用 —— **互相引用成闭包，单看「出现次数」永远看不出死**，必须做可达性分析（我的第一版脚本就栽在这：减掉自身定义后剩 1 次引用，以为是活的）。**`noteLinksOf()` / `detachTodoRefs()` 是活的，别连坐**（前者被后者调用，后者仍在「删除待办」「保存基本资料」两条链路上）。②`noteIsIdea()`（灵感判定，只有测试在调）、`MOD_ENTRY_PH`（四类入口占位映射，模块页已只剩 `web` 一种类型）。③**`IC` 的 6 个零引用图标键**（`pause` / `skip` / `down` / `send` / `gear` / `chip`）—— 判定难点是 `IC[activity.ico]` 是**动态查表**，必须核对 `addActivity()` 实参传的图标名（实测只有 trash/close/check/pen/plus/copy/reset/ext/play/git）与 `ico:` 种子值，否则会把活图标误删。④**三个只写不读的状态字段**：`S._modId`（写两次、读零次）、`S.prepOpen`（只被 `delete`，来源是被删的「预备检查卡」）、`S.projectFileDeletePreview`（删除预演只走 `data-id`，这份缓存从没人读）。⑤后端：删掉 `backend/_rename_tmp.py`（一次性更名脚本，**硬编码的 `D:\Projects\runner-lab` 已不存在，重跑必崩**）、`execution_service.ACTIVE_STATES`（零引用，同一字面量在 SQL 里内联写死）、`startup_manager.py` 里未使用的 `from pathlib import Path`。测试 716 → **718 项**（三条负向断言锁死：零残留 / 只写不读字段 / 零引用图标键）。**两条方法论坑**：ⓐ「已定义但零 `var()` 引用」的令牌不一定是死的 —— `--pjt-lift-scale` / `--pjt-lift-tilt` 是用 `getComputedStyle().getPropertyValue()` 读的，只扫 `var()` 会误判；ⓑ「markup 类名在 `styles.css` 里没有规则」属**反向死代码**（护栏只查 CSS→markup 一个方向），但删掉它们只会让 markup 变哑、收益≈0，**按「疑似缺失样式」看待，本轮不动** —— 最可疑的是 `.btn-danger`（弹窗动作区惯例是 `m-danger`，「确认移除关联」那颗按钮因此一直是默认色而非红色）。
->
-> 2026-09-23 专注视图整轮删除：`S.focus` / `S.expanded` 两个状态字段、`viewHome()` 里的专注分支、顶栏 `#focusBtn`、命令面板项、`Ctrl+.` 快捷键、`case 'focus' / 'expandMod' / 'collapseMod'`，以及全部相关样式（`.focus-layout` / `.focus-mods` / `.collapse-row` / `.collapse-trigger` / `.expanded-mod` / `.chev` 与随之失去宿主的 `.hero` 大标题家族）一次性清空；总控台只剩「项目仪表盘」一种形态。**不要再引入收起 / 展开式的次级模块布局。**
-> 同日追加：总控台页头右侧的「当前会话」标签（`.dashboard-period`）也一并删除 —— 页头现在只有 `<h1>项目仪表盘</h1>`，没有任何右侧说明文字。
->
-> 2026-09-23 活跃度热力图轮：底色改为**只表达在线时长**（弃用后端 `count`），删除 `sizeHeat()` / `--heat-cell` / 全屏放大窗 `#heatFull`，悬停气泡改两行（日期·在线 / +A / -D），默认口径改「每日」，今天之后的格子只作浅灰占位。网格是**纯 CSS Grid**（`1fr` 列 + 格子用 `.heat-cell::before{padding-top:100%}` 撑正方形，**禁用 `aspect-ratio`**）自适应卡宽。
-> 同日收尾：卡片可视窗定为**末尾 13 周（一个季度，91 格）**，方块随之撑到 ~21px 铺满卡宽 —— 26 周只有 ~10px，方块小、留白多、月份刻度还容易糊。改 `HEAT_CARD_COLS` 一处即可切密度。同时修掉月份刻度两个问题：①刻度串原本直接拼数组 → 走 `Array.join(',')` 往格子间塞逗号，改 `join('')`；②不足 2 列的「残月」不打标，否则 13 周窗左端那个 1 列的月底会把紧随的整月挤掉（实测出现「6月 8月 9月」独缺 7月）。详见 §6 的「活跃度」条。
->
-> 2026-09-24 命令面板「常用项目」轮：分组原名「常用」，装的却是**全部项目**、顺序就是数据顺序 —— 既名不副实，也看不出「常」在哪。现在改名为 **「常用项目」**，并按**最近使用降序**排（最近跑过的排最前，从没跑过的沉底）。为此补一条排序键：`loadBackendState()` 新增 `p.lastTs = backendEpoch(runInfo.last_run_at)`，并新增 `backendEpoch()`（后端时间串 → 毫秒数，缺失 / 非法一律 `0`）—— **排序键必须是数值，不能拿 `backendTimeLabel()` 的展示文案排**（「今天 00:03」与「9月22日 13:30」按字符串比毫无意义）。`backendHistoryRow()` 相应多带一个 `at`；本项目内跑一次后由 `rememberBackendAttempt()` 就地刷新 `wf.lastTs`（后端没给 `started_at` 时保留旧值，**不要用 `Date.now()` 凭空造时间**），所以顺序不用等下次启动。提示列换成 `lastUsedLabel(w)`（= `w.last`，缺失读作「从未运行」），**排序键与提示列是同一个口径**，顺序自己就能说明白。测试 712 → **715 项**（新增第 36 块：`backendEpoch` 边界、`lastUsedLabel` 口径、塞三个只有 `lastTs` 不同的项目验证端到端顺序）。测试侧顺带补了一个坑：`palItems` 是 `let` 变量，直接导出只会快照成空数组，**必须用 `Object.defineProperty` 的 getter** 才能取实时值。
->
-> 2026-09-24 流程名占位符轮：「命令面板『常用』里三条条目一模一样、且写着『运行『默认流程』』看不懂」——排查后是**占位符当数据用**。链条：①后端 `projects` 表**根本没有流程名字段**（`/api/bootstrap` 只发 `id/name/description/status/created_at/updated_at/sort_order`）；②`loadBackendState()` 对**没有 seed** 的项目统一走 `JSON.parse(JSON.stringify(DATA.projectTemplate))` 起底，而模板里预置了 `flowName:'默认流程'` → 该占位值跟着深拷贝流到项目卡 chip、概览「当前流程 / 运行流程」、Obsidian 项目主页与命令面板（当时 4 个项目里 3 个都是它，只有 `apex` 命中 seed 才拿到真名）；③命令面板「常用」组标签只写 `运行「${w.flowName}」`、**不带项目名**，于是三条长得完全一样，看不出指哪个项目。修法：模板 `flowName:''`，新增 `flowNameOf(w)`（有名字用名字，缺失返回「未命名流程」）作为**流程名的唯一出口**，四处渲染全部改走它；命令面板「常用」改为 `t:运行「项目名」` + `k:flowNameOf(w)`（项目名进主体、流程名退到右侧提示列），过滤词同时匹配项目名与流程名，按流程名搜索仍然有效。测试 705 → **712 项**，并加了一条反向断言：`app.js` 里不许再出现那个占位流程名的字面量（**注释里也不许写**，否则本文件同字面量会命中这类反向断言，见 §10.12）。
->
-> 2026-09-24 外观偏好接线轮（同类缺陷清扫）：主题 / 强调色 / 玻璃质感 / 桌面通知 / 自动保存 / 使用数据统计这 6 个开关原本和「信息密度」是同一个毛病 —— 开关初值写死在 markup 里（`sw('桌面通知',...,true,'notify')`）、事件分支只改内联样式或 DOM class，既不进 `S` 也不落偏好，于是**重绘即弹回、刷新即丢**。现在全部接上状态：`S` 新增 `accent / glass / notify / save / telemetry`（共 **73 个字段**），偏好键 `apex-console.prefs.v1` 从 1 个字段扩到 **7 个**（`theme / accent / density / glass / notify / save / telemetry`），`normalizePrefs()` **逐字段白名单**（坏字段各自回默认值，不因为一个坏字段丢掉整份偏好），四个 applier `applyTheme / applyAccent / applyDensity / applyGlass` 只写 `<html>` 上的 `data-theme` / `--brand` / `--pad` / `--gap` / `no-blur`（组件里仍不硬写视觉值），由 `applyPrefs()` 在启动时一次回写；`case 'theme' / 'accent' / 'switch'` 与顶栏 `toggleTheme()` 统一走 applier + `persistPrefs()`，不再各写一套。`case 'switch'` 加了 `PREF_KEYS.includes(k)` 守卫：只有外观偏好算持久状态，项目级演示开关（`pjNotify` / `pjRetry`）既不污染偏好也不新增 `S` 字段。另删除**死类名 `tight`** —— `styles.css` 里 0 条规则、`app.js` markup 里却有 16 处 `class="card tight"`，属于「反向死代码」：现有的零引用类名护栏只查 CSS→markup 方向，查不出 markup 里挂着的空类名，所以已补一条反向断言。测试 687 → **705 项**。
->
-> 2026-09-24 信息密度可调轮：设置页「外观 · 信息密度」原本是块**没接状态的装饰** —— 滑块 `value="1"` 写死、没有 `S.density`，拖动只往 `<html>` 写内联 `--pad/--gap`，于是任何重绘（包括进设置页时「开机自启动」的异步回填）都把滑块弹回「标准」，刷新更是全丢。现在接上 `S.density` + 新增 `apex-console.prefs.v1` 偏好键，启动时 `loadPrefs()` → `applyDensity()` 还原令牌；三档预设收敛到 `DENSITY_STEPS` 一处，标准档与 `:root` 的 `--pad:18px / --gap:16px` 同值。拖动分支**保持不整页重渲染**（重渲染会在拖动中重建滑块）。~~**同类缺陷仍在**：强调色 / 玻璃质感 / 主题同样没有状态与持久化，改它们前先照这套接线补~~ → 这几个**已在上一条「外观偏好接线轮」一次性清扫**，7 个外观偏好现在全部有状态、有持久化。
->
-> 2026-09-16 后端接入轮目标：Apex Console 成为唯一前端；「APEX 启动」模块通过 APEX 常驻后端共享同一份 `ApexOneClickService` 状态，支持真实启动与一键关闭，不启动原 Vue/Vite 前端。禁止改回每次动作新建一个短命 service 的适配器，否则关闭动作拿不到启动状态。
+> **当前形态（先看这段）**：项目已从「静态前端 + Python 后端」演进为 **WinUI 3 壳（`shell/`）+ Web 三件套 + Python 后端（仅为浏览器模式保留）**的单仓库结构。**日常入口是壳**：`shell\bin\x64\Debug\net8.0-windows10.0.19041.0\win-x64\ApexShell.exe`（路径深，用快捷方式：桌面「APEX 总控台」，或跑 `ApexShell.exe --shortcuts` 重建）。**二期移植已全部完成**——51 条 API 路由都在壳内就地回答，壳可独立运行、不再探测或拉起 Python；Python 仍保留是因为浏览器模式（`backend/start.ps1` → `127.0.0.1:8765`）与 pytest 那 90 项对照基线还要用它。**两套栈共用同一个 SQLite 库**（`backend/data/apex-console.db`，`user_version` 协议），这是「边移植边不停机」的关键红利。
 
 ---
 
 ## 1. 这是什么
 
-个人开发者用的**本地总控台原型**：继续开发、一键启动应用与网页、项目任务、项目记录与项目文件，全部收在一个界面里。
+个人开发者用的**本地总控台**：继续开发、一键启动应用与网页、项目任务、项目记录与项目文件，全部收在一个界面里。
 
-- **原生前端 + 本地后端**：前端仍是 HTML + CSS + 原生 JS，零构建；后端使用 FastAPI，只监听 `127.0.0.1`，同源提供静态页面和 `/api` 接口。
-- **迁移中**：现有 `DATA` 仍是原型种子，但新增的项目、任务、模块和运行记录必须逐步迁到后端。不得在后端不可用时回退为假成功或假执行。
-- **定位**：验证交互与信息结构，不是可上线产品。不要为它加工程化设施。
+- **前端**：HTML + CSS + 原生 JS，零构建、零依赖。
+- **后端**：两套实现共用一份数据——①壳内 C# 服务（主线，WinUI 3 + WebView2 + Microsoft.Data.Sqlite）；②Python FastAPI（仅 `127.0.0.1:8765`，供浏览器模式与 pytest 对照）。
+- **定位**：自用的真实工具（不是原型演示，也不是可上线产品）。**不得静默回退成假成功 / 假执行**：后端断开、模块缺失、权限被拒或执行失败时，保留原始错误并停在第一个失败步骤。
 
 ---
 
-## 2. 文件地图（本目录）
+## 2. 文件地图
 
-**前端根目录仍保留原 5 个文件；后端只能放入 `backend/`。** 不要在根目录增加文档、截图、备份或构建产物。运行数据放 `backend/data/`，修改前备份仍放项目外。
+| 文件 | 作用 |
+|---|---|
+| `index.html` | 入口骨架：侧栏 + 导航 + 顶栏 + `#view` + 三个全局宿主（详情抽屉 / 编辑弹窗 / 命令面板）+ 提示条 |
+| `styles.css` | 全部样式，设计令牌集中在顶部 `:root`（暗色在 `[data-theme="dark"]`） |
+| `app.js` | 全部前端逻辑：数据种子 `DATA` → 运行时状态 `S` → `render()` 渲染器 → 底部大 `switch` 事件分发 |
+| `smoke-test.js` | 冒烟测试，**同时是本项目的活规格**：读它就知道每个功能的预期行为 |
+| `AGENTS.md` | 本文件 |
+| `shell/` | **WinUI 3 壳**（C# 源码 + 构建产物）。源码在 `shell/*.cs`，产物在 `shell/bin/...`（不进 git） |
+| `backend/` | Python FastAPI 应用、可执行模块包（`backend/modules/`）、运行数据（`backend/data/`）、后端测试 |
 
-| 文件 | 体量 | 作用 |
-|---|---|---|
-| `index.html` | 15 KB | 入口骨架：侧栏 + 导航 + 顶栏 + `#view` + 三个全局宿主（详情抽屉 / 编辑弹窗 / 命令面板）+ 提示条 |
-| `styles.css` | 89 KB | 全部样式，设计令牌集中在顶部 `:root`（含 `[data-theme="dark"]`） |
-| `app.js` | 314 KB | 全部逻辑：数据种子 `DATA` → 运行时状态 `S` → `render()` 渲染器 → 底部大 `switch` 事件分发（128 个 `case`） |
-| `smoke-test.js` | 193 KB | 冒烟测试（718 项），**同时是本项目的活规格**：读它就知道每个功能的预期行为 |
-| `AGENTS.md` | 本文件 | 接手说明书（术语 / 约束 / 架构 / 坑点 / 已删模块） |
-| `backend/` | 后端目录 | FastAPI 应用、可执行模块包、运行日志与后端测试 |
-
-没有 `node_modules`、没有历史副本目录（历史与已删除的旧文档都在 `../backups-2026-09-15.zip`）。`backend/.venv`、`backend/data` 与测试缓存是本机生成物，均不属于源码。
+- **根目录只放源码**：不加文档、截图、备份、快捷方式或构建产物（`shell/` 与 `backend/` 是仅有的两个子目录）。
+- `backend/.venv`、`backend/data`、`shell/bin`、`shell/obj` 是本机生成物，不属于源码。
+- 历史形态归档在 `../backups-2026-09-15.zip`；开发过程记录在 `D:\Projects\.workbuddy\memory\YYYY-MM-DD.md`（外层，不在本仓库）。
 
 ---
 
 ## 3. 怎么跑、怎么验
 
 ```bash
-# 首次准备后端环境（使用 APEX 已有的 Python 3.12 作为引导解释器）
-powershell -ExecutionPolicy Bypass -File backend/bootstrap.ps1
+# 日常入口：双击桌面「APEX 总控台」（指向壳 exe）；或直接跑
+ApexShell.exe                       # 开窗口（托盘常驻、Ctrl+Alt+A 唤起、关窗缩托盘）
+ApexShell.exe --selftest [日志]      # 壳无头自测（不建窗口不碰 WebView2，238 项）
+ApexShell.exe --shortcuts           # 重建桌面快捷方式（指向当前 exe）
+ApexShell.exe --inspect-shortcuts   # 列出桌面/开始菜单里所有 APEX 快捷方式及其真实目标
+ApexShell.exe --stages=exec,routes  # 只跑指定自测阶段（排查用二分）
 
-# 启动：只监听本机 127.0.0.1:8765，然后访问 http://127.0.0.1:8765
-powershell -ExecutionPolicy Bypass -File backend/start.ps1
-
-# 前端活规格
+# 前端活规格（末行必须 ALL_PASS）
 node smoke-test.js
 
-# 后端集成测试
+# 后端对照测试（90 通过 + 4 项既存失败）
 backend/.venv/Scripts/python.exe -m pytest backend/tests -q
+
+# 浏览器模式（Python 后端；壳已不依赖它）
+powershell -ExecutionPolicy Bypass -File backend/start.ps1   # → http://127.0.0.1:8765
 ```
 
-- 桌面唯一入口是「APEX 总控台」快捷方式，目标为 `backend/.venv/Scripts/pythonw.exe backend/console_launcher.py`。入口会对源码内容生成指纹：服务未启动时启动；服务已启动且源码未变化时只打开网站；源码变化时只结束通过 `/api/health` 确认的 `apex-console` 监听进程，重启成功后再打开网站。后端子进程必须带 `CREATE_NO_WINDOW`，前端优先用 Edge / Chrome 的 `--app=` 模式打开独立无地址栏窗口；找不到受支持浏览器时才回退默认浏览器。端口属于未知程序时必须失败关闭，不得结束未知进程。
-- `--app` 固定窗口用的 `--user-data-dir` 是**浏览器的完整 profile**，浏览器会把自身组件与 AI 模型下载进去（单个 ONNX 就近 170 MB），实测能把 `backend/data/` 撑到 460 MB+。因此 `console_launcher.prune_profile()` 会在拉起窗口前清掉 `APP_WINDOW_PROFILE_JUNK` 列出的缓存与组件目录（ProvenanceData / component_crx_cache / GrShaderCache / Default/Cache 等），**只保留 Default 主体**，窗口尺寸与位置记忆不受影响；文件被占用时静默跳过。需要单独清理而不启动服务时跑 `python backend/console_launcher.py --clean-profile`（建议先关掉控制台窗口，否则 msedge 会锁住部分文件）。
-
-- **末行必须是 `ALL_PASS`**，否则算改动失败。
-- 输出格式：逐条 `OK   <一句话>` / `WARN <一句话>`，末尾 `FAIL_COUNT=n`；`n=0` 时打印 `ALL_PASS`。
-- 测试原理：用 `vm` + 极简 DOM 桩加载 `app.js`，末尾注入 `globalThis.__T = { 要测的函数… }` 作为导出清单，然后逐块断言（含**源码级接线断言**与 **CSS 规则断言**）。**新增可测函数必须同步加进这份导出清单**，否则测试里取不到。
-- 测试不依赖浏览器；但它是「渲染字符串级」的验证，**视觉细节仍需人眼看预览**。
+- 壳用 `SetVirtualHostNameToFolderMapping` 把 `https://apex.local/` 映射到**仓库根**，所以**改完 Web 三件套 Ctrl+S、壳里 F5 立即生效**（不用重新构建）。
+- 壳层日志：`%LOCALAPPDATA%\ApexShell\web-shell.log`（导航 / 托盘 / 本地路由 / 图标拦截全链路留痕）。
+- 构建壳：`cd shell && C:\Users\23221\.dotnet\dotnet.exe build ApexShell.csproj -c Debug -p:Platform=x64 -p:RuntimeIdentifier=win-x64`。**构建前必须先结束运行中的壳**（否则 exe 被锁，报 MSB3027）。
+- 测试原理（前端）：用 `vm` + 极简 DOM 桩加载 `app.js`，末尾注入 `globalThis.__T = { 要测的函数… }` 作为导出清单，再逐块断言（含**源码级接线断言**与 **CSS 规则断言**）。**新增可测函数必须同步加进导出清单**，否则测试取不到。视觉细节仍需人眼看预览。
 
 ---
 
@@ -89,181 +68,212 @@ backend/.venv/Scripts/python.exe -m pytest backend/tests -q
 |---|---|---|
 | 一个可运行单元 | **项目** | 数据层字段仍叫 `workflow` / `WF_SEED`（历史遗留，**不要改**） |
 | 流程里的单个动作 | **步骤**，配置动作叫 **步骤编排** | 「添加模块」是进入编辑模式的入口按钮 |
-| 模块库的编辑 / 添加页 | **模块** | 导航第 5 项；**页面 id 仍是 `scripts`**（历史遗留路由，勿改）。曾用名「模块库管理」，2026-09-16 已简化 |
-| 可选模块的资源卡片 | **执行模块库** | 原名「资源库」，2026-09 已改名，**勿回退**；指项目编辑态里那块选择面板，**不要**与导航项「模块」混为一谈 |
+| 模块库的编辑 / 添加页 | **模块** | 导航第 5 项；**页面 id 仍是 `scripts`**（历史遗留路由，勿改） |
+| 可选模块的资源卡片 | **执行模块库** | 原名「资源库」，**勿回退**；指项目编辑态里那块选择面板，**不要**与导航项「模块」混为一谈 |
 | 执行整个流程 | **运行项目** | 页头主按钮；旧称「运行工作流」 |
 | 项目内容区 | **开发上下文** | 项目任务 / 项目记录 / Obsidian / 文件两栏布局 |
-| 项目那趟运行的名字 | **流程名**（`flowName`） | 由用户自己起。后端 `projects` 表**没有这个字段**，走控制台新建的项目也从未填过，所以「没有名字」是常态。**取它一律走 `flowNameOf(w)`**（唯一出口）：有名字用名字，缺失返回 **「未命名流程」**。禁止在渲染处直接读 `w.flowName`，也禁止用任何占位流程名顶替。 |
-| 命令面板首个分组 | **常用项目** | 由项目表派生，按**最近使用降序**（`lastTs`，从未运行 = `0` 沉底）；提示列显示 `lastUsedLabel(w)`，与排序键同一口径。原名「常用」，装的却是全部项目、顺序即数据顺序 |
+| 项目那趟运行的名字 | **流程名**（`flowName`） | 后端 `projects` 表**没有这个字段**，「没有名字」是常态。**取它一律走 `flowNameOf(w)`**（唯一出口）：有名字用名字，缺失返回「未命名流程」。禁止直接读 `w.flowName`，也禁止用占位流程名顶替。 |
+| 命令面板首个分组 | **常用项目** | 由项目表派生，按**最近使用降序**（`lastTs`，从未运行 = `0` 沉底）；提示列 `lastUsedLabel(w)` 与排序键同一口径 |
 
-- **禁用词**：「菜谱」（历史遗留说法，禁止出现在界面文案与注释里）。
-- **禁用值**：任何看着像真名的**占位流程名**（它会被 `JSON.parse(JSON.stringify(DATA.projectTemplate))` 深拷贝复制到每一个没有 seed 的项目上，然后出现在项目卡、概览、命令面板里，看起来像真有这么个流程）。缺失就如实说「未命名流程」。
+- **禁用词**：「菜谱」。**禁用值**：任何看着像真名的占位流程名（会被深拷贝到每个无 seed 的项目上）。
 - 界面文案一律中文；**不用 emoji**；**图标一律内联 SVG**（`IC.*` 或 `tIco()`）。
 
 ---
 
 ## 5. 硬约束（违反即返工）
 
-1. **不引入** React / Vue / Tailwind / 前端打包器。允许 `backend/` 中的本地 FastAPI 和同源真实请求，但必须只监听 `127.0.0.1`。
-2. **真实执行不得静默回退**：后端断开、模块缺失、权限被拒或执行失败时，保留原始错误并停在第一个失败步骤。
-3. 界面用词遵守第 4 节术语表。
+1. **不引入** React / Vue / Tailwind / 前端打包器。后端只监听 `127.0.0.1`。
+2. **真实执行不得静默回退**（见 §1）。
+3. 界面用词遵守 §4 术语表。
 4. 总控台是**单屏 bento 网格，无纵向滚动**；卡片背景保持**纯色 / 纯渐变**，**禁止挂图片**。
-5. 所有**删数据**的操作必须「**预演 + 二次确认**」；后端空库时允许 0 个项目，必须渲染真实空态。
-6. 视觉调整**只改 `styles.css` 顶部 `:root` 令牌**，不在组件里硬写 px（尺寸 / 圆角 / 间距 / 颜色一律走令牌）。
-7. **不新增宽度断点**：适配只有「标准窗口 / 全屏」两态（历史约定，测试里有断言）。
-8. 不留死代码：删功能要连数据、动作分支、样式、断言一起清（有一条全局护栏断言会检查 CSS 里的零引用类名）。**这条护栏是 `includes()` 子串匹配、不是词边界** —— 只要别处出现过含相同子串的标识符（如 `playerOn` 之于 `.player`），孤儿类就会被误判成「有引用」；判定孤儿类前先按子串实查一遍 `app.js` / `index.html`。
+5. 所有**删数据**的操作必须「**预演 + 二次确认**」；空库时允许 0 个项目，必须渲染真实空态。
+6. 视觉调整**只改 `styles.css` 顶部 `:root` 令牌**，不在组件里硬写 px。
+7. **断点只做结构切换，连续变化交给 `clamp` 令牌**：全项目**仅 4 个断点**——`max-width:1199.98px`（侧栏收 76px 图标条）、`max-width:959.98px`（总控台 bento 单列堆叠）、`max-height:799px`（垂直令牌降档）、`max-height:659px`（解除单屏约束）。历史废弃断点（860/900/1080/1180/1280/820/760）在 smoke-test 里有**负向断言禁止回潮**。
+8. 不留死代码：删功能要连数据、动作分支、样式、断言一起清（有全局护栏断言查「CSS 里的零引用类名」）。**这条护栏是 `includes()` 子串匹配、不是词边界**——只要别处出现过含相同子串的标识符（如 `playerOn` 之于 `.player`），孤儿类就会被误判成「有引用」；判定前先按子串实查一遍 `app.js` / `index.html`。
 
 ---
 
 ## 6. 架构速览
 
-**状态**
-- `DATA`：全部种子数据，**共 13 类**：`projects / obsidian / apps / todosPlan / activities / notices / notes / sceneModes / tracks / devContext / projMeta / projectTemplate / modules`。
-- `S`：全部运行时状态（**72 个字段**；2026-09-24 清扫删掉 `playerOn` / `track` / `prog` / `more` 四个后实测，此前文档记的 73 已过时）。除 `S.obsidian`（Obsidian 本机配置）与 **7 个外观偏好** `S.theme / S.accent / S.density / S.glass / S.notify / S.save / S.telemetry`（凡在 `PREF_KEYS` 里的都**落到 localStorage**）之外，其余状态刷新即重置。常用的有：
-  `S.page` 当前页 · `S.proj` 当前项目 **id** · `S.wf` 当前打开的项目 **id** · `S.running` 运行态 `{token,wfId,i,done,total,states,log,order}` · `S.todos.plan` · `S.notes` · `S.noteSel` 正在编辑的项目记录 · `S.wfEdit` 编辑模式 · `S.zoneH` 任务区高度 · `S.more` 各页「展开全部」开关 · `S.modTab` / `S.modQ` 模块页筛选 · `S.obsidian` Obsidian 本机配置 · `S.density` 信息密度档位 0/1/2（紧凑 / 标准 / 宽松，预设收敛在 `DENSITY_STEPS`） · `S.accent` 强调色（必须取自 `ACCENTS` 四色板） · `S.theme` `light`/`dark` · `S.glass` 玻璃质感 · `S.notify` / `S.save` / `S.telemetry` 通用开关 · `S.heatDays` / `S.heatDetail` / `S.heatMode`（默认 `daily`）/ `S.heatFetchedAt` 活跃度 371 格**每日在线分钟**、按日明细、口径与拉取时间。
-- **`proj` 这个字段名装的是两种东西，改数据时务必分清**：`S.proj` / `S.wf` 装项目 **id**（`'apex'`）；而 `todos.plan[].proj` / `modules[].proj` / `notes[].proj` / `activities[].proj` 以及 `DATA.projMeta` / `DATA.devContext` 的**键**装的是项目 **名字**（`'APEX Automation'`）。按名字关联的这几处靠 `renameProjRefs()` 迁移、`purgeProjRefs()` 清理来维持一致。
-- 浏览器本机持久化**只有两个键**：Obsidian 配置用 `apex-console.obsidian.v1`（只允许 `vault/projectFolder/bindings` 三个字段），界面偏好用 `apex-console.prefs.v1`（**恰好 7 个字段** `theme / accent / density / glass / notify / save / telemetry`，即 `PREF_KEYS`；新增偏好字段只能改这一份清单 + `normalizePrefs` 的白名单）。两者共用 `store` 包装（`get/set` + try/catch），读取失败、JSON 损坏、字段越界一律安全回退，不阻断页面。**不要再加第三个键**：其余一切（项目、任务、项目记录、项目文件关联、用户创建的网站模块、项目模块绑定与运行记录）都归后端 SQLite。
-- SQLite 结构版本使用 `PRAGMA user_version`，迁移集中在 `backend/app/db.py` 的 `MIGRATIONS` 中按版本顺序执行。新迁移只能追加，必须保留旧库数据并增加升级测试；数据库版本高于当前程序时必须拒绝启动，不得降级覆盖。
-- 任务数据库的 `kind` 与前端共用 `todo` / `fix` 两种内部值，旧任务升级后默认为 `todo`。启动时为后端任务重建 `S.todos.plan`；新建以 `POST /api/projects/{id}/tasks`、其余操作以 `PATCH/DELETE /api/tasks/{id}` 成功后的返回为准，失败不改本地列表。“当前任务”区的 `S.devTask` 仍是本轮不持久化的界面状态。
-- 项目记录使用 `notes` 表，以项目 id 关联并级联删除；`tag` 仅允许日常 / 技术 / 复盘 / 灵感，`links_json` 保存只读历史关联。启动时由 `/api/bootstrap` 重建 `S.notes`；新建、保存、标签、置顶和删除均以对应后端请求成功后的返回为准，失败不改本地列表。
-- 总控台「活跃度」是**开发者活跃度热力图**，数据全部真实：`GET /api/activity/daily`（默认 371 天 = 53 周）按**本机本地日**返回 `{online, adds, dels, count}`——online 来自 `POST /api/activity/heartbeat`（页面开着每 60s 静默上报一次，`activity_heartbeats` 表按日累加分钟，多标签页多算无妨，多弗朗点名不要去重花活）；adds/dels 来自扫描全局代码目录（`backend/data/activity_config.json` 的 `codeDirs`，缺省 `D:\Projects`）下各 git 仓库的 `git log --numstat`，按 5 分钟进程内缓存，非 git 目录忽略。`/api/bootstrap` 注入 `activityDays`。数据窗固定 53 周（今日下标 = `364 + (getDay()+6)%7`），**卡片只渲染末尾 13 周**（`S.heatDays` 切片，首列必为周一；91 格 = 13 列 × 7 行，格子约 21px 铺满卡宽，改 `HEAT_CARD_COLS` 一处即可切密度）。**底色只表达在线时长**：`buildHeatPayload` 取 `online`，不再用后端的 `count`（`count = online+adds+dels` 仍由后端返回、供接口兼容，前端已不读），否则「没开控制台但提交了几万行代码」会被涂成最深的蓝，与「底色代表在线时长」相悖。色阶对数五档 0 / 1-9 / 10-99 / 100-999 / 1000+，走单一蓝色系令牌 `--dash-heat-0..4`（未活跃 `#EBEDF0` → 最深 `#2563EB`），**严禁掺红绿**；代码增删只在悬停气泡里用色（+ 绿 `#10B981` / - 红 `#EF4444`）。右上角三口径 `S.heatMode` = `daily`（默认）/ `weekly` / `total`，由 `heatSeries()` 一套聚合同时作用在「在线 / 新增 / 删减」三路序列上（weekly = 整列 7 天之和，total = 窗口首日到该日的滚动和），所以底色与气泡永远同口径。布局是**纯 CSS Grid 自适应卡宽**：`1fr` 列平分卡宽，方格用百分比 padding（`.heat-cell::before{padding-top:100%}`，**禁用 `aspect-ratio`** —— 本仓库踩过它在 `auto` 行轨道下被 stretch 对齐忽略、整片棋盘塌成一条线的坑）撑正方形，格宽恒等于列宽，**不可能撑出横向滚动**；月份刻度与格子共用同一套列模板（逐列对齐）；打标规则三条 —— ①只在月份切换处打；②**不足 2 列的「残月」不打**（13 周窗左端那个 1 列的月底否则会把紧随的整月挤掉，实测会变成「6月 8月 9月」独缺 7月）；③**两个标至少隔 3 列**（否则窄窗下会糊成「3月4月」）。刻度串**必须 `join('')`** —— 直接拼数组会走 `Array.join(',')` 往每两个格子之间塞一个逗号。**`sizeHeat()` / `--heat-cell` / 全屏放大窗 `#heatFull` 已于 2026-09-23 全部删除**（卡片即唯一入口，不要再引入 JS 量尺寸或弹窗外壳）。**明细只进悬停两行气泡**（第一行「日期 · 在线 N 分钟」，第二行「+A / -D」），页面无任何统计卡 / 摘要行 / 表格；**今天之后的格子只作浅灰占位**（`heat-cell future`，`pointer-events:none` 且 JS 不生成气泡，未来日期不可能被悬停出来）；后端未就绪时如实显示「活跃度暂不可用」，不得渲染全零假象。在线分钟从部署当天开始积累，代码增删由 git 历史回填。
-- 「编辑基本资料」通过 `PUT /api/projects/{id}/basic-info` 一次提交开发字段、任务、项目记录与开发要求；后端在同一事务中校验、写入或删除，任一条目无效就整批回滚。成功响应才重建该项目的 `S.todos.plan`、`S.notes`、`DATA.devContext` 与 `S.projRules`，不得先改本地再假报保存成功。
-- 应用清单使用 `applications` 表保存名称、分类、图标、常用、占用展示、使用次数、最近启动、真实启动快捷方式与扫描来源；源码不再附带演示应用，也不再把原型清单迁入数据库。`GET /api/applications/scan` 合并 Windows 开始菜单快捷方式、已注册开始应用和 App Paths，只保留能由 Windows 重新验证的启动入口，并过滤网页、目录、卸载 / 修复 / 帮助入口；扫描结果与已保存的真实应用均通过 Windows Shell 提取原生图标。`POST /api/applications/from-scan` 必须按扫描 id 重新确认真实入口，前端不能提交任意程序路径。启动时后端再次确认快捷方式仍在本次扫描结果内，再调用 Windows 打开它；打开成功后才增加使用次数。旧的无启动入口记录保留在数据库但不进入前端清单，重新添加同名真实应用时原地升级。新增、标签、常用、最近启动与移除均以后端成功返回为准；“移除 / 卸载”只移出控制台清单，绝不删除本机安装目录。应用加入项目时复用现有 `modules → project_modules → runs` 执行链：后端创建隐藏的 `application` 适配模块，`projectApplications` 只向前端恢复应用绑定，适配模块不得出现在「模块」页。应用从清单移除时先解除项目绑定并停用适配模块，历史运行记录保留。
+### 前端状态
 
-**渲染**
-- `render(keepScroll)` → 调 `PAGES[S.page]()` 拿 HTML 字符串 → 写进 `#view`；只有切页 / 换项目才播放入场动画。
-- 全站**事件委托**：元素上写 `data-act="动作名" data-id/data-v`，统一在 app.js 底部的 `switch` 里分发。新增交互 = 加一个 `case` + 元素上挂 `data-act`。
+- `DATA`：种子数据（`projects / obsidian / apps / todosPlan / activities / notices / notes / sceneModes / devContext / projMeta / projectTemplate / modules` 等）。后端接入后大部分由 `/api/bootstrap` 重建。
+- `S`：运行时状态（**73 个字段**）。除 `S.obsidian` 与 **7 个外观偏好** `theme / accent / density / glass / notify / save / telemetry`（即 `PREF_KEYS`，**落 localStorage**）之外，其余刷新即重置。常用：`S.page` · `S.proj` / `S.wf`（项目 **id**）· `S.running` · `S.todos.plan` · `S.notes` · `S.wfEdit` · `S.zoneH` · `S.modTab` / `S.modQ` · `S.heatDays` / `S.heatDetail` / `S.heatMode` · `S.density` / `S.accent` / `S.theme` / `S.glass` / `S.notify` / `S.save` / `S.telemetry` · `S.windowState` / `S.windowUpdating`（窗口置顶控件）· `S.projectRuntime`。
+- **`proj` 这个字段名装两种东西**：`S.proj` / `S.wf` 装项目 **id**；`todos.plan[].proj` / `modules[].proj` / `notes[].proj` / `activities[].proj` 与 `DATA.projMeta` / `DATA.devContext` 的**键**装项目 **名字**。按名字关联的靠 `renameProjRefs()` 迁移、`purgeProjRefs()` 清理。
+- 浏览器本机持久化**只有两个键**：`apex-console.obsidian.v1`（只允许 `vault/projectFolder/bindings`）与 `apex-console.prefs.v1`（**恰好 7 个字段**，新增偏好只能改 `PREF_KEYS` + `normalizePrefs` 白名单）。**不要再加第三个键**：其余一切归 SQLite。
+- 渲染：`render(keepScroll)` → `PAGES[S.page]()` 拿 HTML 字符串 → 写进 `#view`；全站**事件委托**（`data-act="动作名" data-id/data-v` → 底部 `switch`，新增交互 = 加 `case` + 挂 `data-act`）。
+- 单一事实源：「普通任务」与「待修改」是同一份 `S.todos.plan`（`kind` 区分，内部字段，对外恒显示「待办」）；「项目记录」与「灵感」是同一份 `S.notes`（灵感 = `tag==='灵感'`）；项目内计数一律由 `devCounts()` 派生。**不要新增第二份数据，也不要加「同步」按钮**。
+- 全局 DOM 宿主：`#drawer/#drawerMask`（**仅纯查看**）· `#noteModal`（**所有编辑 / 填写表单的唯一宿主**，`openModal(html,{form:true})`，窄版 `--modal-w-form` / 宽版 `--modal-w`）· `#paletteMask` 等命令面板 · `#toasts`。
+- **转义纪律**：进 HTML 的**数据值**必须过 `esc()`（`toast()` 内部已 `esc`）。属性位置同理。
 
-**单一事实源（重要）**
-- 「普通任务」与「待修改」是**同一份** `S.todos.plan`，用 `kind` 区分（`todo` / `fix`）；只在所属项目内呈现。**`kind` 是内部字段**（只服务 `projTodos` / `projFixes` / `devCounts`），任何对外文本都统一显示「待办」，见「术语表」与第五节 `KIND_SHOW`。
-- 「项目记录」与「灵感」是**同一份** `S.notes`，灵感 = `tag === '灵感'`；每条记录必须归属项目。
-- 项目内的所有计数（任务数 / 记录数）由 `devCounts()` **派生**，改一处即一致。
-- **不要新增第二份数据**，也不要加「同步」按钮——一致性靠数据同源保证。
+### 后端数据面（两套栈共用）
 
-**全局 DOM 宿主（都在 index.html）**
-`#drawer/#drawerMask` 详情抽屉（**仅「纯查看」类**：应用 / 项目详情、云同步）· `#noteModal/#noteModalMask` 居中编辑弹窗（**所有「编辑 / 填写」表单的唯一宿主**）· `#paletteMask` + `#paletteList` + `#paletteInput` + `#aiZone` 命令面板 · `#toasts` 提示条。
+- **SQLite 结构版本用 `PRAGMA user_version`**，迁移集中在 `backend/app/db.py` 的 `MIGRATIONS`（C# 侧 `shell/Db.cs` 的 `Migrate` 逐条复刻）。**新迁移只能追加**，必须保留旧库数据并加升级测试；**库版本高于程序版本必须拒绝启动**，不得降级覆盖。`PRAGMA foreign_keys` 是连接级设置，每次开连接都要重设。
+- 任务 `kind` 与前端共用 `todo` / `fix`；项目记录 `tag` 仅允许 日常 / 技术 / 复盘 / 灵感，`links_json` 保存只读历史关联。新建 / 修改 / 删除**一律以后端成功返回为准，失败不改本地列表**。
+- 「编辑基本资料」`PUT /api/projects/{id}/basic-info` 一次提交开发字段 + 任务 + 记录 + 开发要求，**同一事务内校验、任一条无效整批回滚**；成功才重建本地 `S.todos.plan` / `S.notes` / `DATA.devContext` / `S.projRules`。
+- **项目删除**：`GET .../delete-preview` 先返回任务 / 记录 / 模块绑定 / 运行记录四类计数；有排队或运行中的动作时**必须先关闭项目**；最后一个项目由前后端共同拦截。确认后靠外键级联一次删除（共享模块本体不删），前端再 `purgeProjRefs()` 清界面数据（与改名链路 `renameProjRefs()` 是一对，口径必须对齐）。
+- **应用清单**：`applications` 表存名称 / 分类 / 图标 / 常用 / 使用次数 / 真实启动入口（`launch_path` + `source_key`）。启动前必须**按 `source_key` 重新验证入口仍在本次扫描结果内**，成功才增加使用次数；`from-scan` 只接受扫描 id，前端不能提交任意路径。「移除」只移出控制台清单，**绝不删本机安装目录**。应用加入项目走隐藏的 `application:{app_id}` 适配模块（不出现在「模块」页）。
 
-- **转义纪律**：所有进 HTML 的**数据值**必须过 `esc()`（`toast()` 内部已经 `esc(msg)`，不用重复）。当前 1178 处模板插值里，未走 `esc()` 的 92 处全是本地字面量或返回 HTML 的函数 —— 改动时不要打破这条。属性位置同理（`title` / `placeholder` / `aria-label`）。
+### 活跃度热力图（数据全真）
+
+- `GET /api/activity/daily`（默认 371 天 = 53 周）按**本机本地日**返回 `{online, adds, dels, count}`。online 来自 `POST /api/activity/heartbeat`（页面开着每 60s 静默上报，`activity_heartbeats` 表按日累加分钟，多标签页多算无妨）；adds/dels 来自扫 `codeDirs`（`backend/data/activity_config.json`，**缺省 `D:\Projects`、只扫一层、`[]` = 彻底关闭**）下各 git 仓库的 `git log --numstat`，5 分钟进程内缓存。
+- **底色只表达在线时长**（`buildHeatPayload` 取 `online`，不读后端的 `count`），色阶对数五档走单一蓝色系 `--dash-heat-0..4`，**严禁掺红绿**；代码增删只在悬停气泡用色（+ 绿 / - 红）。
+- 卡片只渲染**末尾 13 周**（`S.heatDays` 切片，首列必为周一；91 格，改 `HEAT_CARD_COLS` 一处即可切密度）。布局是**纯 CSS Grid 自适应卡宽**：方格用 `.heat-cell::before{padding-top:100%}` 撑正方形（**禁用 `aspect-ratio`**，踩过它在 `auto` 行轨道下被忽略、整片塌成一条线）。月份刻度与格子共用列模板；打标三条规则：①只在月份切换处打；②**不足 2 列的「残月」不打**；③**两标至少隔 3 列**。刻度串**必须 `join('')`**（直接拼数组会往格子间塞逗号）。明细只进悬停两行气泡（`日期 · 在线 N 分钟` / `+A / -D`），**今天之后的格子只作浅灰占位**。后端未就绪时如实显示「活跃度暂不可用」，不得渲染全零假象。
 
 ---
 
-## 7. 页面与组件地图
+## 7. 壳（ApexShell）
 
-导航 5 项（顺序固定）：**总控台 / 项目 / 模块 / 应用 / 设置**
-（第 6 个页面 `workflows` = 打开某个项目后的详情页，**不进导航**，从「项目」页进入。）
+**形态**：WinUI 3，非打包，SelfContained + WindowsAppSDKSelfContained（运行时全自带）。已接管：窗口本体、托盘常驻（左键唤起 / 右键菜单）、全局快捷键 `Ctrl+Alt+A`、关窗缩托盘、单实例互斥、系统 Toast（托盘气球）、**开机自启动**（写 `Run` + `StartupApproved\Run` 双位置）、**窗口置顶**（`OverlappedPresenter.IsAlwaysOnTop`）。
 
-- **总控台**：继续工作 hero（含项目切换）+ 最近打开 + 最近活动；单屏无纵向滚动。这里不放任务与记录的重复入口。
-- **项目（选择页）**：卡片栅格 + 尾部新建卡；卡上可切状态、复制、刷新、删除（删除走预演 + 二次确认）。删除前必须由 `GET /api/projects/{id}/delete-preview` 返回任务、项目记录、执行模块绑定与运行记录数量；项目仍有排队或运行中的动作时，必须先关闭项目。确认后 `DELETE /api/projects/{id}` 在后端借助外键级联一次删除项目、任务、项目记录、绑定和**全部运行历史**，共享模块本体不删。前端成功后再调用 `purgeProjRefs()` 清理按项目名 / 项目 id 引用的界面数据——`S.todos.plan` 待办、`S.notes` 记录、`DATA.projMeta` / `DATA.devContext`（按名索引）、`S.devTask` / `S.projRules`（按 id 索引）；`DATA.modules[].proj` **不删模块**，归回 `DEFAULT_PROJ`。**这与改名链路 `renameProjRefs()` 是一对**（改名=搬过去，删除=清掉），口径必须对齐，否则会出现「删了项目、旧待办还留着，新建同名项目时原地复活」。`S.acts` 活动流是历史记录，删除时**保留**。最后一个项目由前后端共同拦截；`viewHome` 与 `viewWorkflows` 仍各留一层空态兜底（`cur` / `curWf()` 为 `undefined` 时直接返回空态，不碰 `.st` / `.steps`），只用于防止异常数据造成白屏。
-- **项目运行控件（2026-09-16 定稿）**：项目选择页卡片与项目详情页头必须共用 `projectRunControlsHTML()`，不得各写一套。未启动只显示「运行项目」；真实启动成功后两处同时切成「关闭项目 + 重启项目」；进行中按钮禁用并显示对应反馈。`S.projectRuntime` 由后端 `/api/projects/{id}/runtime` 从最近一次成功运行记录恢复，页面刷新后不能退回假空闲。运行流程卡只展示状态、日志和步骤，**不再放第三个关闭入口**。真实重启必须由模块按「完整关闭 → 完整启动」顺序执行，任一步失败都停止并保留原始错误。后端 `/api/bootstrap` 的 `projectRuns` 是运行次数、最近时间与最近三条历史的唯一来源；页面不得补固定日期或标注 Mock 的假历史，关闭动作不计入运行次数。
-- **项目详情页**（`S.wf` 指向的项目），四个区块：
-  1. **概览**：身份卡（可内联编辑）+ 能力卡 + 统计卡。
-  2. **开发上下文**：项目内容唯一入口，两栏。左 = 当前任务区 + 高 / 中 / 低优先级区（任务可拖入区域切换状态，支持多个当前任务、可为空，区高可拖拽调整）；右 = Obsidian 项目资料中枢卡 + 项目记录 + 项目文件。项目文件只登记当前项目的已存在本机文件；“打开”只向后端传递已登记条目的 id，由 Windows 默认程序处理，不能提交任意路径；“移除”必须先预演和二次确认，且只删关联、不删磁盘原文件。中枢卡以「当前项目 — 路径状态 — Obsidian 主页」显示关系：保存路径后一次点击请求打开主页；更多菜单一级只保留「写入项目资料 / 连接设置」，路径、新建与解除连接收进连接设置。浏览器无法读取仓库，所以界面只能显示「路径已保存」，禁止显示已识别或已绑定。任务走居中弹窗编辑；记录走居中弹窗，归属由当前项目入口确定，弹窗不重复显示项目选择或整张关联任务清单。卡底「编辑基本资料」也走居中弹窗，编辑的是「复制 Agent 上下文」同一份纯文本。
-  3. **运行流程**：**单张卡**——卡头是运行状态徽标 + 「添加模块」入口；卡内依次为 运行状态摘要 / 详情（日志终端）→ 主流程线性流程视图 → 历史记录。模块异常在卡内按「· 模块名：原因」点名。
-     - 主流程：每行 5 个节点、**蛇形走向**（第二行反向） + 行间 S 形曲线 + 方向箭头；节点三态：已完成（绿 √）/ 进行中（品牌色高亮）/ 未开始（空心）。
-  4. **设置**：项目开关 + 裸红色「删除项目」长条（点击 → 预演弹窗 → 二次确认）。
-  - 页头 `.page-head.stick` 吸顶：毛玻璃 + 圆角 + `z-index:20`。
-- **模块**（页面 id 沿用 `scripts`，历史遗留路由，勿改）：原「脚本」页已取消，改为**执行模块的唯一编辑 / 添加入口**。数据源是后端 `/api/bootstrap` 恢复后的 `DATA.modules`；源码不再附带演示网站模块。当前「新增模块」使用一个内置 `web` 模板，只填写**名称 / 网站地址 / 描述**，后端保存模块实例，项目归属只由 `project_modules` 多对多绑定维护，不写进模块表单；同一网站模块可被多个项目复用。APEX 等磁盘清单模块显示为「内置模块」，不得从页面改写或删除。新增 / 编辑共用 `moduleFormHTML()`；删除走「预演 + 二次确认」（`modDeleteAsk` → `modDeleteModalHTML` → `modDelete`），并解除使用它的项目绑定、保留历史运行记录。**「应用」仍由 `S.apps` 承载，不在本页出现**；运行输出统一看项目「运行流程」卡的 `#termRun`。
-- **应用**：列表 + 惯性滚动 + 分类标签；“添加应用”实时识别 Windows 本机可启动应用，维持“选择真实应用 → 可选改名 / 改标签 → 确认添加”的两步流程。扫描结果必须在弹窗内容区独立滚动，底部选择状态与“下一步”操作始终可见；点选重绘、进入命名确认再返回时保留原列表位置。不得恢复静态 `ADD_POOL`、自定义空壳应用或后端断开时的假成功；只有带后端验证启动入口的应用才进入 `S.apps`。支持侧栏折叠态（`.app.mini`）。
-- **设置**：外观、通用行为、快捷键；另含 Obsidian 全局连接（仓库名 / 项目目录 / 测试打开），配置与项目主页路径保存在当前浏览器本机。具体项目的主页连接放在项目「开发上下文」资料中枢卡里，通过 `obsidian://` 请求打开、新建或单向写入；生成的 Markdown 主页带返回当前项目的深链接。写入会用 `overwrite` 覆盖目标路径页面，解除连接只删除本机路径，两者执行前都必须预演 + 二次确认。当前不读取仓库、不做自动同步，浏览器不得把保存路径或发出 URI 请求表述为识别、绑定或写入成功。
-- **命令面板**：`⌘K / Ctrl+K`，`buildPalette()`。**「常用」分组必须由 `DATA.projects` 派生**（取有 `flowName` 的项目），**不要写死项目 id**——写死的话项目被删掉后入口还挂在面板上，点下去只会静默跑到别的项目上；分组为空时会被 `clean` 自动过滤掉。同理 `startRun(id)` 必须**明确判存在**（`if (!wf) return`），不要用 `find(...) || curWf()` 兜底。
-- **抽屉与弹窗的边界（2026-09-15 定稿）**：**所有「编辑 / 填写」表单走居中弹窗**——项目记录编辑、编辑基本资料、新建 / 编辑项目任务、新建项目、添加项目文件、添加应用（两步）、导出配置；**右侧抽屉只保留「纯查看」类详情**——应用 / 项目详情、云同步。统一入口是 `openModal(html, { form:true })` / `closeModal()`，配标题区 `mHead()`、按钮区 `mActs()`，全部复用 `#noteModal` 宿主；`form:true` 用窄版宽度（`--modal-w-form`），默认宽版（`--modal-w`，长文本 / 列表）。`closeNoteModal()` 只是 `closeModal()` 的兼容别名（遮罩与 Esc 指向它）。**禁止**再为编辑表单新开抽屉，或自带一套标题 / 按钮结构。
-- **任务表单骨架统一（2026-09-15）**：「新建项目任务」与「项目任务编辑」两个弹窗共用 `todoFormHTML()`——`标题 → 截止 → 优先级` 三段逐字一致（同一顺序、同一样式、都不带灰字说明）。**两个弹窗现在只有两处差异：标题文案、以及编辑多一个「删除」按钮**（新建：`保存 / 取消`；编辑：`保存 / 删除 / 取消`）。**禁止**再给其中一个弹窗单独加字段、改顺序或塞 `<small>` 说明，否则又会退回「新建一个样、编辑另一个样」。所属项目两边都只在标题下**只读**展示（副标题），不再提供选择器；「关联项目记录」整块已删除。
+**路由分发**（`shell/LocalApi.cs`）：WebMessage 桥上先由 `DispatchProjectDomain` 接手——**执行域 → 模块域 → 项目域**三级兜底，未命中返回 null 交回 HttpClient 应急代理。**51 条路由全部已移植**，清单在 `LocalApi.CoveredRoutes`；自测 `routes` 阶段把它与 `backend/app/main.py` 里实际定义的路由做**双向比对**，任何一边多出来都失败——**新增路由必须同步补清单**。`/bootstrap` 与 applications / executions 组都甩到 `Task.Run`（重查询 / 真扫描 / 子进程，别冻 UI）。异常到 HTTP 状态的映射与 FastAPI 版一一对应（404 / 409 / 422 / 503 / 500）。
 
----
+**源码一览**（都在 `shell/`）：
 
-## 8. 样式系统
+| 文件 | 职责 |
+|---|---|
+| `App.xaml.cs` | 启动分支：`--selftest` / `--shortcuts` / `--inspect-shortcuts` / 单实例互斥 |
+| `MainWindow.xaml.cs` | 窗口、托盘、WebView2 初始化、虚拟主机映射、**WebMessage 桥**、**应用图标网络栈拦截** |
+| `LocalApi.cs` | 路由分发器 + 请求体校验（pydantic 等价物）+ `CoveredRoutes` 清单 |
+| `ConsoleConfig.cs` | 路径配置（镜像 `backend/app/config.py`，硬编码仓库根） |
+| `Db.cs` | SQLite 门面：迁移 1–10 复刻、`Execute/FetchOne/FetchAll/Transaction/WithTransaction` |
+| `StartupManager.cs` | 开机自启动（`Run` + `StartupApproved\Run` 双位置） |
+| `ApplicationScanner.cs` | 开始菜单 / UWP / App Paths 扫描 + 图标提取（`SHGetFileInfoW` + 手写 PNG 编码器） |
+| `ApplicationCatalog.cs` | applications 路由组业务层（`ValidateLaunch` 是公共校验） |
+| `ModuleRegistry.cs` | `module.json` 解析与校验 |
+| `ModuleRunner.cs` | 三类模块（web / application / script 落地子进程）+ `sync_registry` |
+| `ExecutionService.cs` | 执行编排（项目锁、失败即停、中断恢复） |
+| `ProjectService.cs` | 项目 / 任务 / 记录 / 文件 / 基本资料 |
+| `ModuleService.cs` | 模块管理 + 项目↔模块 / 应用绑定 |
+| `ActivityService.cs` | 心跳 + 日聚合（git numstat 扫描） |
+| `WindowHost.cs` | `IConsoleWindowHost` + 壳实现（置顶）；无窗口时如实报不可用 |
+| `BootstrapService.cs` | `/bootstrap` 12 键聚合（键名与 Python 版逐字对齐） |
+| `SelfTest.cs` | 无头自测（`--selftest`，含全部阶段） |
+| `ShortcutMaker.cs` | 桌面快捷方式生成 / 排查（走壳内 COM） |
+| `TrayHost.cs` | 托盘 + Win32 导入 |
 
-- 令牌集中在 `styles.css` 顶部 `:root`（暗色在 `[data-theme="dark"]`）：
-  - **文字** `--ink / --ink-2 / --ink-3 / --ink-4`；**描边** `--line / --line-2`
-  - **品牌** `--brand:#E8402A / --brand-dark / --brand-soft / --brand-line / --on-brand`
-  - **语义色** 每色配一枚 `-bg`：`--green / --blue / --amber / --purple / --teal / --slate`
-  - **项目状态三态** `--st-ok / --st-dev / --st-pause`（各配 `-bg`）；**表单校验错误** `--err / --err-bg / --err-line`
-  - **表面** `--card / --card-strong / --tile / --tile-2 / --hover / --bg / --side`
-  - **圆角** `--r-card:20px / --r-inner:14px / --r-sm:10px / --r-pill:999px`
-  - **间距** `--pg:20px / --pg-sm:12px / --gap:16px / --pad:18px`；**阴影** `--sh / --sh-lg`；**毛玻璃** `--blur`
-  - **尺寸** `--side-w:240px / --main-max:1440px / --tile-min:290px / --board-gap / --tile-pad / --app-row-h:46px / --app-row-gap:6px / --home-tile-ico:42px`
-  - **动效** `--ease-out / --motion-press / --motion-panel`
-  - **专项** 终端底色 `--term-bg:#2E3440`；居中弹窗宽度 `--modal-w:760px`（宽版）/ `--modal-w-form:480px`（窄版表单，由 `.note-modal.form` 取用）
-- 卡片三件套：`.card`（圆角 + 毛玻璃 + 描边 + 阴影）、`.card-head` + `.card-title`（配 `<small>` 副标）、`.list` + `.row`。
-- 文字层级：标题 16px/600 → 小标 11px/`--ink-3` → 正文 12.5–13px → 辅助 11px/`--ink-4`。
-- 自适应靠 `min()` / `clamp()` / flex / grid，**不用媒体查询断点**（现有媒体查询只用于「减少动态效果 / 触屏 / 悬停能力」这类能力门控，不是宽度断点）。
+**关键设计**：
+- **可注入**：`LocalApi` 的每个依赖都可注入，`SelfTest` 因此能在无窗口进程里跑真业务逻辑（`initOnStart:false` 跳过启动期副作用）。
+- **无头自测**：`--selftest [日志]` 走 `App.OnLaunched` 分支，**不建窗口不碰 WebView2**——工具会话出身也能跑（绕开安全软件对 WebView2 的拦截），结果**逐条落盘**（进程被掐也能看到死点）+ 退出码。阶段：`base` / `startup` / `scan` / `realscan` / `icon` / `catalog` / `registry` / `exec` / `window` / `activity` / `projects` / `modules` / `bootstrap` / `routes`。
+- **自测环境限制**：派生 `powershell.exe` 会被安全软件连根掐 → 扫描类测试用 `useShellLists:false`（只关 UWP 清单，其余全真）。应用绑定测试**必须用真扫描候选**（`source_key` 要能被重新验证，造假 key 一定 409）。
+- 自测断言要**防自嗨**：注册表辅助直接操作 Registry 而非走被测类。
 
 ---
 
-## 9. 测试约定
+## 8. 页面与组件地图
 
-- 断言按主题分块：`/* n. 主题 */ try { … } catch (e) { console.log('FAIL …'); fail++; }`。
-- 断言的描述要写「期望的行为」，不是实现细节；一条 `check` 一句话。
-- **改了结构就补 / 改断言**；删功能要补**负向断言**（「已彻底移除」）。
-- 避免脆弱匹配：用前缀或正则（如 `indexOf('class="page-head')`），别用整串精确匹配，否则加个类名就误报。
-- 现有全局护栏：「styles.css 里不得出现零引用类名」（**424 个类**当前全部有引用；子串匹配的坑见 §5 第 8 条）。删功能时必须同步删样式，否则这条会红。**但这条只查 CSS → markup 一个方向**：markup 里挂着 `styles.css` 中根本不存在的类名（如已删的 `card tight`）它查不出来，属于「反向死代码」。第 34 块测试里已补一条反向断言（`!app.js.includes('tight')`），删类名时两个方向一起清。
+导航 5 项（顺序固定）：**总控台 / 项目 / 模块 / 应用 / 设置**（第 6 个 `workflows` = 项目详情页，不进导航）。
+
+- **总控台**：继续工作 hero + 最近打开 + 最近活动；单屏无纵向滚动。
+- **项目（选择页）**：卡片栅格 + 尾部新建卡（切状态 / 复制 / 刷新 / 删除）。运行控件 `projectRunControlsHTML()` **必须由选择页卡片与详情页头共用**，不得各写一套；`S.projectRuntime` 由 `/api/projects/{id}/runtime` 恢复，刷新后不能退回假空闲。
+- **项目详情页**（`S.wf`），四区块：① 概览（身份卡 + 能力卡 + 统计卡）；② **开发上下文**（左：当前任务区 + 高 / 中 / 低优先级区，可拖拽、可空、区高可调；右：Obsidian 资料中枢卡 + 项目记录 + 项目文件）；③ **运行流程**（单张卡：状态徽标 + 「添加模块」入口 → 状态摘要 / 日志终端 → 主流程蛇形视图 → 历史记录；主流程每行 5 节点、蛇形走向、行间 S 形曲线；节点三态：已完成绿 √ / 进行中品牌色 / 未开始空心）；④ 设置（开关 + 裸红色「删除项目」长条）。
+- **模块**（页面 id `scripts`）：执行模块的唯一编辑 / 添加入口。新增用内置 `web` 模板（名称 / 网站地址 / 描述），项目归属只由 `project_modules` 多对多绑定维护。磁盘清单模块显示为「内置模块」，**不得从页面改写或删除**。删除走预演 + 二次确认，解除绑定但**保留历史运行记录**。
+- **应用**：列表 + 惯性滚动 + 分类标签；「添加应用」两步（选择真实应用 → 可选改名改标签 → 确认）。扫描结果在弹窗内容区独立滚动、底部操作始终可见；**不得恢复静态池 / 空壳应用 / 后端断开时的假成功**。
+- **设置**：外观（7 个偏好）、通用行为、快捷键、Obsidian 全局连接。
+- **命令面板**：`Ctrl+K`，`buildPalette()`。「常用项目」分组必须由 `DATA.projects` 派生（**不要写死项目 id**）；`startRun(id)` 必须明确判存在，**不要 `find(...) || curWf()` 兜底**。
+- **抽屉 / 弹窗边界**：**所有「编辑 / 填写」走居中弹窗**，**右侧抽屉只保留「纯查看」**（应用 / 项目详情）。禁止为编辑表单新开抽屉。
+- **任务表单**：「新建」与「编辑」共用 `todoFormHTML()`（标题 → 截止 → 优先级三段逐字一致），**只有两处差异**：标题文案、编辑多一个「删除」按钮。所属项目只读展示。
+
+---
+
+## 9. 样式系统
+
+- 令牌集中在 `styles.css` 顶部 `:root`（暗色在 `[data-theme="dark"]`）：**文字** `--ink/-2/-3/-4`；**描边** `--line/-2`；**品牌** `--brand:#E8402A` 系列；**语义色** `--green/blue/amber/purple/teal/slate`（各配 `-bg`）；**项目三态** `--st-ok/-dev/-pause`；**表面** `--card/--card-strong/--tile/--tile-2/--hover/--bg/--side`；**圆角** `--r-card:20px/--r-inner:14px/--r-sm:10px/--r-pill`；**间距** `--pg/--pg-sm/--gap/--pad`；**阴影** `--sh/--sh-lg`；**尺寸** `--side-w:240px/--main-max:1440px/--tile-min:290px/--app-row-h:46px`；**动效** `--ease-out/--motion-press/--motion-panel`；**专项** `--term-bg:#2E3440`、`--modal-w:760px`、`--modal-w-form:480px`、**`--win-min:720px`**。
+- **密度令牌走 `clamp` 连续缩放**（如 `--dash-title:clamp(21px,1.35vw+8px,28px)`），断点之间字号 / 留白无跳变；断点只做结构切换（见 §5 第 7 条）。
+- **全站最小压缩宽度地板**：`body{min-width:var(--win-min);overflow:auto}`（常态无滚动条，窄窗只出横向滚动条）。语义：**适配到 720px 为止，再窄是「不可读」，不是「响应式」该管的事**。
+- **侧栏折叠双模**：宽窗口 `.mini` 常驻折叠；紧凑窗口（≤1199.98px）走 `side-flyout` 浮层展开（点侧栏以外任意处收起，`matchMedia change` 拉宽后自动作废浮层态）。W1 区间的隐藏规则全部加 `:not(.side-flyout)` 门控。
+- 卡片三件套 `.card` / `.card-head` + `.card-title` / `.list` + `.row`。文字层级：标题 16px/600 → 小标 11px `--ink-3` → 正文 12.5–13px → 辅助 11px `--ink-4`。
 
 ---
 
 ## 10. 常踩的坑（都真踩过）
 
-1. **文本替换要覆盖足够上下文**：`old_string` 若正好切到下一个 `case` 的开头，会把相邻分支吞掉——改完立刻回读文件确认。
-2. 同一个 `try` 块里「先用后声明」的 `const` 会 **TDZ 报错**；跨块引用变量无效，要在本块自己读文件。
-3. 运行引擎时序：`startRun` 首帧**全部 `wait`**；第一次 `advanceRun` 才把首个步骤点亮为 `now`；第二次才出现 `done`。写断言别猜。
-4. 蛇形流程的**行容器必须带 `rev` 类**才右对齐，否则节点与 S 弯端点错位（错过一次）。
+**通用 / 前端**
+
+1. **文本替换要覆盖足够上下文**：`old_string` 若切到下一个 `case` 的开头，会把相邻分支吞掉——改完立刻回读文件确认。**长单行条目（如本文档置顶）尤其危险：Edit 会吃掉相邻条目的标题行**；插入内容后用「新内容 + 换行 + 原 old_string 全文」的写法才安全，并回读校验全部相邻标题。
+2. 同一个 `try` 块里「先用后声明」的 `const` 会 **TDZ 报错**；跨块引用变量无效。
+3. 运行引擎时序：`startRun` 首帧**全部 `wait`**；第一次 `advanceRun` 才点亮首个步骤为 `now`；第二次才出现 `done`。写断言别猜。
+4. 蛇形流程的**行容器必须带 `rev` 类**才右对齐，否则节点与 S 弯端点错位。
 5. 贴边通栏元素的小圆角**视觉上等于没有**；要明显圆角就做成悬浮卡片。
-6. 清 CSS 死代码的判定：选择器里**任一**类名在 `app.js` / `index.html` 中从不出现 → 该选择器不可能命中（祖先类活着不代表规则活着，如 `.player .p-info`）。清理前先排除运行时拼接（查模板字符串与字符串加号）。
-7. 本机 PowerShell 的 `Add-Type`（含 `-AssemblyName`）被安全策略拦截：取像素 / 调 .NET 改用隔离 Python。
-8. 打包中文名文件别用 PowerShell `Compress-Archive`（乱码），用 node + zlib 自写 ZIP（文件名 UTF-8 标志位 `0x0800`）。
-9. **「三态 / 多态」配色：类名列表和 CSS 规则必须一一对齐，漏一条就是隐形的黑点**。项目状态三态 `pst-ok` / `pst-dev` / `pst-pause` 里，`.pst-ok` 的规则一度根本没写（只有 `--st-ok` / `--st-ok-bg` 令牌在，另外两态有规则）。后果不是「没颜色」而是**看起来像另一个颜色**——`.st-switch .dot{background:currentColor}` 会退化成继承色（近黑），界面报障就是「正常显示的不是绿色是黑色」；同时「正常」那颗开关连底色都是透明的，和另外两态不一致。**教训**：色板是按「态」写的，`PROJ_STS` 加一个态就必须在 `styles.css` 里补一条 `.pst-*`；测试已加断言（每个 `st.cls` 都要在 styles.css 里有 `.{cls}{` 规则 + `.pst-ok` 必须有 `color:var(--st-ok)`）。
-10. **`stCls` 与 `st` 是两份数据，可能对不上**：`DATA.projects` 里 `ops`（`st:'已暂停'` / `stCls:'b-slate'`）与 `ai`（`st:'开发中'` / `stCls:'b-blue'`）用的是通用 badge 类，只有 `apex` 用 `pst-ok`。卡片 badge 直接渲染 `w.stCls`，状态切换控件却走 `projStDef(w.st).cls` —— 两处取值口径不同，改状态样式时别只看其中一处。
-11. **本仓库源码是纯 LF，用脚本批量改写会把整份文件变成 CRLF，源码级断言会静默失效**。Windows 上 `io.open(p,'w')` 默认 `newline=None`，会把 `\n` 翻成 `\r\n`；而测试里有一批按 `\n` 精确匹配的断言（如 `'(function init(){\n  loadObsidianState();'`），CRLF 下 `{\r\n` 不含 `{\n`，断言就红了 —— 而且报出来的条目看起来与你的改动毫不相干（曾表现成「启动时恢复配置…」失败）。
-    **规避**：批量改写用 `io.open(p,'w',encoding='utf-8',newline='')` 或二进制 `replace(b'\r\n', b'\n')`；改完对所有源码复核 `b.count(b'\r\n')`。项目没有 git、没有 `.gitattributes`，没有任何东西替你兜住。
-12. **写否定断言时，注释里出现被否定的字面量也会命中正则**。例如断言 `!/startRun\('apex'\)/.test(appSrc)`，如果源码注释里写了「原来是 `startRun('apex')` / `startRun('ops')`」来交代历史，断言照样 FAIL。同一个坑还踩过一次：CSS 注释里写出被否定断言否定的**令牌名**（带 `--` 前缀）也会误命中。**写这类注释时不要带具体调用字面量**，改成「原来这两条是硬编码项目 id 的 startRun 调用」这种描述。
-13. **批量做全局替换前，先确认每个出现位置都是你要改的那个**。同名的东西可能指两种概念（如 `proj` 既指项目 id 又指项目名、`模块` 既指导航项又指 `DATA.modules` 的条目），直接全文替换会把 `S.proj`（id）也一起改掉。**先 `grep -n` 列全部出现位置并分类，再决定替换范围**。
-14. **真实 APEX 模块不要改回长 PowerShell 启动器**：旧入口曾被 Microsoft Defender 识别为 `HackTool:PowerShell/ApexToolkit.A`，脚本在参数解析前就被 AMSI 拦截，表现为 `ScriptContainedMaliciousContent`。当前 `backend/modules/apex-launcher/runner.py` 由 APEX 自己的 Python 3.12 虚拟环境执行，并通过 Windows `runas` 请求管理员权限；`module.json` 不含 PowerShell 或执行策略绕过。不要用关闭防护、加白名单或改回脚本来规避。`ModuleRunner` 的程序路径也必须像参数一样展开 `{project_root}` 等占位符。
-15. **总控台一键入口只结束已验证的监听进程，不要改回 `taskkill /T`**：虚拟环境解释器会有父子进程，`taskkill /T` 为遍历整棵进程树可能在实际机器上报“拒绝访问”，即使目标监听进程本身可安全结束。当前 `console_launcher.py` 先用健康检查确认服务身份，再对 `8765` 的监听 PID 使用最小 `PROCESS_TERMINATE` 权限；普通权限无法取得结束句柄时才申请 UAC。源码未变化时不重启，避免打开网站就中断正在执行的项目。
-16. **自管滚动不要捕获按钮的指针**：应用列表的惯性滚动容器若在 `pointerdown` 时对按钮调用 `setPointerCapture`，鼠标点击会被吞掉，表现为键盘 Enter 可用、鼠标无反应。交互控件必须先经 `appScrollDragBlocked()` 排除；只有列表空白和非操作区域进入拖动。
-17. **无人值守的模块绝不能停在交互输入上**：Windows 上 `getpass` 会绕过 stdin 重定向直接读控制台，即使子进程用 `stdin=DEVNULL` 启动，`getpass.getpass()` 仍会**永久挂住**（`console_launcher` 与 `ModuleRunner` 都用 `CREATE_NO_WINDOW`，现场表现为项目卡在「运行中」）。副作用是 `subprocess.run` 不带 `timeout` 时父进程一起挂死。因此 `backend/modules/runner-lab/runner.py` 必须给导入器传 `--no-prompt` 并设置 `IMPORT_TIMEOUT_SECONDS`；任何新增的交互式脚本在被模块调用前都要先加同类开关。
-18. **项目名来自 manifest，不要再写死**：`module_runner.sync_registry()` 原先对任何 manifest 都插入项目名「APEX 启动」。现在读 `projectName` / `projectDescription`（未声明时回落到原文案，见 `module_registry.DEFAULT_PROJECT_*`）。新增模块必须在 `module.json` 里显式声明这两个字段，否则会继承「APEX 一键启动」的文案。
-19. **`{console_root}` 在动作参数里也能用了（曾经不能）**：占位符以前只在 `projectRoot` 被替换，`actions.*.program` / `args` 里写它会在运行时抛 `模块参数包含未知占位符`，现场表现是「点一下模块就失败，日志里一行 ValueError」（`data/console-service.err.log` 里留过多次）。现在可用占位符统一由 `ModuleRunner._run_values()` 产出：`{module_dir}` `{project_root}` `{console_root}` `{run_dir}` `{result_path}` `{log_path}`；`{console_root}` 与 `ModuleRegistry.console_root` 同源。**跨项目模块（如 `runner-lab`）引用 console 自己的虚拟环境时必须写 `{console_root}`，不要写绝对路径**。回归由 `tests/test_module_project_metadata.py::test_action_placeholders_expand_to_an_existing_interpreter` 兜住。
-20. **模块要开窗口就用 `pythonw.exe` + `DETACHED_PROCESS`，不要等窗口关闭**：`runner-lab` 模块的 `run` 动作改为打开导入窗口（拖压缩包 + 输密码）。`ModuleRunner` 会尽量用 `CREATE_NO_WINDOW` 起子进程，所以窗口进程必须由 `runner.py` 自己用 `pythonw.exe` + `DETACHED_PROCESS` 拉起来，否则会跟着一起来一个黑框，且调用方退出时被连带回收。pid 记在 `%TEMP%\run-analytics\import-gui.pid`（`tempfile.gettempdir()`，仓库之外；2026-09-23 前记在 `D:\RunningData\import-gui.pid`，该目录已撤销、导入投放目录收敛进 run-analytics 项目内），`stop` / `restart` 靠它精确结束窗口；不要换成按镜像名 `taskkill /IM pythonw.exe`。无界面导入路径仍然保留（不带 `--gui` 即走它），供自动化调用。
-21. **模块项目是独立 git 仓库，放在 console 同级目录**：按「平台一个仓库、每个项目模块一个仓库」的约定，run-analytics 仓库在 `D:\Projects\run-analytics`（`..\run-analytics`），`module.json` 的 `projectRoot` 写相对路径 `..\run-analytics`，`module_registry` 会相对 console 根解析（不要改回按 cwd 解析，也不要写死盘符）。本仓库 `.gitignore` 排除 `run-analytics/` 整个目录，**两边提交互不混合**：改模块项目在它自己的仓库提交（含健康数据排除），改 `backend/modules/` 的接入层才在本仓库提交。
-22. **「设置页开关」这一类控件的通病是「看着能点、其实没接线」**：`data-act="switch"` 只翻转 DOM 上的 `on` 类，`sw(...,true,'notify')` 的初值写死在 markup 里 —— 点一下有 toast 反馈、看着像生效，但 `S` 里没有对应字段、`localStorage` 里也没落盘，**任何一次重绘就弹回写死的初值，刷新更是全丢**（用户报障的原话就是「调不了，刷新后就变回去了」）。信息密度滑块、主题、强调色、玻璃质感、桌面通知 / 自动保存 / 使用数据统计 7 个偏好都栽在同一个模式上。**修法固定三步**：①`S` 加字段 + 加进 `PREF_KEYS`/`normalizePrefs` 白名单；②写一个只操作 `<html>` 令牌 / 状态类的 applier，并在 `applyPrefs()` 里注册；③事件分支改成「改 `S` → 调 applier → `persistPrefs()` → `render(true)`」。**新增任何外观开关都照这三步走**，不要只加 markup + toast。
-23. **`classList` 也要进 DOM 桩**：`documentElement` 的桩若只有 `dataset` / `style`，`applyGlass()` 会在启动时直接抛 `Cannot read properties of undefined`，整份 app.js 加载失败（表现是 `LOAD_FAIL`，看起来跟你的改动毫不相干）。桩里的 `classList` 必须有**真实记忆**（`Set` 支撑 `add/remove/toggle/contains`），否则玻璃质感只能测「没抛错」，测不出到底开没开。
-24. **占位符不许当数据用（模板字段会被深拷贝到每个真实项目上）**：`DATA.projectTemplate` 是「新建项目」的深拷贝底板，而 `loadBackendState()` 里**没有 seed 的项目也走它** —— 模板里每个字段都会变成真实项目对象的字段。曾给它写过 `flowName:'默认流程'`，于是所有后端来的 / 控制台新建的项目都带上这个名字，项目卡 chip、概览「当前流程 / 运行流程」、Obsidian 项目主页、命令面板四处一起显示。**模板里只放真正的默认值**（空串 / 0 / 空数组）；要「兜底文案」就写成渲染期函数（`flowNameOf()`），不要塞进数据 —— 「用户没填」与「用户填了这个值」在数据层必须能区分。
-25. **「好几条一模一样」几乎总是「兜底值 + 标签缺主体」的组合**：命令面板「常用」组标签只写流程名、不带项目名，再叠上被深拷贝的占位流程名，就成了三条完全相同的「运行『…』」，用户只能问「这是什么意思」。排查口诀：**先问「这个字段缺省时是什么」，再看「这条标签里有没有能区分主体的信息」**。
-26. **排序键必须是数值，不能拿展示文案排**：`backendTimeLabel()` 输出的是「今天 00:03」/「9月22日 13:30」这种给人看的文案，按字符串比大小毫无意义（「9月…」恒大于「今…」）。要排序就在适配层**另存一个毫秒数**（后端时间串一律经 `backendEpoch()` 转，缺失 / 非法为 `0` 让「从未运行」自然沉底），文案只负责显示。另外：本地新增 / 更新数据时**要顺手刷新排序键**（`rememberBackendAttempt()` 就地为 `wf.lastTs` 赋值），否则刚跑完的项目顺序不动，看着像排序没生效；刷新时若源数据没有时间戳，**保留旧值，不要用 `Date.now()` 凭空造一个**。
-27. **测试里断言 `let` 变量的实时值，导出必须用 getter**：`globalThis.__T = { palItems }` 只在注入那一刻求值 —— `palItems` 是 `let`、`buildPalette()` 每次整体重写，直接导出只会快照成空数组，断言永远看到空列表还以为功能坏了。正确写法是 `Object.defineProperty(globalThis.__T, 'palItems', { get(){ return palItems; } })`，读的才是当场那份。
+6. 清 CSS 死代码：选择器里**任一**类名在 `app.js` / `index.html` 里从不出现 → 该规则不可能命中（祖先类活着不代表规则活着，如 `.player .p-info`）。清理前先排除运行时拼接。
+7. **本机安全策略拦截**：PowerShell 的 `Add-Type`（含 `-AssemblyName`）与 `New-Object -ComObject WScript.Shell`（"COM object instantiation can run arbitrary code"）都会被拦；`reg.exe` 也在黑名单。**取像素 / 调 .NET 用隔离 Python；读注册表用 Python `winreg`；建快捷方式 / 解析 lnk 走壳内 CLI**（壳进程内的 COM 是通的）。
+8. 打包中文名文件别用 PowerShell `Compress-Archive`（乱码），用 node + zlib 自写 ZIP（UTF-8 标志位 `0x0800`）。
+9. **「三态 / 多态」配色：类名列表和 CSS 规则必须一一对齐**，漏一条就是隐形的黑点（`.st-switch .dot{background:currentColor}` 会退化成继承色，看起来像「黑色」而不是「没颜色」）。测试已加断言（每个 `st.cls` 都要有 `.{cls}{` 规则）。
+10. **`stCls` 与 `st` 是两份数据，可能对不上**：卡片 badge 直接渲染 `w.stCls`，状态切换控件走 `projStDef(w.st).cls`——改状态样式时别只看其中一处。
+11. **源码是纯 LF，批量改写别把整份文件变成 CRLF**，否则按 `\n` 精确匹配的源码级断言静默失效（报出来的条目还看起来毫不相干）。批量改写用 `newline=''` 或二进制 `replace(b'\r\n', b'\n')`；改完复核 `b.count(b'\r\n')`。
+12. **写否定断言时，注释里出现被否定的字面量也会命中正则**（`!startRun\('apex'\)/` 会被注释里的历史说明命中）。写这类注释不要带具体调用字面量。
+13. **批量全局替换前先分类**：同名可能指两种概念（`proj` 既指 id 又指名字）。先 `grep -n` 列全部出现位置并分类，再决定范围。
+14. **「设置页开关」通病是「看着能点、其实没接线」**：`data-act="switch"` 只翻转 DOM class，初值写死在 markup 里 → 任何重绘就弹回、刷新全丢。**修法固定三步**：①`S` 加字段 + 进 `PREF_KEYS`/`normalizePrefs`；②写一个只操作 `<html>` 的 applier 并注册到 `applyPrefs()`；③事件分支改成「改 `S` → applier → `persistPrefs()` → `render(true)`」。
+15. **`classList` 也要进 DOM 桩**（否则 `applyGlass()` 抛异常导致整份 app.js `LOAD_FAIL`），且必须有**真实记忆**（`Set` 支撑 add/remove/toggle/contains）。同理 `ctx.matchMedia` 也要有桩（空 addEventListener）。
+16. **占位符不许当数据用**：`DATA.projectTemplate` 是新建项目的深拷贝底板，模板里每个字段都会变成真实项目字段。**模板里只放真正的默认值**；要兜底文案写成渲染期函数（`flowNameOf()`）。
+17. **「好几条一模一样」几乎总是「兜底值 + 标签缺主体」**：排查口诀——先问「这个字段缺省时是什么」，再看「这条标签里有没有能区分主体的信息」。
+18. **排序键必须是数值**：展示文案（如「9月22日 13:30」）按字符串比毫无意义。适配层另存毫秒数（`backendEpoch()`，缺失 / 非法为 `0` 让「从未运行」沉底），文案只负责显示；本地更新数据时顺手刷新排序键，但**不要用 `Date.now()` 凭空造时间**。
+19. **测试里断言 `let` 变量的实时值，导出必须用 getter**（`Object.defineProperty(__T, 'x', {get(){return x}})`），否则只快照成注入那一刻的值。
+
+**后端 / 执行栈**
+
+20. **真实 APEX 模块不要改回长 PowerShell 启动器**：旧入口曾被 Defender 识别为 `HackTool:PowerShell/ApexToolkit.A`，脚本在参数解析前就被 AMSI 拦截。当前 `backend/modules/apex-launcher/runner.py` 由 APEX 自己的 Python 虚拟环境执行，通过 `runas` 请求提权；`module.json` 不含 PowerShell。不要用关防护 / 白名单规避。
+21. **一键入口只结束已验证的监听进程，不要改回 `taskkill /T`**：虚拟环境解释器有父子进程，`/T` 可能报「拒绝访问」。先用健康检查确认服务身份，再对监听 PID 使用最小权限。
+22. **自管滚动不要捕获按钮的指针**：惯性滚动容器若对按钮 `setPointerCapture`，鼠标点击会被吞（键盘 Enter 却可用）。交互控件先经 `appScrollDragBlocked()` 排除。
+23. **无人值守的模块绝不能停在交互输入上**：Windows 上 `getpass` 会绕过 stdin 重定向直接读控制台，**永久挂住**（表现为项目卡在「运行中」）。交互式脚本被模块调用前必须加 `--no-prompt` 类开关 + 超时。
+24. **项目名来自 manifest**：新增模块必须在 `module.json` 显式声明 `projectName` / `projectDescription`，否则继承 `module_registry.DEFAULT_PROJECT_*` 的文案。
+25. **占位符**：`{module_dir}` `{project_root}` `{console_root}` `{run_dir}` `{result_path}` `{log_path}`。**跨项目模块引用 console 自己的虚拟环境时必须写 `{console_root}`**，不要写绝对路径。**占位符展开必须留在 `try` 里**——异常从 try 前逃出会让 run 永远停在 `running`（项目卡死「运行中」，按钮消失，看起来像「点了没反应」）。
+26. **模块要开窗口就用 `pythonw.exe` + `DETACHED_PROCESS`**，不要等窗口关闭（否则跟着来一个黑框，且调用方退出时被连带回收）；pid 记在 `%TEMP%` 下，靠它精确结束；**不要**用 `taskkill /IM pythonw.exe`。
+27. **模块项目是独立 git 仓库，放在 console 同级目录**（如 `D:\Projects\run-analytics`）：`module.json` 的 `projectRoot` 写相对路径，`module_registry` **相对 console 根**解析（不按 cwd、不写死盘符）。
+28. **C# 壳侧（二期移植踩过的）**：
+    - `catch (A or B ex)` **不是合法 C#**——异常过滤要写 `catch (Exception ex) when (ex is A or B)`。
+    - `x.Result;` 作为**丢弃结果的裸语句**编译不过（CS0201），必须 `_ = x.Result;`。
+    - `await Task.Run(...)` 默认捕获调用方上下文，**UI 线程用 `.Result` 等待会死锁**——库代码一律 `.ConfigureAwait(false)`（表现为自测卡死、日志缺汇总行）。
+    - `ContinueWith(_ => { … out _ … })` 里 lambda 参数 `_` 与 discard 撞名，`out _` 被当成 out lambda 参数（编译报类型错）——lambda 参数改名。
+    - `JsonDocument.RootElement` 必须先 `.Clone()` 再让 document 释放，否则 element 悬挂。
+    - `List<T>.Reverse()` 是 **void 实例方法**；要 LINQ 反转用 `AsEnumerable().Reverse()`。
+    - Nullable 属性模式 `{ Value.X: … }` 的**第一级就作用在解包后的 T 上**，再写 `.Value` 会报「未包含 Value」。
+    - **多线程竞态**：「任务收摊」与「finally 落库对其他连接可见」之间有窗口（Python 单线程事件循环没有），等待方见 `RunIsLive=false` 就收手会闪失——收手前重查一拍。
+    - 构建输出被运行中的壳锁住（**MSB3027**）：先 `taskkill` 旧壳再构建，新壳需重新启动。
+    - **从工具会话启动的进程会被安全软件掐掉 WebView2**：壳一律由人双击 / 自启动拉起，agent 只做构建与无头自测。
+    - 本机无系统级 dotnet，用全路径 `C:\Users\23221\.dotnet\dotnet.exe`。
+29. **后端测试基线的真相**：`pytest backend/tests` 是 **90 通过 + 4 项既存失败**（`test_apex_launcher.py` 调 `launcher.backend_compatible()`，而该函数从来不存在）。**修掉之前，别把「后端全绿」当成改动的验收前提**。
+30. **壳里的模块子进程不能靠「不传 CREATE_NO_WINDOW」来给控制台**：`requires_admin` 分支在 Python 版写 `creationflags=0`，语义是「沿用后端自己那个控制台」；壳是 WinUI GUI 进程、**没有控制台可继承**，于是系统给子进程**新分配**一个控制台窗口，而它的 stdout/stderr 全被重定向进 `process.*.log` → 那个窗口永远空白，用户看到一块悬着的「黑屏」（2026-09-25 实测，项目「APEX 启动」的 `apex-launcher` 每次运行必现）。**壳侧恒为 `CreateNoWindow = true`，不要复刻 `requires_admin` 这条判断**（两套栈在这一处是**有意分歧**，别「对齐」回去）。判定手段：拿 `pythonw.exe` 当无控制台父进程，A/B 各跑一次，子进程自报 `GetConsoleWindow` / `IsWindowVisible` —— `flags=0` 得可见窗口，`CREATE_NO_WINDOW` 得 0。
+31. **`apex_launcher` 的输入助手必须用被标记 `RUNASADMIN` 的解释器启动，别改成 `sys.executable`**：`processes.py` 的 `REFERENCE_INPUT_PYTHON` 两条口径差一行，后果却是整条流程停在第一步。**AK.exe 是提权运行的**（非提权进程对它 `SetWindowPos` 会得到 `(5, …, '拒绝访问。')`），**提权窗口在前台时非提权进程的 `SetCursorPos` 直接返回 0、指针纹丝不动**（2026-09-25 实测，AK 一退出就恢复正常）——所以「动鼠标的那个进程」必须同样提权。参考实现（旧启动脚本的 `.bat`、`D:\Py项目\APEX` 那份）正是靠写死 `C:\Users\23221\AppData\Local\Programs\Python\Python314\python.exe`（该 exe 在 `HKCU\…\AppCompatFlags\Layers` 里是 `~ RUNASADMIN`）来保证这一点；换成 venv 的 `sys.executable` 后助手不再被强制提权，`SetCursorPos` 被系统拒绝，而旧代码把真实原因吞掉、只留一个对不上的「实际坐标」，于是现象是「AK 打开后点不动、后面的 Steam/游戏全不执行」。**别把 `REFERENCE_INPUT_PYTHON` 改回 `sys.executable`**；环境变量 `APEX_INPUT_PYTHON` 是给别的机器留的出口。排查手段：`processes.move_mouse()` 的返回里现在带 `error` / `error_detail` / `returncode` / `elapsed_seconds`，非提权进程起 `Python314\python.exe` 会明确报 `[WinError 740] 请求的操作需要提升`。
+32. **读子进程 stdout 必须先并发读走再 `WaitForExit`，否则管道满 → 子进程永不退出**：`ApplicationScanner.ListStartApps()` 跑 `powershell.exe Get-StartApps` 会往 stdout 写 **17KB**（本机 203 条清单，stderr 还有 CLIXML 进度流），而匿名管道缓冲区只有 **4KB**。旧写法「先 `WaitForExit(15000)` 再 `ReadToEnd()`」让子进程卡在自己那次写操作上**永不退出** → 必然超时 → 商店/UWP 清单被判失败。后果不是报错而是**静默丢数据**：添加应用里搜不到任何商店应用，而已绑定 UWP 应用（如 ChatGPT/Codex）的项目一运行就撞 `ValidateLaunch` 的 409「入口已失效」——**当年被误记成「派生 powershell.exe 会被安全软件掐」，其实是 .NET 管道死锁**。正确写法（见 `ApplicationScanner.ListStartApps`）：
+    ```csharp
+    proc.Start();
+    var stdoutTask = proc.StandardOutput.ReadToEndAsync();   // 先并发读走
+    var stderrTask = proc.StandardError.ReadToEndAsync();
+    if (!proc.WaitForExit(15000)) { proc.Kill(true); … }
+    stdout = stdoutTask.GetAwaiter().GetResult();
+    _ = stderrTask.GetAwaiter().GetResult();
+    ```
+    Python 的 `subprocess.run(capture_output=True)` 走 `communicate()`，本身就是并发读，所以同一命令 0.74s 返回 203 条——两套栈在这一处**不是命令参数差异**（`-Command` / `-EncodedCommand` / 是否重定向 stdin 实测都不影响）。
+    **排查入口**：`ApexShell.exe --scan` 逐层打印扫描结果（开始菜单根 → 快捷方式 → 目标解析 → 商店清单 → App Paths → 最终候选），并把库里每个带真实入口的应用逐个复验、直接点名谁会被判「入口已失效」。**注意自测覆盖不到这里**：`--selftest` 的扫描阶段一律 `useShellLists:false`（关掉商店清单），所以要另跑 `--scan`。
+
 
 ---
 
 ## 11. 已删除的模块（**不要加回来**，有负向断言）
 
-- **版本 / 存储页面与假快照机制**：侧栏、项目内统计与跳转、演示数据、动作分支、样式和冒烟断言已全部移除；项目运行历史仍由后端真实记录提供。
-- **预备检查卡**：异常不单独成卡，改为在「运行流程」卡内点名。
-- **执行模块卡**：并入「运行流程」卡；「添加模块」入口移到该卡卡头。
-- **独立待办 / 笔记页**：侧栏入口、首页卡片、页面渲染器、旧动作与对应样式已删除；任务 / 记录全部收进项目「开发上下文」。
-- **收件箱 tab**：`S.todos.inbox` / `S.todoTab` 已删，不再存在独立内容入口。
-- **侧栏「Apex 启动脚本」小卡**：含 `S.boot` / `runBoot` 动作 / `.mini-block` 系列样式，全清。
-- **「打开项目」入口与 `wfOpenProject` 动作（2026-09-15）**：`projDevHTML()` 与 `devContextHTML()` 底部两处按钮 + `case 'wfOpenProject'` 一起清（它原本只是弹个 toast 的空动作；`devContextHTML` 其后已随下一条整体删除）。项目里真正的打开行为走 `openFolder`（`PATH_OF` 目录映射）。**注意**：命令面板里还有两个同名文案「打开项目」的入口，动作是 `openWf`（AI 卡片，跳转到项目详情）与 `askWorkflows`（问答 chip，跳到项目选择页），属于另一套跳转动作，未删除。
-- **右侧抽屉版「完整开发上下文」与 `wfDev` 家族（2026-09-15）**：`devContextHTML()`、`wfDetailHTML()`、`wfDetail()`、`wfSwap()`（抽屉视图）已删；对应动作分支 `wfDetail` / `wfDev` / `wfDevBack` / `wfDevLink` / `wfOpenModule` / `setDevTask` / `clearDevTask` / 孤立触发的 `wfRun` 一起清。项目页底部原「完整开发上下文」按钮改为「编辑基本资料」（`data-act="editBasicInfo"`），打开居中弹窗（复用 `#noteModal` 宿主），内容 = `agentContextText()` 的同一份**纯文本**，可编辑、可保存回写（字段→`DATA.devContext`、待办→`S.todos`、灵感 / 笔记→`S.notes`、开发要求→`S.projRules`）；文本里缺掉的尾部条目属删数据，走 `basicInfoPreflightHTML` 预演 + 二次确认。抽屉里原来的「继续开发」按钮一并去掉。有负向断言（项目页不再出现「完整开发上下文」/`wfDev`）。
-  - **模板精简（同日）**：`agentContextText()` 的定位段只输出 `项目` / `当前开发模块` / `模块路径` / `相关文件` 四行，后接三个内容段（`待办：` / `灵感 / 笔记：` / `开发要求：`）。原来的 `项目 ID`（与项目名等价）、`模块 ID`（路径里已含）、`开发状态`（静态值）三行，以及 `当前待办：N 项（含待修改 N 项）` / `当前灵感 / 笔记：N 项` 两行派生计数，已从模板剔除——计数与紧随其后的列表纯重复，对下游 Agent 无价值。**`下一步` 行也在第四轮一并剔除**（与待办列表里的目标重复，见下条）。**字段本身仍留在 `DATA.devContext` 里**（其中 `开发状态` 的页面宿主已在同日随开发上下文卡头一并删除，现在只剩「编辑基本资料」弹窗的 `nm-meta` 在显示）；`BI_FIELDS` 保持宽容解析，老文本若还带这些行照样吃得下（不丢历史数据），只是模板不再输出。有负向断言锁定（`项目 ID：` / `模块 ID：` / `开发状态：` / `当前待办：` / `当前灵感 / 笔记：` / `下一步：` 均不在模板里）。
-  - **任务行格式收敛为 `N. [待办][优先级] 正文（截止）`（2026-09-15 四轮）**：①**类型徽章恒写「待办」**——「待修改」不再出现在任何输出里（`agentContextText` / 任务来源 / 删除预演 / `obsidianProjectNote` 全部改走新常量 `KIND_SHOW`），`TASK_KIND` 退居**数据词表**，只服务 `projTodos` / `projFixes` / `devCounts` 这几个内部分支；**`kind` 字段本身不动**，老数据仍可区分。②**优先级 高 / 中 / 低条条显式**——以前只有高 / 低带标记、中留空，现在三档全写，文本与界面的三档分组逐条对应。③**类型徽章刻意不参与解析**——`parseBasicInfoText()` 只回写 `pri` / 正文 / 截止，`applyBasicInfo()` 也不再写 `t.kind`；否则模板恒写「待办」会在保存时把 `fix` 条目**静默改成 `todo`**。**这条是硬约束**：新增任务由落库侧兜底成 `todo`。④「↳ 引用笔记」续行随之下线，`note.links` 至此**没有任何渲染宿主**。有正 / 负向断言（每条都带 `[高中低]`、解析结果无 `kind`、保存后 `fix` 仍为 `fix`、文本不含 `↳` / `下一步：` / `待修改`）。
-- **开发上下文卡头整行删除（2026-09-15）**：`projDevHTML()` 返回的 `<section class="card tight">` 里，`card-head` 整块已删——既包括原标题 `继续开发 <项目名>`（项目名在页头 `h1` 与概览卡 `ov-name` 已各有一处，属第三处重复），也包括同行的开发状态徽章 `<span class="badge b-blue">${d.status}</span>`。**卡片现在直接以 `<div class="dev-cols">` 开场，没有卡头、没有标题**——这是有意为之，不要「顺手」补一个标题或徽章回来。**连带后果**：`devContext.status` 在页面上已无宿主，只剩「编辑基本资料」弹窗的 `nm-meta`（`${w.name} · ${d.status} · …`）在显示它；`projDevHTML()` 里对 `DATA.devContext[w.name]` 的兜底对象也顺手去掉了 `status` 键（`{files:[], lastEdit:'—'}`）。**字段本身没删**（保留 `DATA.devContext` 与 `BI_FIELDS` 里的 `开发状态` 宽容解析），要彻底删字段是另一件事。有断言（整页不含 `继续开发`、卡头紧接 `dev-cols`、卡内无 `card-head` / `badge b-blue`）。
-- **任务编辑弹窗的「所属项目」选择器与「关联项目记录」整块（2026-09-15）**：两块连 UI 带动作一起清——`case 'todoSetProj'`（就地改任务归属）、`case 'todoNoteLink'`（建立 / 断开引用）、`toggleNoteLink()`（引用写入侧）全部删除，`todoMenu()` 里的 `projOpts` / `linkedNotes` / `pool` 局部变量一并去掉。**后果要清楚**：①任务创建后不能再改所属项目（所属项目只在弹窗标题下只读展示）；②任务 ↔ 记录的关联从两侧都无法再编辑（记录编辑器的任务清单早先已删），`note.links` 退化成**只读历史数据**——第四轮删掉「↳ 引用笔记」后它已无任何渲染宿主，只剩删除待办时的 `detachTodoRefs()` 兜底。**`notesLinkedTo` / `noteLinksOf` / `detachTodoRefs` 因此必须保留**——`detachTodoRefs()` 是唯一活着的消费者（两处调用：删除单条待办、保存基本资料时按文本差集删待办），不要连带删掉。有负向断言（`case 'todoSetProj'` / `case 'todoNoteLink'` / `toggleNoteLink` 零残留）。**遗留已确认（2026-09-16）**：`refBadgeOf` / `linkBadgeOf` / `notesLinkedTo` 三个纯展示函数**已无任何渲染宿主**，源码里只剩各自的定义与 `__T` 导出（`notesLinkedTo` 仅被 `refBadgeOf` 调用）——属**确认的死代码**。当前选择是**保留**（删它要连测试导出与断言一起改，收益低）；谁要清理，请连同 `smoke-test.js` 的导出清单一起改，别只删 app.js。
-- **专注视图（首页收起态）**：`S.focus` / `S.expanded`、`viewHome()` 的专注分支（`focusHero` / `focus-layout` / `focus-mods` / `collapse-row` / `collapse-trigger`）、顶栏 `#focusBtn` 图标按钮、命令面板「切换到专注视图」、设置页快捷键行、`Ctrl+.` 绑定、`case 'focus' / 'expandMod' / 'collapseMod'` 与全部相关样式一次性删除。**连带清理**：`.hero` / `.hero-main` / `.hero-title` / `.hero-actions` / `.hero-project-facts` / `.c-ico` / `.chev` 失去唯一宿主，一并从 `styles.css` 删除（`.hero-meta` 仍在项目仪表盘的当前项目卡里使用，**保留**）。有负向断言（源码无 `专注视图` / `S.focus` / `expandMod`、`index.html` 无 `focusBtn`、`viewHome()` 不含 `collapse-row`、孤儿类名护栏为 0）。
-- **历史副本与探针截图**：`backups/`、`.probe-*.png` 已删除，内容归档在 `../backups-2026-09-15.zip`。
-- **75 条孤儿 CSS 规则（50 个类名）**：早期卡片体系、旧项目卡等遗骸已清，**现零孤儿（424 个类全部有引用）**，且测试里有全局护栏断言锁定。**注意「播放器」当时并未清干净**：`.player / .pbar / .play / .spacer` 四条规则一直留到 2026-09-24 才删（护栏的子串匹配放过了它们，见本轮变更）。
-- **三份文档**：`存储与信息层级-设计方案.md`（存储机制未定稿，说明一并撤下）、`README.md`（内容已并入本文件）、`资料库同步地址清单-2026-09-12.md`（过时）——全部移入 `../backups-2026-09-15.zip`。
-- **「脚本」页与运行终端（2026-09-16）**：整页取消，改为「模块」。同时清掉的还有 `viewScripts()` / `runScript()` / `tickTimer` / `.scripts` / `.script` / `.script .s-name` / `.script .s-meta` / `.caret` / `@keyframes blink`，以及动作分支 `run` / `clearTerm` / 无触发点的 `openScript`；样式里 `.terminal` / `.t-line` **保留**（应用详情、文件预览、运行流程卡的 `#termRun` 仍在用）。命令面板的「运行 start.sh」改为「新增执行模块」，设置页快捷键列表的「运行上次脚本 Ctrl+R」改为「打开模块 Ctrl+M」。**运行输出没有新宿主**——统一看项目「运行流程」卡的 `#termRun`，不要再为它加回一个终端。
-- **四份分散的模块数据（2026-09-16）**：`DATA.scripts` / `DATA.webLib` / `DATA.folderLib` / `DATA.cmdLib` 合并为一份 `DATA.modules`，旧键**已彻底删除**（有负向断言）。连带简化：`larderItems()` 的四个 if/else 分支收敛成一次 `filter(m => m.type === t)`；`addStep()` 的 web / folder / script / cmd 四分支收敛成一次 `find()`（`base.note = m.arg || m.desc`，保持脚本步骤仍显示参数）。**迁移点**：脚本类模块的 `ref` 从内部 id（`s1`…`s5`）改成脚本文件名（`start.sh`…），项目步骤里唯一的引用 `w1s4` 已同步改写；新增模块的入口不参与 `ref` 唯一性以外的校验。**应用类不并入**（有断言锁定），仍走 `S.apps`。
-- **「找不到就顶上第一个」的静默兜底（2026-09-16）**：`startRun()` 原为 `find(...) || curWf()`，项目被删后会**静默拿第一个项目顶上**（用户以为跑的是自己点的那个）；命令面板「常用」还写死了两个项目 id。两者已改：`startRun` 明确判存在并提示，常用分组改由 `DATA.projects` 派生。**这类兜底一律不要**——它把「失败」变成「做了另一件事」，比崩溃更难发现。
-- **0 项目白屏（2026-09-16）**：`viewHome` 的 `cur.st` 与 `viewWorkflows` 的 `curWf().steps` 在 `DATA.projects` 为空时抛异常，异常发生在 `#view.innerHTML` 赋值**之前**，页面会停在上一屏、之后点任何导航都没反应（看起来像卡死）。现为两层防护：`projDeleteAsk` / `projDelete` 拦掉「删除最后一个项目」，两个页面各留一层空态。**记住这个模式**：`render()` 里任何在返回 HTML 之前就取属性的写法，抛错都会造成「页面冻结」而不是报错。
-- **无宿主的引用展示层 + 只写不读的状态字段（2026-09-24 第二轮清扫）**：前端删 `notesLinkedTo` / `refBadgeOf` / `linkBadgeOf`（闭包死码，宿主是已删的「完整开发上下文」抽屉）、`noteIsIdea`、`MOD_ENTRY_PH`、`IC` 的 6 个零引用键、`S._modId` / `S.prepOpen` / `S.projectFileDeletePreview`；后端删 `_rename_tmp.py` / `ACTIVE_STATES` / 未用的 `Path` 导入。**有负向断言锁定，不要加回来**。要重新加「任务 ↔ 记录」的可视关联，先想清楚宿主放哪 —— 关联入口两侧早已删除，`note.links` 现在是只读历史数据，只有 `detachTodoRefs()` 兜底。
+- **版本 / 存储页面与假快照机制**、**预备检查卡**（异常改为在运行流程卡内点名）、**执行模块卡**（并入运行流程卡）、**独立待办 / 笔记页**、**收件箱 tab**、**侧栏「Apex 启动脚本」小卡**。
+- **「脚本」页与运行终端**：整页取消改为「模块」（`viewScripts` / `runScript` / `.scripts` / `.terminal`… ；`.terminal` / `.t-line` **保留**，应用详情与运行流程卡还在用）。命令面板的「运行上次脚本」改为「打开模块」。**运行输出没有新宿主**，统一看项目「运行流程」卡的 `#termRun`。
+- **四份分散的模块数据**：`DATA.scripts` / `webLib` / `folderLib` / `cmdLib` 已合并为 `DATA.modules`（旧键彻底删除）；应用类**不并入**，仍走 `S.apps`。
+- **右侧抽屉版「完整开发上下文」与 `wfDev` 家族**：项目页底部改「编辑基本资料」（居中弹窗），有负向断言。
+- **专注视图（首页收起态）**：`S.focus` / `S.expanded` / `#focusBtn` / `Ctrl+.` / `.hero` 大标题家族全删。**不要再引入收起 / 展开式的次级模块布局。**
+- **任务编辑弹窗的「所属项目」选择器与「关联项目记录」**：任务创建后不能改归属；任务 ↔ 记录的关联两侧都无法编辑，`note.links` 退化成**只读历史数据**。**`detachTodoRefs()` 必须保留**（唯一活着的消费者）。
+- **「找不到就顶上第一个」的静默兜底**：`startRun` 明确判存在；命令面板常用分组由数据派生。**这类兜底一律不要**——它把「失败」变成「做了另一件事」。
+- **75 条孤儿 CSS 规则**已清（现零孤儿，有全局护栏断言）。**注意护栏的子串匹配会放过**含相同子串的类名。
+- **无宿主的引用展示层 + 只写不读的状态字段**（2026-09-24 第二轮清扫）：前端删 `refBadgeOf` / `linkBadgeOf` / `notesLinkedTo` / `noteIsIdea` / `MOD_ENTRY_PH` / `IC` 的 6 个零引用键 / `S._modId` / `S.prepOpen` / `S.projectFileDeletePreview`；后端删 `_rename_tmp.py` / `ACTIVE_STATES`。**有负向断言锁定，不要加回来**。
+- **缺宿主的启动/关闭旧接口 + 零规则类钩子**（2026-09-25 第三轮清扫）：前端删 `S._modType` / `S._modProj` / `S.projectFileDeletePreview`（后者 2026-09-24 删过一次、又被当成键写回 `S` 字面量，当时的护栏只查 `S.xxx` 点号形式没拦住；现已改成**裸名字查**）与 5 个零规则类钩子（`dashboard-head` / `tile-menu` / `wf-steps-card` / `txt` / 概览编辑卡上的裸 `ov-edit`）；后端 `apex_launcher` 删 23 个零调用定义（`*_for_ui` / `test_mouse_move` / `launch_game` / `close_game` / `close_steam` / `save_config` / `capture_template` / `AUTOMATION_REVISION` / `ensure_ak_running` 一族，含 7 个连带孤儿，如 `_wait_state` 的调用点全在被删子树里）+ 3 处未使用 import。**有负向断言锁定**（前端 `smoke-test.js` + 后端 `tests/test_automation_dead_code.py`），不要加回来。
+- **开发上下文卡头整行删除**：卡片直接以 `<div class="dev-cols">` 开场，**没有卡头、没有标题**——不要「顺手」补回来。
+- **任务行格式 `N. [待办][优先级] 正文（截止）`**：类型徽章**恒写「待办」**（「待修改」不出现在任何输出里），优先级三档全显式。**类型徽章刻意不参与解析**——否则模板恒写「待办」会在保存时把 `fix` 条目**静默改成 `todo`**。
+- **`0 项目白屏`**：`render()` 里任何在返回 HTML **之前**就取属性的写法，抛错都会造成「页面冻结」而不是报错。现为两层防护（拦「删除最后一个项目」+ 两页空态兜底）。
+- **历史副本与探针截图**、**三份旧文档**：归档在 `../backups-2026-09-15.zip`。
 
 ---
 
 ## 12. 交接规则
 
-- **改完必跑 `node smoke-test.js`，末行 `ALL_PASS`**（当前 718 项）；改后端还必须跑 `backend/.venv/Scripts/python.exe -m pytest backend/tests -q`（当前 90 通过 + 4 项 `test_apex_launcher` 既存失败，见第 12 节开头与文首）。结构变了补断言，删功能补负向断言。
-- **本目录没有 git**：动手前自行留退路（复制到目录外），**不要破坏性覆盖**。
-- **根目录只有原 5 个文件，后端统一进 `backend/`，源码是纯 LF**：别在根目录加东西；用脚本批量改写后必须复核 `b.count(b'\r\n') === 0`（见第 10 节第 11 条）。
+- **改完必跑**：`node smoke-test.js`（末行 `ALL_PASS`，728 项）；改壳代码还要跑 `ApexShell.exe --selftest`（238 项，逐条落盘便于定位死点）；改后端还要跑 `pytest backend/tests -q`（98 + 4 既存失败）。**结构变了补断言，删功能补负向断言**。
+  - **删根目录文件后务必跑前端冒烟测试**：里面有一条「根目录白名单」断言（`expectedFiles`），删了文件不同步改断言就会红——2026-09-25 删 `00-启动 APEX 总控台.lnk` 时就漏跑过一次。
+- **本目录有 git**（`D:\Projects\apex-console`）：动手前先看 `git status`，别破坏性覆盖；提交粒度按主题，别把多个主题混在一个提交里。
+- **根目录只放源码**（Web 三件套 + `smoke-test.js` + `AGENTS.md`），其余一律进 `shell/` 或 `backend/`。源码**纯 LF**：批量改写后复核 `b.count(b'\r\n') === 0`（见 §10 第 11 条）。
 - 一次只做一个主题的改动，不顺手重构无关代码；需求不明确先问。
-- 历史形态在 `../backups-2026-09-15.zip`（2026-09-12 / 09-14 三个快照 + 一份旧文档，已校验可完整还原）。
-- 正式运行方式：启动 `backend/start.ps1` 后访问 `http://127.0.0.1:8765`。直接打开 `index.html` 只适合看静态界面，真实执行仍要求本地后端已启动。若需交付他人，整个 `apex-console` 目录才是完整运行单元。
+- **交付习惯**：改完要给出「已验证可用」的结论（构建 / 测试 / 自测日志 / 无头验证都跑过），不要把「试一下」的循环丢给人；只有必须人眼确认的视觉细节才请人验收。

@@ -39,13 +39,20 @@ class WindowsStartupManager:
 
     @staticmethod
     def _launcher_command() -> str:
-        """开机要执行的命令。
+        """开机要执行的命令：直接拉 WinUI 壳。
 
-        **不带 ``--no-open``**：启动项挂上去就是为了让多弗朗在登录后直接看到控制台
-        窗口。早先这里带 ``--no-open``，结果是服务在后台悄悄起来、屏幕上一个窗口都
-        没有，被当成「开机自启动没实现」报过 bug。要静默起服务请手动跑
+        壳（shell/ApexShell.exe）启动时会自己打开总控台窗口，并托管 Python 后端
+        （探测 8765，没跑就静默拉起 uvicorn），所以注册表只需指向壳这一个入口。
+        壳还没构建（路径不存在，比如刚 clone 没编译）时回退旧的 console_launcher
+        方案，保证开机自启动不倒退。要静默起服务请手动跑
         ``console_launcher.py --no-open``，别写回启动项。
         """
+        shell_exe = (
+            config.PROJECT_DIR / "shell" / "bin" / "x64" / "Debug"
+            / "net8.0-windows10.0.19041.0" / "win-x64" / "ApexShell.exe"
+        )
+        if shell_exe.exists():
+            return subprocess.list2cmdline([str(shell_exe)])
         pythonw = config.BACKEND_DIR / ".venv" / "Scripts" / "pythonw.exe"
         launcher = config.BACKEND_DIR / "console_launcher.py"
         return subprocess.list2cmdline([str(pythonw), str(launcher)])

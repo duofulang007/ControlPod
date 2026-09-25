@@ -26,3 +26,9 @@ backend/docs/*.visual-check.*
 # run-analytics is an independent git repo at ..\run-analytics (per-module repos policy):
 # it manages its own history and health data; this repo tracks nothing under it.
 run-analytics/
+
+# WinUI shell (apex-console/shell): C# build artifacts
+shell/bin/
+shell/obj/
+shell/*.user
+shell/.vs/
