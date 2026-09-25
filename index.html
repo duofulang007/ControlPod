@@ -19,7 +19,7 @@
           <path d="M9.5 4.5v15" stroke="var(--ink-2)" stroke-width="1.8"/>
         </svg>
       </button>
-      <div>
+      <div data-drag title="拖动窗口">
         <div class="name">APEX</div>
         <div class="tag">掌控主动权 · 更进一步</div>
       </div>
@@ -69,6 +69,10 @@
   <!-- ============ 主区域 ============ -->
   <div class="main">
     <header class="topbar">
+      <!-- 拖动层：绝对定位铺满整条顶栏，控件都压在它上面（z-index:1）所以照常能点。
+           按下它 → chrome-command: drag → 壳用 WM_NCLBUTTONDOWN(HTCAPTION) 进入系统拖拽循环；
+           双击 = 最大化 / 还原。 -->
+      <div class="tb-drag" data-drag aria-hidden="true"></div>
       <div aria-label="打开指令栏" class="search" id="searchBox" role="button" tabindex="0">
         <span class="ai-spark">
           <svg fill="none" viewBox="0 0 24 24" style="width:16px; height:16px">
@@ -89,12 +93,27 @@
         <span class="voice-ring"></span>
       </button>
 
-      <button class="pill window-topmost" id="topmostBtn" title="窗口置顶：固定窗口在最上层显示" aria-label="窗口置顶" aria-pressed="false" disabled>
+      <!-- 窗口组：置顶 · 缩小到托盘 · 全屏。三个都走壳的原生能力，不再依赖浏览器 Fullscreen API。
+           组首用 margin-left:auto 把「窗口组 + 偏好组」一起推到右侧，搜索框左侧那段空白正好留给拖窗。 -->
+      <button class="icon-btn window-topmost" id="topmostBtn" title="窗口置顶：固定窗口在最上层显示" aria-label="窗口置顶" aria-pressed="false" disabled>
         <svg fill="none" viewBox="0 0 24 24" aria-hidden="true">
           <path d="M8.5 4.5h7l-1 5 3 3v2h-11v-2l3-3-1-5zM12 14.5V20" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
         </svg>
       </button>
 
+      <button class="icon-btn" id="trayBtn" title="缩小到托盘（后台常驻；托盘左键 / Ctrl+Alt+A 唤起）" aria-label="缩小到托盘">
+        <svg fill="none" viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M12 4.5v9M8.4 10.1l3.6 3.6 3.6-3.6M4.5 18h15" stroke="var(--ink-2)" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8"/>
+        </svg>
+      </button>
+
+      <button class="icon-btn" id="fsBtn" title="全屏（铺满工作区）" aria-label="全屏" aria-pressed="false">
+        <svg fill="none" viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M9 3.5H4.5V8M15 3.5h4.5V8M9 20.5H4.5V16M15 20.5h4.5V16" stroke="var(--ink-2)" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8"/>
+        </svg>
+      </button>
+
+      <!-- 偏好组：主题 · 通知（左侧细竖线与窗口组分隔，见 styles.css 的 .icon-btns） -->
       <div class="icon-btns">
         <button class="icon-btn" id="themeBtn" title="切换主题">
           <svg fill="none" viewBox="0 0 24 24" style="width:20px; height:20px">
@@ -108,11 +127,6 @@
             <path d="M10 19.2a2.2 2.2 0 0 0 4 0" stroke="var(--ink-2)" stroke-linecap="round" stroke-width="1.8"/>
           </svg>
           <span class="badge" id="bellBadge"></span>
-        </button>
-        <button class="icon-btn" id="fsBtn" title="全屏（主内容限宽居中）">
-          <svg fill="none" viewBox="0 0 24 24" style="width:20px; height:20px">
-            <path d="M9 3.5H4.5V8M15 3.5h4.5V8M9 20.5H4.5V16M15 20.5h4.5V16" stroke="var(--ink-2)" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8"/>
-          </svg>
         </button>
       </div>
     </header>

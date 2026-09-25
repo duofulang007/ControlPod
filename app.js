@@ -46,6 +46,30 @@ function shellToast(message, title){
   } catch (_) {}
 }
 
+/* 壳窗口外壳同步：告诉壳「页面布局变了，重量拖拽区宽度」。
+   无边框壳的拖拽区 = 顶栏搜索框左边缘（= 侧栏宽 + 顶栏左内边距），侧栏折叠或紧凑窗口切
+   side-flyout 会让它变——壳量的是旧值就会把搜索框左半截压在拖拽区下面点不动。
+   浏览器 / vm 环境无 webview，空操作（同 shellToast）。 */
+/* 壳窗口命令：前端 → 壳的单向指令（拖动窗口 / 缩小到托盘 / 全屏铺满）。
+   不走 API 路由 —— 壳自测会把路由清单和 backend/app/main.py 双向比对，多一条就得连 Python 后端一起改。
+   壳的状态回推走 chrome-state（见下方监听），所以「按钮点出来的最大化」和「双击拖动区」状态一致。 */
+function shellChromeCommand(command){
+  if (!IN_SHELL) return;
+  try {
+    window.chrome.webview.postMessage({ type:'chrome-command', command });
+  } catch (_) {}
+}
+
+/* 无边框壳的拖动：声明为 data-drag 的区域（顶栏拖动层 / 侧栏品牌区）按下即拖窗，双击即最大化。
+   浏览器 / vm 无此通道，自动跳过。 */
+document.addEventListener('mousedown', (e) => {
+  if (e.button !== 0 || !e.target.closest('[data-drag]')) return;
+  shellChromeCommand('drag');
+});
+document.addEventListener('dblclick', (e) => {
+  if (e.target.closest('[data-drag]')) shellChromeCommand('toggle-maximize');
+});
+
 async function apiRequest(path, options){
   let status, readJson;
   if (IN_SHELL){
@@ -5399,23 +5423,31 @@ $('#drawerMask').addEventListener('click', closeDrawer);
 const topmostBtn = $('#topmostBtn');
 if (topmostBtn) topmostBtn.addEventListener('click', () => { void updateConsoleWindowTopmost(); });
 
-/* ---------- 全屏模式：桌面入口默认 990×700 固定窗口，仍可随时切换全屏 ----------
-   全屏由 Fullscreen API 驱动：点击按钮请求/退出，fullscreenchange 时切换 body.is-fullscreen，
-   CSS 据此给主内容加 max-width + 居中（不做连续 resize 计算）。 */
+/* ---------- 全屏：无边框壳里「全屏」= 窗口铺满工作区 ----------
+   原来的浏览器 Fullscreen API 在 WebView2 里走不通（壳没接 ContainsFullScreenElementChanged），
+   现在改成发 chrome-command 让壳走 OverlappedPresenter；壳回推 chrome-state 再切 body.is-fullscreen，
+   「按钮点出来的最大化」和「双击拖拽区的最大化」两条路都会同步，状态不漂移。
+   CSS 沿用 .is-fullscreen 给主内容限宽居中（不做连续 resize 计算）。 */
 const fsBtn = $('#fsBtn');
-function syncFullscreen(){
-  const on = !!document.fullscreenElement;
-  document.body.classList.toggle('is-fullscreen', on);
-  if (fsBtn) fsBtn.title = on ? '退出全屏' : '全屏（主内容限宽居中）';
-}
-if (fsBtn) fsBtn.addEventListener('click', () => {
-  if (document.fullscreenElement){ document.exitFullscreen(); return; }
-  const el = document.documentElement;
-  const req = el.requestFullscreen || el.webkitRequestFullscreen;
-  if (req){ try { const p = req.call(el); if (p && p.catch) p.catch(() => toast('浏览器阻止了全屏请求')); } catch (e){ toast('当前环境不支持全屏'); } }
-  else toast('当前环境不支持全屏');
+if (fsBtn) fsBtn.addEventListener('click', () => shellChromeCommand('toggle-maximize'));
+
+/* 缩小到托盘：进程常驻，托盘左键 / Ctrl+Alt+A 唤起，彻底退出走托盘右键「退出」 */
+if ($('#trayBtn')) $('#trayBtn').addEventListener('click', () => shellChromeCommand('hide'));
+
+/* 壳回推窗口状态：同步 body.is-fullscreen 与全屏按钮按下态（浏览器 / vm 无此通道，自动跳过） */
+if (IN_SHELL) window.chrome.webview.addEventListener('message', (e) => {
+  try {
+    const msg = JSON.parse(e.data);
+    if (!msg || msg.type !== 'chrome-state') return;
+    const on = msg.maximized === true;
+    document.body.classList.toggle('is-fullscreen', on);
+    const btn = $('#fsBtn');
+    if (btn){
+      btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+      btn.title = on ? '退出全屏' : '全屏（铺满工作区）';
+    }
+  } catch (_) {}
 });
-document.addEventListener('fullscreenchange', syncFullscreen);
 
 /* 应用列表：滚动由自管物理驱动 → 索引条高亮在 rAF 循环里节流调用（见 initInertialScroll 的 loop） */
 /* 窗口尺寸变化 → 重新锁定「一屏完整行数」并让物理滚动重算边界（没有真实 window 的环境自动跳过） */

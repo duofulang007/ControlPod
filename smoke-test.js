@@ -2127,6 +2127,21 @@ try {
   check(html2.includes('id="fsBtn"') && html2.includes('id="topmostBtn"')
     && !html2.includes('id="sceneBtn"'),
     '顶栏保留全屏切换，并以窗口置顶替换旧工作模式');
+  /* 无边框壳的拖拽区宽度由壳去量「搜索框左边缘」，侧栏折叠后必须主动通报重量，
+     否则壳还按旧宽度占着拖拽区，会把搜索框左半截压在下面点不动。 */
+  const app2 = require('fs').readFileSync(path.join(__dirname, 'app.js'), 'utf8');
+  check(/data-drag/.test(html2) && /closest\('\[data-drag\]'\)/.test(app2)
+    && app2.includes("shellChromeCommand('drag')") && app2.includes("shellChromeCommand('toggle-maximize')"),
+    '顶栏拖动层 / 侧栏品牌区声明 data-drag：按下即拖窗，双击即最大化');
+  check(app2.includes("type:'chrome-command'") && /function shellChromeCommand\(/.test(app2)
+    && /shellChromeCommand\('toggle-maximize'\)/.test(app2)
+    && /shellChromeCommand\('hide'\)/.test(app2),
+    '顶栏「全屏 / 缩小到托盘」走壳的 WebMessage 命令通道（chrome-command）');
+  check(!/requestFullscreen|webkitRequestFullscreen|fullscreenchange/.test(app2),
+    '浏览器 Fullscreen API 已彻底移除（壳里走不通，负向断言不许回潮）');
+  check(/msg\.type !== 'chrome-state'/.test(app2) && /is-fullscreen/.test(app2)
+    && html2.includes('id="trayBtn"') && html2.includes('id="fsBtn"'),
+    '壳回推 chrome-state 驱动 body.is-fullscreen，顶栏保留「缩小到托盘 + 全屏」两个窗口控件');
   /* 全局交互基线：禁用文本选择 + 输入控件放行（顺序不能反，否则输入框无法打字） */
   const iNone = css2.indexOf('user-select:none');
   const iText = css2.indexOf('user-select:text !important');

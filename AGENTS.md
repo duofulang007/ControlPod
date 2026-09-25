@@ -1,7 +1,7 @@
 # AGENTS.md · 控制台项目接手说明书
 
 > 给任何要读 / 改这个项目的 agent：**先读这一份，再动代码**。术语、硬约束、架构、验证方式与全部已踩过的坑都在这里。
-> 最后更新：2026-09-25 · 测试基线：**前端 `node smoke-test.js` ALL_PASS（728 项）+ 后端 `pytest backend/tests -q` 98 通过（另有 4 项 `test_apex_launcher` 既存失败，见 §10 末）+ 壳自测 `ApexShell.exe --selftest`（238 项）**
+> 最后更新：2026-09-26 · 测试基线：**前端 `node smoke-test.js` ALL_PASS（729 项）+ 后端 `pytest backend/tests -q` 98 通过（另有 4 项 `test_apex_launcher` 既存失败，见 §10 末）+ 壳自测 `ApexShell.exe --selftest`（238 项）**
 >
 > **当前形态（先看这段）**：项目已从「静态前端 + Python 后端」演进为 **WinUI 3 壳（`shell/`）+ Web 三件套 + Python 后端（仅为浏览器模式保留）**的单仓库结构。**日常入口是壳**：`shell\bin\x64\Debug\net8.0-windows10.0.19041.0\win-x64\ApexShell.exe`（路径深，用快捷方式：桌面「APEX 总控台」，或跑 `ApexShell.exe --shortcuts` 重建）。**二期移植已全部完成**——51 条 API 路由都在壳内就地回答，壳可独立运行、不再探测或拉起 Python；Python 仍保留是因为浏览器模式（`backend/start.ps1` → `127.0.0.1:8765`）与 pytest 那 90 项对照基线还要用它。**两套栈共用同一个 SQLite 库**（`backend/data/apex-console.db`，`user_version` 协议），这是「边移植边不停机」的关键红利。
 
@@ -56,7 +56,7 @@ powershell -ExecutionPolicy Bypass -File backend/start.ps1   # → http://127.0.
 ```
 
 - 壳用 `SetVirtualHostNameToFolderMapping` 把 `https://apex.local/` 映射到**仓库根**，所以**改完 Web 三件套 Ctrl+S、壳里 F5 立即生效**（不用重新构建）。
-- 壳层日志：`%LOCALAPPDATA%\ApexShell\web-shell.log`（导航 / 托盘 / 本地路由 / 图标拦截全链路留痕）。
+- 壳层日志：`%LOCALAPPDATA%\ApexShell\web-shell.log`（导航 / 托盘 / 本地路由 / 图标拦截全链路留痕）。**每行前缀 `+Nms` = 距本进程启动的毫秒数**——启动耗时直接读它：`tray: RegisterClassW`（窗口构造开始）→ `localapi: ready` → `webview: ready` → `nav-done` → `splash: dismiss`。
 - 构建壳：`cd shell && C:\Users\23221\.dotnet\dotnet.exe build ApexShell.csproj -c Debug -p:Platform=x64 -p:RuntimeIdentifier=win-x64`。**构建前必须先结束运行中的壳**（否则 exe 被锁，报 MSB3027）。
 - 测试原理（前端）：用 `vm` + 极简 DOM 桩加载 `app.js`，末尾注入 `globalThis.__T = { 要测的函数… }` 作为导出清单，再逐块断言（含**源码级接线断言**与 **CSS 规则断言**）。**新增可测函数必须同步加进导出清单**，否则测试取不到。视觉细节仍需人眼看预览。
 
@@ -133,7 +133,7 @@ powershell -ExecutionPolicy Bypass -File backend/start.ps1   # → http://127.0.
 | 文件 | 职责 |
 |---|---|
 | `App.xaml.cs` | 启动分支：`--selftest` / `--shortcuts` / `--inspect-shortcuts` / 单实例互斥 |
-| `MainWindow.xaml.cs` | 窗口、托盘、WebView2 初始化、虚拟主机映射、**WebMessage 桥**、**应用图标网络栈拦截** |
+| `MainWindow.xaml.cs` | 窗口（默认 1440×900 且**居中到工作区**，见 `ApplyDefaultPlacement`；工作区放不下时按工作区收窄，避免算出负坐标）、**启动遮罩**、托盘、WebView2 初始化、虚拟主机映射、**WebMessage 桥**、**应用图标网络栈拦截** |
 | `LocalApi.cs` | 路由分发器 + 请求体校验（pydantic 等价物）+ `CoveredRoutes` 清单 |
 | `ConsoleConfig.cs` | 路径配置（镜像 `backend/app/config.py`，硬编码仓库根） |
 | `Db.cs` | SQLite 门面：迁移 1–10 复刻、`Execute/FetchOne/FetchAll/Transaction/WithTransaction` |
@@ -154,6 +154,8 @@ powershell -ExecutionPolicy Bypass -File backend/start.ps1   # → http://127.0.
 
 **关键设计**：
 - **可注入**：`LocalApi` 的每个依赖都可注入，`SelfTest` 因此能在无窗口进程里跑真业务逻辑（`initOnStart:false` 跳过启动期副作用）。
+- **启动路径（2026-09-26 提速）**：冷启动全程约 4s，其中 **~3.5s 是 WebView2 的固有成本**（环境创建 ≈1.5s + 导航到渲染 ≈2.05s，20 次实测稳定在 2.0–2.1s），应用侧能动的那 ~0.4s 才是我们的活。做法三条：① 构造里把 **LocalApi 初始化甩进 `Task.Run`**（实测只 ~60ms，但仍不许它占关键路径），② WebView2 环境创建同时起跑、两者并行，③ UI 线程只负责尽快画出 **启动遮罩**——`MainWindow.xaml` 的 `Splash` 是纯 XAML，先于 WebView2 绘制，窗口在 **+0.32s** 就带着 APEX 字标出现，遮罩一直盖到 `NavigationCompleted` 再淡出 260ms（这 260ms 正好盖住「bootstrap + render」那 ~160ms），**彻底消掉原来 2.4s 的纯白空窗**。失败与超时都如实报（`EnsureCoreWebView2Async` 异常直接写在遮罩上；20s 兜底提示超时），不假装在加载。**注意**：WinUI 里 WebView2 属于 external content，**只能被 XAML 盖在上面、不能被别的层透过去** —— 所以遮罩必须是「上层 + 整体淡出」，别去给 WebView2 做透明背景。
+- **还想更快只能省掉冷启动本身**：壳是单实例 + 托盘常驻，`开机自启` 已在设置页（`Run` + `StartupApproved\Run` 双写），托盘热键 **Ctrl+Alt+A** 秒唤起。点 X 是缩托盘不是退出——**从托盘右键「退出」再重点开，就是每次 4s 冷启动的那条路**。
 - **无头自测**：`--selftest [日志]` 走 `App.OnLaunched` 分支，**不建窗口不碰 WebView2**——工具会话出身也能跑（绕开安全软件对 WebView2 的拦截），结果**逐条落盘**（进程被掐也能看到死点）+ 退出码。阶段：`base` / `startup` / `scan` / `realscan` / `icon` / `catalog` / `registry` / `exec` / `window` / `activity` / `projects` / `modules` / `bootstrap` / `routes`。
 - **自测环境限制**：派生 `powershell.exe` 会被安全软件连根掐 → 扫描类测试用 `useShellLists:false`（只关 UWP 清单，其余全真）。应用绑定测试**必须用真扫描候选**（`source_key` 要能被重新验证，造假 key 一定 409）。
 - 自测断言要**防自嗨**：注册表辅助直接操作 Registry 而非走被测类。
@@ -272,9 +274,44 @@ powershell -ExecutionPolicy Bypass -File backend/start.ps1   # → http://127.0.
 
 ## 12. 交接规则
 
-- **改完必跑**：`node smoke-test.js`（末行 `ALL_PASS`，728 项）；改壳代码还要跑 `ApexShell.exe --selftest`（238 项，逐条落盘便于定位死点）；改后端还要跑 `pytest backend/tests -q`（98 + 4 既存失败）。**结构变了补断言，删功能补负向断言**。
+- **改完必跑**：`node smoke-test.js`（末行 `ALL_PASS`，729 项）；改壳代码还要跑 `ApexShell.exe --selftest`（238 项，逐条落盘便于定位死点）；改后端还要跑 `pytest backend/tests -q`（98 + 4 既存失败）。**结构变了补断言，删功能补负向断言**。
   - **删根目录文件后务必跑前端冒烟测试**：里面有一条「根目录白名单」断言（`expectedFiles`），删了文件不同步改断言就会红——2026-09-25 删 `00-启动 APEX 总控台.lnk` 时就漏跑过一次。
 - **本目录有 git**（`D:\Projects\apex-console`）：动手前先看 `git status`，别破坏性覆盖；提交粒度按主题，别把多个主题混在一个提交里。
 - **根目录只放源码**（Web 三件套 + `smoke-test.js` + `AGENTS.md`），其余一律进 `shell/` 或 `backend/`。源码**纯 LF**：批量改写后复核 `b.count(b'\r\n') === 0`（见 §10 第 11 条）。
 - 一次只做一个主题的改动，不顺手重构无关代码；需求不明确先问。
 - **交付习惯**：改完要给出「已验证可用」的结论（构建 / 测试 / 自测日志 / 无头验证都跑过），不要把「试一下」的循环丢给人；只有必须人眼确认的视觉细节才请人验收。
+
+---
+
+## 13. 无边框卡片外壳（2026-09-26 新增，同日两次纠偏后定稿）
+
+**形态**：壳是「整窗一张卡片」——无边框、无系统标题栏三按钮、DWM 圆角 + 品牌红描边，内容顶到窗口最上沿。
+实现集中在 `shell/WindowChrome.cs`（新文件）；`MainWindow` 构造里 `new WindowChrome(this, _appWindow).Apply()`。
+**拖动 / 全屏 / 缩小到托盘由页面声明**：`data-drag` 区域按下 → `chrome-command: drag`；`#fsBtn` → `toggle-maximize`；`#trayBtn` → `hide`。
+
+**配方（实测有效，别凭直觉改）**
+
+| 目的 | 做法 |
+|---|---|
+| 去掉系统三按钮 | `SetBorderAndTitleBar(hasBorder:false, hasTitleBar:false)`，保留 `WS_THICKFRAME` 所以边缘缩放不受影响。**只剥 `WS_SYSMENU` 不够**——WinUI 的按钮是它自己画的，不走经典非客户区绘制，样式位剥了按钮照样在（真机 `WS_SYSMENU=无` 但三个按钮仍在）。若以后要 `ExtendsContentIntoTitleBar`，这条必须放在它之前 |
+| 整条顶栏可拖 | 页面 `.topbar` 里放一层绝对定位的 `.tb-drag`（控件 `z-index:1` 压在上面，照常能点），`mousedown` → `chrome-command: drag` → 壳用**专用后台线程**拖动：`timeBeginPeriod(1)` 拿真 8ms 节拍 + 原生 `SetWindowPos(SWP_ASYNCWINDOWPOS)` 异步落位，左键松开即停、30 秒保险丝。**两个坑都踩过**：`ReleaseCapture + SendMessage(WM_NCLBUTTONDOWN)` 在 WinUI 3 壳里无效；UI 线程的 DispatcherQueueTimer 拖起来掉帧（分辨率粗 + 被 WebView2 渲染挤占）。侧栏品牌区同样 `data-drag` |
+| **为什么不用区域机制** | 空壳 + 程序化拖拽实测：**拖拽区 = `SetTitleBar` 那个元素的矩形**（元素内能拖、不在元素里也不在穿透区里就不能拖），穿透区挖不出额外可拖区；而且那个元素会盖住侧栏折叠按钮。所以整套 `SetTitleBar / 穿透区 / DragBar` 已删 |
+| 圆角 / 描边 | 33=`DWMWCP_ROUND`；描边线用 34=`DWMWA_COLOR_NONE`(0xFFFFFFFE) 关掉（2026-09-26 多弗朗：红边不要，层次感靠阴影）。DWM 圆角会把 WebView2 一起裁；阴影随 WS_THICKFRAME 自带，不用自己画 |
+| 最大化不压任务栏 | `WM_GETMINMAXINFO` 钳到工作区；`SetWindowSubclass` 装，**回调必须由字段持有**否则被 GC。无边框（无系统边框）时这条尤其必要 |
+| 全屏 / 缩小到托盘 | `#fsBtn` → `toggle-maximize`：**MoveAndResize 到监视器整块矩形（1K=1920×1080）** + 临时 `IsAlwaysOnTop=true` 盖住任务栏，退出还原窗口化矩形与置顶状态；全屏期间 `_fullscreenIntent=true` 让 WM_GETMINMAXINFO 别钳成工作区。**WinAppSDK 1.6 没有 OverlappedPresenter.SetFullscreen**（1.7 才有），别照官方新文档写。**MoveAndResize 设的是含不可见调整边框的外层矩形**（无边框后实测 左7 上0 右7 下7，非对称），不补偿的话全屏右边和下面各留一条缝 —— 用 `FullscreenOuterRect()` 在进全屏那一刻现量现补，别写死 7。`#trayBtn` → `hide`（`_appWindow.Hide()`） |
+
+**WebMessage 约定（都不走 API 路由**——`CheckRouteCoverage()` 会拿 `backend/app/main.py` 双向比对，多一条就得连 Python 后端一起改**）**
+
+- 页面 → 壳：`chrome-command`（`drag` / `hide` / `toggle-maximize`），`app.js` 的 `shellChromeCommand()`；`data-drag` 区域 `mousedown` 发 `drag`、`dblclick` 发 `toggle-maximize`
+- 壳 → 页面：`chrome-state`（`{maximized}`），页面据此切 `body.is-fullscreen`（沿用 `.is-fullscreen .view` 限宽居中），按钮 / 双击 / 拖到屏幕顶端三条路状态一致
+
+**踩过的坑（都真踩过）**
+
+1. **别用 `GetWindowRect` 判定「最大化后溢出屏幕」**：WinUI 窗口（`WS_THICKFRAME`）的 `GetWindowRect` 含每边 **8px 不可见调整边框**，最大化读出来是 `(-8,-8)-(1928,1040)`；可见边框 `DwmGetWindowAttribute(DWMWA_EXTENDED_FRAME_BOUNDS)` 才是肉眼看到的。2026-09-26 在这条上误判过一轮、写了个不必要的 `MoveAndResize` 修复，已撤回。
+2. **`_ = XxxAsync()` 不能写在 `Something += (_, e) => { … }` 里**：那个 `_` 是 lambda 参数（`CoreWebView2`）不是弃元，编译报 CS0029。
+3. **抓 DWM 合成窗口的截图不能用窗口 DC**（BitBlt 全黑），要走 `GetDC(0)` 屏幕 DC 再按窗口矩形裁。
+4. **程序化拖拽前必须先把窗口变前台**（先点一下 / `SetForegroundWindow`），否则第一次 mouse-down 被「激活窗口」吃掉 → 拖拽**假阴性**。
+5. **`taskkill /F` 强杀壳会留孤儿 `msedgewebview2.exe`**，之后可能导航不完成（卡在启动遮罩、日志 `splash: 导航超时`）。构建前尽量让壳从托盘正常退出。
+6. **WinAppSDK 1.6 的 `AppWindowChangedEventArgs` 没有 `DidPresenterStateChange`**，最大化翻转要在 `WindowChrome` 里自己差分（`EmitMaximized`）。
+
+**已知未验证（工具会话验不了）**：从工具会话启动的壳，WebView2 能 ready 但**导航不完成**（`splash: 导航超时`）。所以「空白区拖动手感、托盘 / 全屏按钮、顶栏观感」要由人从开始菜单的 lnk 打开验收。

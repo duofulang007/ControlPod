@@ -285,12 +285,35 @@ internal sealed class TrayHost : IDisposable
 }
 
 /// <summary>壳层共享诊断日志（一期联调用，稳定后删除）。落 %LOCALAPPDATA%\ApexShell\web-shell.log。</summary>
+/// <summary>壳层日志：每行带「距本进程启动多少毫秒」，启动耗时一眼可查（+4123ms 这种）。
+/// 加锁是因为它同时被 UI 线程与线程池写（图标拦截、应用扫描都调它）。</summary>
 internal static class ShellLog
 {
     private static readonly string LogPath = System.IO.Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
         "ApexShell", "web-shell.log");
 
-    public static void Log(string msg) =>
-        System.IO.File.AppendAllText(LogPath, $"[{DateTime.Now:HH:mm:ss.fff}] {msg}\n");
+    private static readonly object Gate = new();
+
+    /// <summary>本进程启动时刻：只用来算相对耗时，拿不到就退回首次日志时刻（不影响相对比较）。</summary>
+    private static readonly DateTime ProcessStart = ResolveProcessStart();
+
+    private static DateTime ResolveProcessStart()
+    {
+        try { return System.Diagnostics.Process.GetCurrentProcess().StartTime; }
+        catch { return DateTime.Now; }
+    }
+
+    /// <summary>距本进程启动的毫秒数。</summary>
+    public static long SinceStartMs => (long)(DateTime.Now - ProcessStart).TotalMilliseconds;
+
+    public static void Log(string msg)
+    {
+        var line = $"[{DateTime.Now:HH:mm:ss.fff}] +{SinceStartMs}ms {msg}\n";
+        lock (Gate)
+        {
+            try { System.IO.File.AppendAllText(LogPath, line); }
+            catch { /* 日志写不进去不能反过来影响主流程 */ }
+        }
+    }
 }
