@@ -34,7 +34,16 @@ except Exception:
     HAVE_PYAUTOGUI = False
 
 _input_state = threading.local()
-REFERENCE_INPUT_PYTHON = Path(os.environ.get("APEX_INPUT_PYTHON", sys.executable))
+# 「输入助手用哪个解释器去动鼠标」是这套流程里不能随手改的一环。
+# 参考实现（旧启动脚本的 .bat，以及 D:\Py项目\APEX 那份）把这里**写死成系统 Python 3.14**：
+# 旧启动脚本就是用它跑的，是「验证过的驱动」；搬到本仓库时被换成 sys.executable（venv 的 python），
+# 动鼠标的进程与权限环境随之改变，表现为 AK 视觉点击报 AK_MOUSE_CONTROL_UNAVAILABLE、流程停在第一步。
+# 顺序：环境变量 APEX_INPUT_PYTHON > 参考解释器（存在才用）> 当前解释器。
+_REFERENCE_INPUT_PYTHON = Path(r"C:\Users\23221\AppData\Local\Programs\Python\Python314\python.exe")
+REFERENCE_INPUT_PYTHON = Path(
+    os.environ.get("APEX_INPUT_PYTHON")
+    or (_REFERENCE_INPUT_PYTHON if _REFERENCE_INPUT_PYTHON.exists() else sys.executable)
+)
 
 
 @dataclass(frozen=True)
@@ -81,26 +90,6 @@ class ExactProcessCloseResult:
         data = asdict(self)
         data["success"] = self.success
         return data
-
-
-class _MouseInput(ctypes.Structure):
-    _fields_ = (
-        ("dx", ctypes.wintypes.LONG),
-        ("dy", ctypes.wintypes.LONG),
-        ("mouseData", ctypes.wintypes.DWORD),
-        ("dwFlags", ctypes.wintypes.DWORD),
-        ("time", ctypes.wintypes.DWORD),
-        ("dwExtraInfo", ctypes.wintypes.WPARAM),
-    )
-
-
-class _InputUnion(ctypes.Union):
-    _fields_ = (("mi", _MouseInput),)
-
-
-class _Input(ctypes.Structure):
-    _anonymous_ = ("value",)
-    _fields_ = (("type", ctypes.wintypes.DWORD), ("value", _InputUnion))
 
 
 def is_windows() -> bool:
@@ -751,78 +740,46 @@ def screen_size():
     return width, height
 
 
-def _set_cursor_pos(x: int, y: int) -> bool:
-    if not is_windows():
-        return False
-    try:
-        return bool(ctypes.windll.user32.SetCursorPos(int(x), int(y)))
-    except Exception:
-        return False
-
-
 def _run_input_helper(x: int, y: int, click: bool) -> dict:
     helper = Path(__file__).with_name("input_helper.py")
     python = str(REFERENCE_INPUT_PYTHON) if REFERENCE_INPUT_PYTHON.exists() else sys.executable
     command = [python, str(helper), "--x", str(int(x)), "--y", str(int(y))]
     if click:
         command.append("--click")
+    started = time.monotonic()
     try:
+        # 超时放宽到 15s：helper 现在会为「指针被系统拒绝」重试若干轮（实测 SetCursorPos 会偶发返回 0、
+        # 指针不动），5s 会把重试掐在半路，反过来又变成一个看不出原因的 TimeoutExpired。
         completed = subprocess.run(
             command,
             cwd=str(helper.parent.parent),
             capture_output=True,
             text=True,
-            timeout=5,
+            timeout=15,
             creationflags=subprocess.CREATE_NO_WINDOW if is_windows() else 0,
         )
         output = completed.stdout.strip().splitlines()
         result = json.loads(output[-1]) if output else {}
+        # helper 的原始信息一律带出去：以前只留 ok/moved/clicked/actual，
+        # 返回码与 stderr 被丢掉，上游就只能看到一个对不上的坐标，猜不出到底发生了什么。
+        result.setdefault("returncode", completed.returncode)
+        if completed.stderr.strip():
+            result.setdefault("stderr", completed.stderr.strip()[:300])
     except Exception as exc:
-        result = {"ok": False, "moved": False, "clicked": False, "error": type(exc).__name__}
+        result = {
+            "ok": False,
+            "moved": False,
+            "clicked": False,
+            "error": type(exc).__name__,
+            "error_detail": str(exc)[:200],
+        }
+    result.setdefault("elapsed_seconds", round(time.monotonic() - started, 2))
     _input_state.result = result
     return result
 
 
 def last_input_result() -> dict:
     return getattr(_input_state, "result", {})
-
-
-def move_mouse(x: int, y: int) -> bool:
-    result = _run_input_helper(int(x), int(y), click=False)
-    return bool(result.get("ok") and result.get("moved"))
-
-
-def _send_mouse_input(flags: int) -> bool:
-    if not is_windows():
-        return False
-    event = _Input()
-    event.type = 0
-    event.mi = _MouseInput(0, 0, 0, flags, 0, 0)
-    try:
-        sent = ctypes.windll.user32.SendInput(1, ctypes.byref(event), ctypes.sizeof(_Input))
-        return int(sent) == 1
-    except Exception:
-        return False
-
-
-def click_left() -> bool:
-    """Send a Windows left-button press/release and verify both events."""
-    if is_windows():
-        down = _send_mouse_input(0x0002)
-        if not down:
-            return False
-        time.sleep(0.06)
-        up = _send_mouse_input(0x0004)
-        if not up:
-            try:
-                ctypes.windll.user32.mouse_event(0x0004, 0, 0, 0, 0)
-            except Exception:
-                pass
-        return up
-    if HAVE_PYAUTOGUI:
-        pyautogui.click()
-        return True
-    return False
 
 
 def get_cursor_pos():
