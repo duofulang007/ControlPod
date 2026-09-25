@@ -76,13 +76,14 @@ textarea,
   --topbar-pin-ico:16px;
 
   /* 项目仪表盘：首页仅呈现项目状态、活动和推进，不重复应用入口；所有密度与热力图尺寸集中在这里。 */
-  --dash-card-pad:18px;
+  /* 连续缩放：clamp(下限, 随视口宽线性, 上限) —— 断点之间不跳变，压到下限由断点接手 */
+  --dash-card-pad:clamp(13px, 0.9vw + 6px, 18px);
   --dash-gap:14px;
   --dash-side-min:320px;
   --dash-kicker:11px;
-  --dash-title:28px;
+  --dash-title:clamp(21px, 1.35vw + 8px, 28px);
   --dash-desc:12.5px;
-  --dash-stat:24px;
+  --dash-stat:clamp(19px, 1.15vw + 7px, 24px);
   --dash-stat-label:10.5px;
   --dash-heat-gap:3px;
   --dash-heat-label:10px;
@@ -136,6 +137,9 @@ textarea,
      侧栏固定宽 + 全屏主内容上限，两态共用同一套令牌 */
   --side-w:240px;
   --main-max:1440px;
+  /* 全站最小压缩宽度：窗口比这还窄时布局不再跟缩（body 出横向滚动条），
+     响应式适配到 720 为止 —— 再往下是「不可读」，不是「响应式」该管的事 */
+  --win-min:720px;
 
   /* 项目选择页：卡片栅格。--tile-min 是**期望**列宽（决定一行放几张卡）、
      --board-gap 卡片间距、--tile-pad 卡片内边距。列数由 minmax 自适应，不写宽度断点。
@@ -215,6 +219,7 @@ textarea,
 html,body{height:100%}
 body{
   margin:0;
+  min-width:var(--win-min);   /* 最小压缩宽度地板：再窄出横向滚动条，布局不跟缩（见 --win-min） */
   font-family:"Noto Sans SC","PingFang SC","Microsoft YaHei",-apple-system,"Segoe UI",sans-serif;
   font-size:13px;
   line-height:1.6;
@@ -222,7 +227,7 @@ body{
   background:var(--bg);
   background-attachment:fixed;
   -webkit-font-smoothing:antialiased;
-  overflow:hidden;
+  overflow:auto;   /* 常态无滚动条（.app 恰好铺满）；窗口 < --win-min 时出横向滚动条而不是压烂布局 */
 }
 button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
 input,select{font:inherit;color:inherit}
@@ -232,7 +237,7 @@ input,select{font:inherit;color:inherit}
 
 /* ---------- 布局骨架 ---------- */
 /* 布局骨架：侧栏固定 240px（1260 标准窗口下主区约 1020px） */
-.app{display:grid;grid-template-columns:var(--side-w) minmax(0,1fr);height:100vh;height:100dvh}
+.app{display:grid;grid-template-columns:var(--side-w) minmax(0,1fr);height:100vh;height:100dvh;transition:grid-template-columns var(--motion-panel) var(--ease-out)}
 .app.mini{grid-template-columns:76px minmax(0,1fr)}
 
 .sidebar{
@@ -255,7 +260,6 @@ input,select{font:inherit;color:inherit}
 
 /* ---------- 侧边栏 ---------- */
 .brand{display:flex;align-items:center;gap:10px;min-width:0}
-.brand .mark{width:30px;height:30px;flex:0 0 30px;display:block}
 .brand .name{font-family:Inter,sans-serif;font-size:19px;font-weight:700;letter-spacing:-.2px;line-height:1.1}
 .brand .tag{font-size:10px;color:var(--ink-4);white-space:nowrap}
 /* ---------- 折叠态（.app.mini）：侧栏收成图标条 ----------
@@ -343,7 +347,7 @@ input,select{font:inherit;color:inherit}
 .pill.window-topmost:disabled{opacity:.55;cursor:not-allowed}
 
 /* 图标组：默认按内容排布，但允许收缩 + 内部换行 —— 窄窗口下这组固定直径按钮会把
-   .main 的最小内容宽顶到 400px 以上（内容被裁切）。项目禁止宽度断点，改用可换行收缩 */
+   .main 的最小内容宽顶到 400px 以上（内容被裁切）。骨架级变化走 v2.1 断点，此处仍用可换行收缩 */
 .icon-btns{display:flex;align-items:center;gap:8px;flex:0 1 auto;flex-wrap:wrap;
   justify-content:flex-end;min-width:0}
 .icon-btn{
@@ -462,7 +466,7 @@ button:focus-visible,input:focus-visible,.row:focus-visible,.tab:focus-visible{
 .home-grid{
   flex:1;min-height:0;
   display:grid;
-  grid-template-columns:minmax(0,1.38fr) minmax(var(--dash-side-min),.92fr);
+  grid-template-columns:minmax(min(320px,100%),1.38fr) minmax(min(var(--dash-side-min),100%),.92fr);
   grid-template-rows:minmax(0,1.06fr) minmax(0,.94fr);
   grid-template-areas:"overview heat" "projects activity";
   gap:var(--gap);
@@ -475,11 +479,11 @@ button:focus-visible,input:focus-visible,.row:focus-visible,.tab:focus-visible{
 .home-grid .card-head{flex:0 0 auto}
 .dashboard-overview-main{flex:1;min-height:0;display:flex;flex-direction:column;justify-content:center;gap:calc(var(--dash-gap) / 1.6)}
 .dashboard-kicker{margin:0 calc(var(--dash-gap) / 3) 0 0;font-size:var(--dash-kicker);font-weight:600;letter-spacing:.08em;color:var(--ink-3)}
-.dashboard-overview h2{margin:0;font-size:var(--dash-title);line-height:1.15;letter-spacing:-.04em}
-.dashboard-desc{margin:calc(var(--dash-gap) / 3) 0 0;color:var(--ink-2);font-size:var(--dash-desc);line-height:1.6;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.dashboard-overview h2{margin:0;font-size:var(--dash-title);line-height:1.15;letter-spacing:-.04em;overflow-wrap:anywhere}
+.dashboard-desc{margin:calc(var(--dash-gap) / 3) 0 0;color:var(--ink-2);font-size:var(--dash-desc);line-height:1.6;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
 .dashboard-overview-foot{display:flex;align-items:center;gap:calc(var(--dash-gap) / 2);flex-wrap:wrap}
 .dashboard-actions{display:flex;align-items:center;gap:calc(var(--dash-gap) / 2);flex-wrap:wrap}
-.dashboard-kpis{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:calc(var(--dash-gap) / 2);min-height:0}
+.dashboard-kpis{display:grid;grid-template-columns:repeat(4,minmax(72px,1fr));gap:calc(var(--dash-gap) / 2);min-height:0}
 .dashboard-kpis>div{display:flex;min-width:0;min-height:0;flex-direction:column;justify-content:center;gap:calc(var(--dash-gap) / 5);padding:calc(var(--dash-gap) / 1.6) calc(var(--dash-gap) / 1.5);border:1px solid var(--line-2);border-radius:var(--r-inner);background:var(--tile-2);overflow:hidden}
 .dashboard-kpis span,.dashboard-kpis small{font-size:var(--dash-stat-label);color:var(--ink-3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .dashboard-kpis strong{font-size:var(--dash-stat);font-weight:650;line-height:1;color:var(--ink)}
@@ -1488,3 +1492,51 @@ svg{display:block}
   .obs-target:active,.obs-hub-more:active{transform:none}
 }
 @keyframes obsFade{from{opacity:0}to{opacity:1}}
+
+/* ---------- 响应式断点（定稿 v2.1：宽 2 + 高 2，全项目仅此 4 个，不再增加） ----------
+   丝滑原则：连续变化交给 :root 的 clamp 令牌，断点只做「结构切换」；
+   W1/W2 管宽度骨架，H1/H2 管高度密度。旧断点（1280/1180/1100/1080/900/860/820/760/640/560）保持废弃。 */
+
+/* W1 紧凑档（宽 ≤1199）：侧栏自动收成 76px 图标条。
+   规则与 .app.mini 一一对应，但用 .app:not(.mini) 书写 —— 手动折叠时由 .mini 自己的规则接管，两套来源不打架 */
+@media (max-width:1199.98px){
+  .app{grid-template-columns:76px minmax(0,1fr)}
+  .app:not(.mini):not(.side-flyout) .brand{gap:0;justify-content:center}
+  .app:not(.mini):not(.side-flyout) .brand>*:not(.side-mini){display:none}
+  .app:not(.mini):not(.side-flyout) .side-label,
+  .app:not(.mini):not(.side-flyout) .nav-item span,
+  .app:not(.mini):not(.side-flyout) .user>div:last-child{display:none}
+  .app:not(.mini):not(.side-flyout) .nav-item{justify-content:center;padding:9px}
+  .app:not(.mini):not(.side-flyout) .user{justify-content:center}
+  /* 手动展开（点折叠按钮）：侧栏以 240px 浮层临时覆盖主区，内容完整可读；主区占满全宽不受挤压 */
+  .app.side-flyout{grid-template-columns:minmax(0,1fr)}
+  .app.side-flyout .sidebar{position:fixed;left:0;top:0;bottom:0;z-index:60;width:240px;box-shadow:var(--sh-lg)}
+}
+
+/* W2 堆叠档（宽 ≤960）：总控台 bento 退化为单列，按 主→次→次→次 纵排；
+   行高交还内容（auto），本档允许 .view 纵向滚动（单屏约束以 ≥960 为准） */
+@media (max-width:959.98px){
+  .home-grid{
+    flex:0 0 auto;              /* 高度交还内容：auto 行按卡片自然高度撑开，滚动交给 .view */
+    grid-template-columns:minmax(0,1fr);
+    grid-template-rows:none;
+    grid-template-areas:"overview" "heat" "projects" "activity";
+  }
+}
+
+/* H1 紧凑高度（高 ≤799）：垂直密度整体降一档 —— 只缩留白与装饰高度，不动结构 */
+@media (max-height:799px){
+  :root{
+    --pg:14px;
+    --gap:12px;
+    --dash-card-pad:13px;
+    --dash-gap:10px;
+    --dash-title:clamp(19px, 1.2vw + 6px, 24px);
+    --dash-heat-empty-h:44px;
+  }
+}
+
+/* H2 解除单屏（高 ≤659）：行高交还内容，卡片自然高度，滚动发生在 .view 内部 —— 内容完整优先于单屏 */
+@media (max-height:659px){
+  .home-grid{flex:0 0 auto;grid-template-rows:none}
+}

@@ -6,16 +6,64 @@
 /* 后端同源服务；仅为兼容旧的 file:// 打开方式才使用固定本机地址。 */
 const API_BASE = (typeof location !== 'undefined' && location.protocol === 'file:')
   ? 'http://127.0.0.1:8765/api' : '/api';
-async function apiRequest(path, options){
-  if (typeof fetch !== 'function') throw new Error('当前环境不支持后端请求');
-  const res = await fetch(API_BASE + path, {
-    headers:{'Content-Type':'application/json'}, ...(options || {})
+
+/* WinUI 壳通道：页面跑在 WebView2 里时，请求经 C# 代理转发到本机后端（桥协议见 apex-shell/MainWindow.xaml.cs）。
+   浏览器 / vm 冒烟测试环境没有 window.chrome.webview，自动走下面的 fetch 分支，行为不变。 */
+let __shellSeq = 0;
+const __shellWaiters = new Map();
+if (typeof window !== 'undefined' && window.chrome && window.chrome.webview
+  && typeof window.chrome.webview.addEventListener === 'function'){
+  window.chrome.webview.addEventListener('message', ev => {
+    const m = ev.data;
+    if (!m || m.type !== 'api-reply') return;
+    const waiter = __shellWaiters.get(m.id);
+    if (!waiter) return;
+    __shellWaiters.delete(m.id);
+    waiter(m);
   });
-  let payload = null;
-  try { payload = await res.json(); } catch (_) { payload = null; }
-  if (!res.ok){
+}
+function shellRequest(path, options){
+  return new Promise((resolve, reject) => {
+    const id = ++__shellSeq;
+    __shellWaiters.set(id, m => m.ok
+      ? resolve({ status: m.status, text: m.text })
+      : reject(new Error(m.error || '壳通道请求失败')));
+    window.chrome.webview.postMessage({
+      type: 'api-call', id, path,
+      method: (options && options.method) || 'GET',
+      body: (options && options.body) != null ? String(options.body) : null
+    });
+  });
+}
+const IN_SHELL = typeof window !== 'undefined' && !!(window.chrome && window.chrome.webview);
+
+/* 壳系统通知：走 WebMessage 让 C# 弹托盘 Toast（Win10/11 原生样式，可进通知中心）。
+   浏览器 / vm 环境无 webview，空操作。用于运行终态这类「人不在壳窗口前也该知道」的事件。 */
+function shellToast(message, title){
+  if (!IN_SHELL) return;
+  try {
+    window.chrome.webview.postMessage({ type:'shell-toast', title: title || 'APEX 总控台', message: message || '' });
+  } catch (_) {}
+}
+
+async function apiRequest(path, options){
+  let status, readJson;
+  if (IN_SHELL){
+    const r = await shellRequest(path, options);
+    status = r.status;
+    readJson = () => { try { return JSON.parse(r.text); } catch (_) { return null; } };
+  } else {
+    if (typeof fetch !== 'function') throw new Error('当前环境不支持后端请求');
+    const res = await fetch(API_BASE + path, {
+      headers:{'Content-Type':'application/json'}, ...(options || {})
+    });
+    status = res.status;
+    readJson = async () => { try { return await res.json(); } catch (_) { return null; } };
+  }
+  let payload = await readJson();
+  if (status < 200 || status >= 300){
     const detail = payload && payload.detail;
-    throw new Error(typeof detail === 'string' ? detail : (detail && detail.message) || `后端请求失败（${res.status}）`);
+    throw new Error(typeof detail === 'string' ? detail : (detail && detail.message) || `后端请求失败（${status}）`);
   }
   return payload;
 }
@@ -298,7 +346,6 @@ const S = {
   appCat:'全部',
   apps: DATA.apps.slice(),
   projectFiles: [],
-  projectFileDeletePreview: null,
   todos: {plan: DATA.todosPlan.map(t=>({...t}))},
   acts: DATA.activities.slice(),
   notices: DATA.notices.map(n=>({...n})),
@@ -328,8 +375,6 @@ const S = {
   modTab:'all',        // 类型筛选：all / web / folder / script / cmd
   modQ:'',             // 模块库搜索词
   modConfirm:'',       // 待删除模块的键「type|ref」，非空时渲染预演 + 二次确认弹窗
-  _modType:'',         // 模块表单：当前选中的类型
-  _modProj:'',         // 模块表单：当前选中的所属项目
   _modKey:'',          // 模块表单：正在编辑的条目键「原 type|原 ref」；新增时为空
   devTask:{},          // 「本轮开发任务」：{tids:[…]}，tid 指向 S.todos 条目（实时解析）；按项目 id 隔离
   projRules:{},        // 「开发要求」按项目覆盖（编辑基本资料保存时写入）：{projId:[5 条]}；缺省用 DEV_RULES
@@ -961,7 +1006,7 @@ function viewHome(){
   </section>`;
 
   return `
-    <div class="page-head dashboard-head">
+    <div class="page-head">
       <div><h1>项目仪表盘</h1></div>
     </div>
     <div class="home-grid">
@@ -1036,7 +1081,7 @@ function viewApps(){
       <span>${esc(a.name)}</span>
       <span class="tile-acts">
         <button class="tile-btn tile-launch" data-act="launch" data-id="${a.id}" title="启动 ${esc(a.name)}" aria-label="启动 ${esc(a.name)}">${IC.play('currentColor')}</button>
-        <button class="tile-btn tile-menu" data-act="appMenu" data-id="${a.id}" title="快捷操作" aria-label="快捷操作">···</button>
+        <button class="tile-btn" data-act="appMenu" data-id="${a.id}" title="快捷操作" aria-label="快捷操作">···</button>
       </span>
     </div>`;
   /* 行卡片（列表视图）：每行一张独立卡片，高度由 CSS 令牌固定，便于按「一屏完整行数」锁定容器高度。
@@ -2918,7 +2963,7 @@ function applyProjEdit(id, nameRaw, bodyRaw){
 /* 编辑窗口本体：标题输入框 + 多行正文编辑区 + 实时字数 + 保存 / 取消 */
 function projEditFormHTML(w){
   const name = w.name || '', body = w.desc || '';
-  return `<section class="card ov-card ov-edit">
+  return `<section class="card ov-card">
     <div class="ov-edit-h">
       <span class="ov-edit-t">编辑项目内容</span>
       <button class="ov-edit-x" data-act="closeProjEdit" data-id="${w.id}"
@@ -3630,7 +3675,7 @@ function viewWorkflows(animate){
     <button class="btn btn-ghost btn-sm" data-act="exitWfEdit" data-id="${wf.id}">退出编辑</button>
   </div>
   <div class="wf-main">
-    <section class="card wf-steps-card">
+    <section class="card">
       <div class="card-head">
         <div class="card-title">步骤编排<small>${esc(wf.name)} · ${onSteps.length}/${wf.steps.length} 已启用</small></div>
         <div class="right">
@@ -4784,6 +4829,7 @@ function markBackendRunFailed(wf, token, message){
   if (S.page==='workflows' || S.page==='projects') render(true);
   const verb = r.action==='stop' ? '关闭' : r.action==='restart' ? '重启' : '运行';
   toast(`「${wf.name}」${verb}失败`);
+  shellToast(`「${wf.name}」${verb}失败：${r.error || ''}`, '运行失败');
 }
 function rememberBackendAttempt(wf, payload){
   if (!wf || !payload || payload.action === 'stop') return;
@@ -4828,6 +4874,7 @@ function applyBackendRun(wf, token, payload){
       const verb = closing ? '关闭' : restarting ? '重启' : '启动';
       addActivity(`${verb}了项目「${wf.name}」`, `真实模块${verb}成功`, closing ? 'close' : 'play', C.green, '项目');
       toast(`「${wf.name}」${closing ? '已关闭' : restarting ? '已重启' : '已完成'}`);
+      shellToast(`「${wf.name}」${closing ? '已关闭' : restarting ? '已重启' : '已完成'}`, '运行完成');
     }
   } else if (r.status==='failed' || r.status==='interrupted'){
     const message = payload.error || (payload.result && payload.result.error) || (closing ? '项目关闭失败' : restarting ? '项目重启失败' : '模块执行失败');
@@ -4838,6 +4885,7 @@ function applyBackendRun(wf, token, payload){
       r.settled = true;
       rememberBackendAttempt(wf, payload);
       toast(`「${wf.name}」${closing ? '关闭' : restarting ? '重启' : '运行'}失败`);
+      shellToast(`「${wf.name}」${closing ? '关闭' : restarting ? '重启' : '运行'}失败：${message}`, '运行失败');
     }
   }
   /* 首次落到终态时刷新活跃度聚合：这次真实执行要立刻反映到色格上 */
@@ -5401,7 +5449,23 @@ $('#voiceBtn').addEventListener('click', e => {
   else startVoice();
 });
 $('#themeBtn').addEventListener('click', toggleTheme);
-$('#miniBtn').addEventListener('click', () => { $('#app').classList.toggle('mini'); });
+/* 折叠按钮双模：宽窗口走 .mini 常驻折叠；紧凑窗口（≤1199，W1 强制图标条）改走 side-flyout
+   浮层展开——否则按钮在这个区间是死的（CSS 锁 76px，加不加 .mini 都没变化，侧栏永远出不来）。
+   浮层点侧栏以外任意处（或再次点按钮）收起；窗口拉宽后浮层态自动作废，不会带回宽窗口。 */
+$('#miniBtn').addEventListener('click', () => {
+  const app = $('#app');
+  if (window.matchMedia('(max-width:1199.98px)').matches) app.classList.toggle('side-flyout');
+  else app.classList.toggle('mini');
+});
+document.addEventListener('click', (e) => {
+  const app = $('#app');
+  if (!app.classList.contains('side-flyout')) return;
+  const t = e.target;
+  if (!(t && t.closest && t.closest('.sidebar'))) app.classList.remove('side-flyout');
+});
+window.matchMedia('(max-width:1199.98px)').addEventListener('change', (e) => {
+  if (!e.matches) $('#app').classList.remove('side-flyout');
+});
 $('#drawerMask').addEventListener('click', closeDrawer);
 const topmostBtn = $('#topmostBtn');
 if (topmostBtn) topmostBtn.addEventListener('click', () => { void updateConsoleWindowTopmost(); });

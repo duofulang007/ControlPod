@@ -53,6 +53,7 @@ ctx.globalThis = ctx;
 ctx.window = ctx;          // 浏览器里 window === globalThis
 ctx.innerWidth = 1600;
 ctx.innerHeight = 900;
+ctx.matchMedia = () => ({ matches:false, addEventListener(){}, removeEventListener(){} });   // 媒体查询桩：vm 里无实现，折叠按钮双模逻辑加载时要用
 vm.createContext(ctx);
 
 let src = fs.readFileSync(path.join(__dirname, 'app.js'), 'utf8');
@@ -709,10 +710,17 @@ try {
   /* 4) 死代码清扫（2026-09-24）：宿主消失后留存的纯展示函数、占位映射与只写不读字段已彻底移除 */
   check(!/notesLinkedTo|refBadgeOf|linkBadgeOf|noteIsIdea|MOD_ENTRY_PH/.test(appSrcRef),
     '无宿主的引用派生 / 灵感判定 / 四类入口占位映射已彻底移除（零残留）');
-  check(!/S\._modId|S\.prepOpen\b|S\.projectFileDeletePreview/.test(appSrcRef) && !/\bprepOpen\s*:/.test(appSrcRef),
-    '只写不读的状态字段已清除（模块 id / 预备检查展开态 / 文件删除预演缓存）');
+  check(!/\b_modId\b|\bprepOpen\b|projectFileDeletePreview/.test(appSrcRef),
+    '只写不读的状态字段已清除（模块 id / 预备检查展开态 / 文件删除预演缓存）—— 这里按裸名字查：只查 S.xxx 点号形式会漏掉「以键的形式写回 S 字面量」');
   check(!/^ {2}(pause|skip|down|send|gear|chip):\s+c => sv\(/m.test(appSrcRef),
     '生产零引用的图标键已清除（IC 只保留有宿主的图标）');
+  /* 6) 死代码清扫（2026-09-25）：零引用状态字段 + 零规则类钩子 */
+  check(!/\b_modType\b|\b_modProj\b/.test(appSrcRef),
+    '模块表单的零引用选中态字段已清除（只剩 _modKey 一个键，类型与所属项目由条目自身派生）');
+  const idxSrcRef = require('fs').readFileSync(path.join(__dirname, 'index.html'), 'utf8');
+  check(!/dashboard-head|tile-menu|wf-steps-card|class="txt"/.test(appSrcRef + idxSrcRef)
+    && !appSrcRef.includes('class="card ov-card ov-edit"'),
+    '零规则类钩子已清除（这几个类名在 styles.css 里从来没有规则，是删功能留下的残骸）');
   const devCtx = T.projDevHTML(w1);
   check((devCtx.match(/data-act="gotoTodo"/g) || []).length === T.projTasks(w1.name).filter(t=>!t.done).length
     && (devCtx.match(/data-act="gotoNote"/g) || []).length === T.projNotes(w1.name).length,
@@ -1929,13 +1937,17 @@ try {
   check(agentsMd.includes('术语') && agentsMd.includes('硬约束') && agentsMd.includes('ALL_PASS')
     && agentsMd.includes('已删除的模块'),
     '交接说明书 AGENTS.md 就位（术语 / 硬约束 / 验证方式 / 已删模块清单齐全）');
-  /* 根目录瘦身护栏：只保留源码、Git 元数据和唯一启动入口。
+  /* 根目录瘦身护栏：只保留源码、Git 元数据和工具元数据。
      `.git` 与 `.workbuddy` 都是工具自己写的元数据目录，不是产物，一并排除；
      不排除的话 WorkBuddy 一旦在根目录生成 .workbuddy/ 就会让这条断言无端测挂。 */
   const dirFiles = require('fs').readdirSync(__dirname).filter(name=>name!=='.git' && name!=='.workbuddy').sort();
-  const expectedFiles = ['.gitattributes', '.gitignore', '00-启动 APEX 总控台.lnk', 'AGENTS.md', 'README.md', 'app.js', 'backend', 'index.html', 'smoke-test.js', 'styles.css'].sort();
+  const expectedFiles = ['.gitattributes', '.gitignore', 'AGENTS.md', 'README.md', 'app.js', 'backend', 'index.html', 'shell', 'smoke-test.js', 'styles.css'].sort();
   check(JSON.stringify(dirFiles) === JSON.stringify(expectedFiles),
-    '根目录只保留源码、Git 配置和唯一启动入口（实际：' + dirFiles.join(', ') + '）');
+    '根目录只保留源码与 Git 配置（实际：' + dirFiles.join(', ') + '）');
+  /* 启动入口只在桌面：`00-启动 APEX 总控台.lnk` 已删除，且代码里禁止重建
+     （见 shell/ShortcutMaker.cs 的 CreateDesktopShortcut）。 */
+  check(!dirFiles.some(name=>name.endsWith('.lnk')),
+    '根目录不再放启动快捷方式（唯一入口是桌面「APEX 总控台」）');
   const n0 = T.DATA.notes.length;
   T.S.notes.unshift({id:'nX', title:'t', tag:'日常', pinned:false, time:'刚刚', body:'b', proj:T.DATA.projects[0].name});
   check(T.S.notes.length === n0 + 1, '新建项目记录会追加到底层记录（' + (n0 + 1) + ' 条）');
@@ -2047,13 +2059,20 @@ try {
     '新建任务与记录只通过项目入口接线');
 } catch (e) { console.log('FAIL 项目内容唯一入口 → ' + e.message); fail++; }
 
-/* 27. 窗口规格：仅「1260×840 标准窗口 / 全屏」两态（多断点已移除，靠 .is-fullscreen 切换） */
+/* 27. 窗口规格：「1260×840 标准窗口 / 全屏」两态 + 定稿 v2.1 四断点（宽 960/1200 + 高 659/799） */
 try {
   const css2 = require('fs').readFileSync(path.join(__dirname, 'styles.css'), 'utf8');
   const html2 = require('fs').readFileSync(path.join(__dirname, 'index.html'), 'utf8');
-  check(!/@media\s*\(max-width:(1280|1180|1100|1080|900|640|560)px\)/.test(css2),
-    '功能断点已全部移除（不含任何 max-width 断点）');
-  check(!/@media\s*\(max-height:(820|760)px\)/.test(css2), '矮屏断点已移除');
+  check(!/@media\s*\(max-width:(1280|1180|1100|1080|900|860|640|560)px\)/.test(css2),
+    '历史废弃断点不再回潮（860/900/1080/1180/1280 等保持移除）');
+  check(!/@media\s*\(max-height:(820|760)px\)/.test(css2), '历史废弃矮屏断点（820/760）保持移除');
+  check(css2.includes('@media (max-width:1199.98px)') && css2.includes('@media (max-width:959.98px)'),
+    '定稿 v2.1 宽度断点就位：W1 ≤1199 紧凑档 / W2 ≤960 堆叠档');
+  check(css2.includes('@media (max-height:799px)') && css2.includes('@media (max-height:659px)'),
+    '定稿 v2.1 高度断点就位：H1 ≤799 密度降档 / H2 ≤659 解除单屏');
+  check(/--dash-title:clamp\(/.test(css2) && /--dash-stat:clamp\(/.test(css2)
+    && /--dash-card-pad:clamp\(/.test(css2),
+    '密度令牌走 clamp 连续缩放（断点之间不跳变）');
   check(css2.includes('@media (prefers-reduced-motion:reduce)') && css2.includes('@media (hover:none)'),
     '无障碍媒体查询保留（动效降级 / 触屏）');
   check(css2.includes('--side-w:240px') && css2.includes('--main-max:1440px'),
@@ -2106,17 +2125,26 @@ try {
   check(/\.dashboard-project-list\{[^}]*overflow:hidden auto/.test(css2)
     && /\.dashboard-project-list::-webkit-scrollbar\{width:6px\}/.test(css2),
     '项目总览列表自身滚动：项目多于卡高时出细滚动条可看全');
-  check(/\.dashboard-kpis\{[^}]*repeat\(4,minmax\(0,1fr\)\)/.test(css2)
+  check(css2.includes('--win-min:720px') && /body\{[^}]*min-width:var\(--win-min\)/.test(css2)
+    && /body\{[^}]*overflow:auto/.test(css2),
+    '全站最小压缩宽度 720px 地板：窗口再窄布局不跟缩，body 出横向滚动条（逐字竖排从此绝迹）');
+  const app27 = require('fs').readFileSync(path.join(__dirname, 'app.js'), 'utf8');
+  check(app27.includes("classList.toggle('side-flyout')")
+    && /matchMedia\('\(max-width:1199\.98px\)'\)\.matches/.test(app27)
+    && css2.includes('.app.side-flyout .sidebar{position:fixed')
+    && /\.app:not\(\.mini\):not\(\.side-flyout\)/.test(css2),
+    '折叠按钮双模：宽窗口 .mini 常驻折叠，紧凑窗口 side-flyout 浮层展开（点外部收起）——按钮在 W1 区间不再是死按钮');
+  check(/\.dashboard-kpis\{[^}]*repeat\(4,minmax\(72px,1fr\)\)/.test(css2)
     && /\.dashboard-kpis>div\{[^}]*min-height:0/.test(css2),
-    '当前项目指标为固定 4 列紧凑条，格子可收缩，矮窗口下不再横向溢出');
+    '当前项目指标为固定 4 列紧凑条，格子有 72px 下限（窄窗口压不烂、标签不叠数字）');
   check(!/\.dashboard-progress\{|\.dashboard-project-bar\{|\.hero-progress\{|\.ov-prog\{/.test(css2),
     '项目完成百分比及其进度条样式已彻底移除');
   check(/--dash-card-pad:/.test(css2) && /--dash-heat-gap:/.test(css2) && /--dash-heat-label:/.test(css2),
     '仪表盘密度和活跃图尺寸均走顶部设计令牌');
   check(/grid-template-rows:minmax\(0,1\.06fr\) minmax\(0,\.94fr\)/.test(css2),
     '仪表盘两行按内容密度分配，不再把高度留给空白');
-  check(/grid-template-columns:minmax\(0,1\.38fr\) minmax\(var\(--dash-side-min\),\.92fr\)/.test(css2),
-    '当前项目与活跃度使用不对称列宽，信息层级更清晰');
+  check(/grid-template-columns:minmax\(min\(320px,100%\),1\.38fr\) minmax\(min\(var\(--dash-side-min\),100%\),\.92fr\)/.test(css2),
+    '当前项目与活跃度保持不对称列宽（1.38fr:.92fr），且两列都有下限——窄窗口下谁也不许被压没');
   check(!/font-size:[^;}]*vw/.test(css2), '字号未使用 vw 单位');
   check(html2.includes('id="fsBtn"') && html2.includes('id="topmostBtn"')
     && !html2.includes('id="sceneBtn"'),
@@ -2314,6 +2342,7 @@ try {
   const launcher31 = fs31.readFileSync(path.join(__dirname, 'backend/modules/apex-launcher/runner.py'), 'utf8');
   const consoleLauncher31 = fs31.readFileSync(path.join(__dirname, 'backend/console_launcher.py'), 'utf8');
   const startPs31 = fs31.readFileSync(path.join(__dirname, 'backend/start.ps1'), 'utf8');
+  const startup31 = fs31.readFileSync(path.join(__dirname, 'backend/app/startup_manager.py'), 'utf8');
   const bootstrapPs31 = fs31.readFileSync(path.join(__dirname, 'backend/bootstrap.ps1'), 'utf8');
   const manifest31 = JSON.parse(fs31.readFileSync(path.join(__dirname, 'backend/modules/apex-launcher/module.json'), 'utf8'));
   const apex31 = T.WF_SEED.find(p=>p.id==='apex');
@@ -2472,6 +2501,12 @@ try {
     && main31.includes('@app.get("/api/window")')
     && main31.includes('@app.put("/api/window/topmost")'),
     '窗口置顶控件读取并更新后端验证的固定窗口状态，不伪造成功');
+  check(app31.includes('function shellToast')
+    && app31.includes("type:'shell-toast'")
+    && (app31.match(/shellToast\(/g) || []).length >= 4,
+    '壳通知桥：运行终态（完成/失败/关闭）会经 WebMessage 发系统 Toast，浏览器环境空操作');
+  check(startup31.includes('ApexShell.exe') && startup31.includes('shell_exe.exists()'),
+    '开机自启动注册命令改指 WinUI 壳 exe（壳未构建时回退 console_launcher）');
   check(startPs31.includes('Push-Location $backend') && startPs31.includes('finally') && startPs31.includes('Pop-Location'),
     'Apex Console 启动脚本不依赖调用者当前目录');
   check([startPs31, bootstrapPs31].every(text=>!/[^\x00-\x7F]/.test(text)),
