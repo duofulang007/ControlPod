@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import time
 import webbrowser
 from pathlib import Path
 from typing import Any, Callable
@@ -352,6 +353,12 @@ class ModuleRunner:
         except Exception as exc:  # noqa: BLE001 - stored as a real run failure
             error = f"{type(exc).__name__}: {exc}"
         finally:
+            # 先确认 result.json 落盘，再翻 runs.status。两者顺倒过来会有真实竞态：
+            # /runtime 不看 runs.status，它重新读 result.json；子进程写文件与退出的
+            # 可见顺序不保证（负载高时窗口可达几十毫秒），于是「状态已 succeeded 但
+            # result.json 还读不到」会让 state 退化成 unknown——用户刚跑完就刷新看到空白。
+            if status == "succeeded":
+                self._wait_for_result_file(result_path)
             self.db.execute(
                 "UPDATE runs SET status=?,finished_at=?,exit_code=?,error=? WHERE id=?",
                 (status, utc_now(), exit_code, error, run_id),
@@ -359,6 +366,12 @@ class ModuleRunner:
             active_key = f"{module.id}:{action}"
             if self._module_runs.get(active_key) == run_id:
                 self._module_runs.pop(active_key, None)
+
+    @staticmethod
+    def _wait_for_result_file(result_path: Path, timeout: float = 2.0) -> None:
+        deadline = time.monotonic() + timeout
+        while not result_path.exists() and time.monotonic() < deadline:
+            time.sleep(0.005)
 
     @staticmethod
     def _expand(value: str, values: dict[str, str]) -> str:

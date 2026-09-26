@@ -1,9 +1,9 @@
 # AGENTS.md · 控制台项目接手说明书
 
 > 给任何要读 / 改这个项目的 agent：**先读这一份，再动代码**。术语、硬约束、架构、验证方式与全部已踩过的坑都在这里。
-> 最后更新：2026-09-26 · 测试基线：**前端 `node smoke-test.js` ALL_PASS（729 项）+ 后端 `pytest backend/tests -q` 98 通过（另有 4 项 `test_apex_launcher` 既存失败，见 §10 末）+ 壳自测 `ApexShell.exe --selftest`（238 项）**
+> 最后更新：2026-09-26 · 测试基线：**前端 `node smoke-test.js` ALL_PASS（766 项） + 后端 `pytest backend/tests -q` 102 通过（`test_apex_launcher` 4 项已重写为现存 API 的行为测试，见 §10 末）+ 壳自测 `ApexShell.exe --selftest`（242 项）**
 >
-> **当前形态（先看这段）**：项目已从「静态前端 + Python 后端」演进为 **WinUI 3 壳（`shell/`）+ Web 三件套 + Python 后端（仅为浏览器模式保留）**的单仓库结构。**日常入口是壳**：`shell\bin\x64\Debug\net8.0-windows10.0.19041.0\win-x64\ApexShell.exe`（路径深，用快捷方式：桌面「APEX 总控台」，或跑 `ApexShell.exe --shortcuts` 重建）。**二期移植已全部完成**——51 条 API 路由都在壳内就地回答，壳可独立运行、不再探测或拉起 Python；Python 仍保留是因为浏览器模式（`backend/start.ps1` → `127.0.0.1:8765`）与 pytest 那 90 项对照基线还要用它。**两套栈共用同一个 SQLite 库**（`backend/data/apex-console.db`，`user_version` 协议），这是「边移植边不停机」的关键红利。
+> **当前形态（先看这段）**：项目已从「静态前端 + Python 后端」演进为 **WinUI 3 壳（`shell/`）+ Web 三件套 + Python 后端（仅为浏览器模式保留）**的单仓库结构。**日常入口是壳**：`shell\bin\x64\Debug\net8.0-windows10.0.19041.0\win-x64\ApexShell.exe`（路径深，用快捷方式：桌面「APEX 总控台」，或跑 `ApexShell.exe --shortcuts` 重建）。**二期移植已全部完成**——51 条 API 路由都在壳内就地回答，壳可独立运行、不再探测或拉起 Python；Python 仍保留是因为浏览器模式（`backend/start.ps1` → `127.0.0.1:8765`）与 pytest 那 102 项对照基线还要用它。**两套栈共用同一个 SQLite 库**（`backend/data/apex-console.db`，`user_version` 协议），这是「边移植边不停机」的关键红利。
 
 ---
 
@@ -40,7 +40,7 @@
 ```bash
 # 日常入口：双击桌面「APEX 总控台」（指向壳 exe）；或直接跑
 ApexShell.exe                       # 开窗口（托盘常驻、Ctrl+Alt+A 唤起、关窗缩托盘）
-ApexShell.exe --selftest [日志]      # 壳无头自测（不建窗口不碰 WebView2，238 项）
+ApexShell.exe --selftest [日志]      # 壳无头自测（不建窗口不碰 WebView2，242 项）
 ApexShell.exe --shortcuts           # 重建桌面快捷方式（指向当前 exe）
 ApexShell.exe --inspect-shortcuts   # 列出桌面/开始菜单里所有 APEX 快捷方式及其真实目标
 ApexShell.exe --stages=exec,routes  # 只跑指定自测阶段（排查用二分）
@@ -48,7 +48,7 @@ ApexShell.exe --stages=exec,routes  # 只跑指定自测阶段（排查用二分
 # 前端活规格（末行必须 ALL_PASS）
 node smoke-test.js
 
-# 后端对照测试（90 通过 + 4 项既存失败）
+# 后端对照测试（102 通过）
 backend/.venv/Scripts/python.exe -m pytest backend/tests -q
 
 # 浏览器模式（Python 后端；壳已不依赖它）
@@ -211,6 +211,7 @@ powershell -ExecutionPolicy Bypass -File backend/start.ps1   # → http://127.0.
 17. **「好几条一模一样」几乎总是「兜底值 + 标签缺主体」**：排查口诀——先问「这个字段缺省时是什么」，再看「这条标签里有没有能区分主体的信息」。
 18. **排序键必须是数值**：展示文案（如「9月22日 13:30」）按字符串比毫无意义。适配层另存毫秒数（`backendEpoch()`，缺失 / 非法为 `0` 让「从未运行」沉底），文案只负责显示；本地更新数据时顺手刷新排序键，但**不要用 `Date.now()` 凭空造时间**。
 19. **测试里断言 `let` 变量的实时值，导出必须用 getter**（`Object.defineProperty(__T, 'x', {get(){return x}})`），否则只快照成注入那一刻的值。
+19b. **「绝对定位铺满父容器」的层，可拖区只剩控件本身**（2026-09-26 实测，同一个 bug 连栽两次）：`.tb-drag{inset:0}` 的父级 `.topbar` **只有顶栏控件那么高**，于是顶栏的内边距、以及顶栏以上到窗口顶边那一整条碰哪都拖不动（用户原话「把鼠标放在顶部栏再往上就拖不动了，很鸡肋」）。修法见 **§13 的配方表**里「拖动区要铺满顶栏 + 侧栏顶棚」那一条。**四步之外，还有两个反直觉的收尾，缺了就是从「拖不动」变成「点不动」或「看不见」**：①`overflow:hidden` 的祖先会把负 inset 的越界矩形裁掉（向左扩尤其明显），要么祖先换 `overflow:clip`、要么改用伪元素假墙；②**拖动带挂在 `data-drag` 元素自己身上**，别挂在它内部的子元素上 —— 伪元素命中时 `elementFromPoint` 返回宿主元素，宿主不带 `data-drag` 就永远匹配不到，拖动带铺得再完美也是死的；③同理，**给了拖动带的那个元素要 `isolation:isolate`**，把行内 `z-index` 收在自己的层叠上下文里。四条线索一起看：既没看见带子、又点不动、导航还被盖住 —— 全是这两个坑的不同表现。**排查手段**：别只看矩形，用 `document.elementFromPoint(x,y).closest('[data-drag]')` 逐点问「这个坐标按下算不算拖动」，并拿真实 `index.html` 骨架跑（`setContent` 会引入约 20px 的 `body` 偏移假象，用 `data:` URI 或起本地服务才是真坐标）。
 
 **后端 / 执行栈**
 
@@ -234,10 +235,12 @@ powershell -ExecutionPolicy Bypass -File backend/start.ps1   # → http://127.0.
     - 构建输出被运行中的壳锁住（**MSB3027**）：先 `taskkill` 旧壳再构建，新壳需重新启动。
     - **从工具会话启动的进程会被安全软件掐掉 WebView2**：壳一律由人双击 / 自启动拉起，agent 只做构建与无头自测。
     - 本机无系统级 dotnet，用全路径 `C:\Users\23221\.dotnet\dotnet.exe`。
-29. **后端测试基线的真相**：`pytest backend/tests` 是 **90 通过 + 4 项既存失败**（`test_apex_launcher.py` 调 `launcher.backend_compatible()`，而该函数从来不存在）。**修掉之前，别把「后端全绿」当成改动的验收前提**。
+29. **后端测试基线（2026-09-26 已修复）**：`pytest backend/tests` 现为 **102 通过**。此前长期挂 4 项的真相是——`test_apex_launcher.py` 测的是 `09cd066`「内置 APEX 一键启动模块」重构**删掉的旧接口**（`backend_compatible` / `backend_owner_pid` / `stop_verified_backend` / `ensure_backend`，见 `3bd7e50`）；当时把 runner 从「自管 8765 后端」换成「管理 8766 内置 worker」，runner 与测试没同步。这些接口全仓库零调用，是死代码，**不是**「从来不存在」——旧的失败说明把它猜反了。现已重写为现存 API（`ensure_worker` / `execute_action` / `worker_port_occupied`）的行为测试。**基线必须真实**：既存失败会让「后端全绿」失去验收价值，与其降低标准，不如把它修掉。
+
 30. **壳里的模块子进程不能靠「不传 CREATE_NO_WINDOW」来给控制台**：`requires_admin` 分支在 Python 版写 `creationflags=0`，语义是「沿用后端自己那个控制台」；壳是 WinUI GUI 进程、**没有控制台可继承**，于是系统给子进程**新分配**一个控制台窗口，而它的 stdout/stderr 全被重定向进 `process.*.log` → 那个窗口永远空白，用户看到一块悬着的「黑屏」（2026-09-25 实测，项目「APEX 启动」的 `apex-launcher` 每次运行必现）。**壳侧恒为 `CreateNoWindow = true`，不要复刻 `requires_admin` 这条判断**（两套栈在这一处是**有意分歧**，别「对齐」回去）。判定手段：拿 `pythonw.exe` 当无控制台父进程，A/B 各跑一次，子进程自报 `GetConsoleWindow` / `IsWindowVisible` —— `flags=0` 得可见窗口，`CREATE_NO_WINDOW` 得 0。
-31. **`apex_launcher` 的输入助手必须用被标记 `RUNASADMIN` 的解释器启动，别改成 `sys.executable`**：`processes.py` 的 `REFERENCE_INPUT_PYTHON` 两条口径差一行，后果却是整条流程停在第一步。**AK.exe 是提权运行的**（非提权进程对它 `SetWindowPos` 会得到 `(5, …, '拒绝访问。')`），**提权窗口在前台时非提权进程的 `SetCursorPos` 直接返回 0、指针纹丝不动**（2026-09-25 实测，AK 一退出就恢复正常）——所以「动鼠标的那个进程」必须同样提权。参考实现（旧启动脚本的 `.bat`、`D:\Py项目\APEX` 那份）正是靠写死 `C:\Users\23221\AppData\Local\Programs\Python\Python314\python.exe`（该 exe 在 `HKCU\…\AppCompatFlags\Layers` 里是 `~ RUNASADMIN`）来保证这一点；换成 venv 的 `sys.executable` 后助手不再被强制提权，`SetCursorPos` 被系统拒绝，而旧代码把真实原因吞掉、只留一个对不上的「实际坐标」，于是现象是「AK 打开后点不动、后面的 Steam/游戏全不执行」。**别把 `REFERENCE_INPUT_PYTHON` 改回 `sys.executable`**；环境变量 `APEX_INPUT_PYTHON` 是给别的机器留的出口。排查手段：`processes.move_mouse()` 的返回里现在带 `error` / `error_detail` / `returncode` / `elapsed_seconds`，非提权进程起 `Python314\python.exe` 会明确报 `[WinError 740] 请求的操作需要提升`。
-32. **读子进程 stdout 必须先并发读走再 `WaitForExit`，否则管道满 → 子进程永不退出**：`ApplicationScanner.ListStartApps()` 跑 `powershell.exe Get-StartApps` 会往 stdout 写 **17KB**（本机 203 条清单，stderr 还有 CLIXML 进度流），而匿名管道缓冲区只有 **4KB**。旧写法「先 `WaitForExit(15000)` 再 `ReadToEnd()`」让子进程卡在自己那次写操作上**永不退出** → 必然超时 → 商店/UWP 清单被判失败。后果不是报错而是**静默丢数据**：添加应用里搜不到任何商店应用，而已绑定 UWP 应用（如 ChatGPT/Codex）的项目一运行就撞 `ValidateLaunch` 的 409「入口已失效」——**当年被误记成「派生 powershell.exe 会被安全软件掐」，其实是 .NET 管道死锁**。正确写法（见 `ApplicationScanner.ListStartApps`）：
+31. **`result.json` 必须先于 `runs.status` 可见（2026-09-26 修）**：`/api/projects/{id}/runtime` **不看** `runs.status`，它重新读 `result.json` 并取 `result.status.state`。原先 `_execute` 的 `finally` 直接翻 `runs.status`，而子进程写 `result.json` 的落盘可见性**不保证**早于父进程 `proc.wait()` 返回——负载高时窗口可达几十毫秒，于是「状态已 `succeeded`、`result.json` 却还读不到」，`state` 退化成 `unknown`（用户刚跑完就刷新看到空白）。症状是**偶发**：满负载跑 12s 时 8/8 全绿，同一份代码在 30s（机器繁忙）时红一次。现在 `finally` 在 `status == "succeeded"` 时先 `_wait_for_result_file()`（上限 2s）再落库。**别把这类偶发失败当成「重跑一次就好」**——它正是 §10 第 234 条那个竞态家族的同一类病；也提醒：轮询类测试断言「终态」时，先确认终态依赖的**所有**持久化副作用都已可见。
+32. **`apex_launcher` 的输入助手必须用被标记 `RUNASADMIN` 的解释器启动，别改成 `sys.executable`**：`processes.py` 的 `REFERENCE_INPUT_PYTHON` 两条口径差一行，后果却是整条流程停在第一步。**AK.exe 是提权运行的**（非提权进程对它 `SetWindowPos` 会得到 `(5, …, '拒绝访问。')`），**提权窗口在前台时非提权进程的 `SetCursorPos` 直接返回 0、指针纹丝不动**（2026-09-25 实测，AK 一退出就恢复正常）——所以「动鼠标的那个进程」必须同样提权。参考实现（旧启动脚本的 `.bat`、`D:\Py项目\APEX` 那份）正是靠写死 `C:\Users\23221\AppData\Local\Programs\Python\Python314\python.exe`（该 exe 在 `HKCU\…\AppCompatFlags\Layers` 里是 `~ RUNASADMIN`）来保证这一点；换成 venv 的 `sys.executable` 后助手不再被强制提权，`SetCursorPos` 被系统拒绝，而旧代码把真实原因吞掉、只留一个对不上的「实际坐标」，于是现象是「AK 打开后点不动、后面的 Steam/游戏全不执行」。**别把 `REFERENCE_INPUT_PYTHON` 改回 `sys.executable`**；环境变量 `APEX_INPUT_PYTHON` 是给别的机器留的出口。排查手段：`processes.move_mouse()` 的返回里现在带 `error` / `error_detail` / `returncode` / `elapsed_seconds`，非提权进程起 `Python314\python.exe` 会明确报 `[WinError 740] 请求的操作需要提升`。
+33. **读子进程 stdout 必须先并发读走再 `WaitForExit`，否则管道满 → 子进程永不退出**：`ApplicationScanner.ListStartApps()` 跑 `powershell.exe Get-StartApps` 会往 stdout 写 **17KB**（本机 203 条清单，stderr 还有 CLIXML 进度流），而匿名管道缓冲区只有 **4KB**。旧写法「先 `WaitForExit(15000)` 再 `ReadToEnd()`」让子进程卡在自己那次写操作上**永不退出** → 必然超时 → 商店/UWP 清单被判失败。后果不是报错而是**静默丢数据**：添加应用里搜不到任何商店应用，而已绑定 UWP 应用（如 ChatGPT/Codex）的项目一运行就撞 `ValidateLaunch` 的 409「入口已失效」——**当年被误记成「派生 powershell.exe 会被安全软件掐」，其实是 .NET 管道死锁**。正确写法（见 `ApplicationScanner.ListStartApps`）：
     ```csharp
     proc.Start();
     var stdoutTask = proc.StandardOutput.ReadToEndAsync();   // 先并发读走
@@ -274,7 +277,7 @@ powershell -ExecutionPolicy Bypass -File backend/start.ps1   # → http://127.0.
 
 ## 12. 交接规则
 
-- **改完必跑**：`node smoke-test.js`（末行 `ALL_PASS`，729 项）；改壳代码还要跑 `ApexShell.exe --selftest`（238 项，逐条落盘便于定位死点）；改后端还要跑 `pytest backend/tests -q`（98 + 4 既存失败）。**结构变了补断言，删功能补负向断言**。
+- **改完必跑**：`node smoke-test.js`（末行 `ALL_PASS`，766 项）；改壳代码还要跑 `ApexShell.exe --selftest`（242 项，逐条落盘便于定位死点）；改后端还要跑 `pytest backend/tests -q`（102 通过）。**结构变了补断言，删功能补负向断言**。
   - **删根目录文件后务必跑前端冒烟测试**：里面有一条「根目录白名单」断言（`expectedFiles`），删了文件不同步改断言就会红——2026-09-25 删 `00-启动 APEX 总控台.lnk` 时就漏跑过一次。
 - **本目录有 git**（`D:\Projects\apex-console`）：动手前先看 `git status`，别破坏性覆盖；提交粒度按主题，别把多个主题混在一个提交里。
 - **根目录只放源码**（Web 三件套 + `smoke-test.js` + `AGENTS.md`），其余一律进 `shell/` 或 `backend/`。源码**纯 LF**：批量改写后复核 `b.count(b'\r\n') === 0`（见 §10 第 11 条）。
@@ -295,15 +298,43 @@ powershell -ExecutionPolicy Bypass -File backend/start.ps1   # → http://127.0.
 |---|---|
 | 去掉系统三按钮 | `SetBorderAndTitleBar(hasBorder:false, hasTitleBar:false)`，保留 `WS_THICKFRAME` 所以边缘缩放不受影响。**只剥 `WS_SYSMENU` 不够**——WinUI 的按钮是它自己画的，不走经典非客户区绘制，样式位剥了按钮照样在（真机 `WS_SYSMENU=无` 但三个按钮仍在）。若以后要 `ExtendsContentIntoTitleBar`，这条必须放在它之前 |
 | 整条顶栏可拖 | 页面 `.topbar` 里放一层绝对定位的 `.tb-drag`（控件 `z-index:1` 压在上面，照常能点），`mousedown` → `chrome-command: drag` → 壳用**专用后台线程**拖动：`timeBeginPeriod(1)` 拿真 8ms 节拍 + 原生 `SetWindowPos(SWP_ASYNCWINDOWPOS)` 异步落位，左键松开即停、30 秒保险丝。**两个坑都踩过**：`ReleaseCapture + SendMessage(WM_NCLBUTTONDOWN)` 在 WinUI 3 壳里无效；UI 线程的 DispatcherQueueTimer 拖起来掉帧（分辨率粗 + 被 WebView2 渲染挤占）。侧栏品牌区同样 `data-drag` |
+| 拖动区要铺满「顶栏 + 侧栏顶棚」（2026-09-26 补，踩了两次才定稿） | 只写 `inset:0` 的话，可拖区**只剩控件本身**（见 §10.19b）——顶栏内边距、顶栏以上到窗口顶边、侧栏左侧边距，碰哪都拖不动。正解是**按容器外扩 + 伪元素补方向**：①`.topbar` 定义 `--tb-drag-out:calc(var(--pad) + 8px)`，`.tb-drag{inset:calc(-1*var(--tb-drag-out)) calc(-1*var(--pad)) 0 0}`，向上吃掉主区内边距 + 8px 系统保留区、向右吃满右内边距；②**左侧 18px 不能用负 inset 吃**——`.main` 是 `overflow:hidden`，向左越界会被裁掉，改用 `.tb-drag::before` 假墙（`left:calc(-1*var(--pad));width:var(--pad)`）；③`.app` 加 **`overflow:clip`**（同样裁但不建滚动容器），否则负 inset 的越界矩形还没轮到 `.main` 裁就先在网格根被裁；④侧栏顶棚的拖动带挂在 **`.brand` 自己身上**（`.brand::before`，`left/right:calc(-1*var(--side-pad))`、`top:calc(-1*var(--brand-drag-up))`、`height:var(--brand-drag-h)`）。**两条不能忘的**：<br>**(a) 拖动带必须挂在带 `data-drag` 的元素上**——伪元素命中时 `elementFromPoint` 返回的是**宿主元素**，宿主不带 `data-drag` 就永远匹配不到 `closest('[data-drag]')`，按下纹丝不动（第一次就栽在这：拖动带铺好了、`.brand` 却不带 `data-drag`）。所以 `.brand` 自己带 `data-drag`，里面那个文字块反而可以去掉。<br>**(b) 承载行必须 `isolation:isolate`** ——`.brand` 建独立层叠上下文，`.brand-header`（折叠按钮）的 `z-index:1` 才只在行内比较；不隔离的话它会跑出去跟 `.nav` / `.user`（`z-index:auto`）按 DOM 顺序比，**整条导航被拖动带盖住、文字描述全不见**（第二次栽在这，用户截图报「侧栏文字不见了」）。<br>⑤`.sidebar{padding-top:8px}` + `.brand{padding-top:calc(var(--side-pad) + 8px)}`、`--brand-drag-up:26px`(=8+18) 让带子上沿顶到窗口最顶，brand 行正好落在内容起点上 |
 | **为什么不用区域机制** | 空壳 + 程序化拖拽实测：**拖拽区 = `SetTitleBar` 那个元素的矩形**（元素内能拖、不在元素里也不在穿透区里就不能拖），穿透区挖不出额外可拖区；而且那个元素会盖住侧栏折叠按钮。所以整套 `SetTitleBar / 穿透区 / DragBar` 已删 |
 | 圆角 / 描边 | 33=`DWMWCP_ROUND`；描边线用 34=`DWMWA_COLOR_NONE`(0xFFFFFFFE) 关掉（2026-09-26 多弗朗：红边不要，层次感靠阴影）。DWM 圆角会把 WebView2 一起裁；阴影随 WS_THICKFRAME 自带，不用自己画 |
 | 最大化不压任务栏 | `WM_GETMINMAXINFO` 钳到工作区；`SetWindowSubclass` 装，**回调必须由字段持有**否则被 GC。无边框（无系统边框）时这条尤其必要 |
 | 全屏 / 缩小到托盘 | `#fsBtn` → `toggle-maximize`：**MoveAndResize 到监视器整块矩形（1K=1920×1080）** + 临时 `IsAlwaysOnTop=true` 盖住任务栏，退出还原窗口化矩形与置顶状态；全屏期间 `_fullscreenIntent=true` 让 WM_GETMINMAXINFO 别钳成工作区。**WinAppSDK 1.6 没有 OverlappedPresenter.SetFullscreen**（1.7 才有），别照官方新文档写。**MoveAndResize 设的是含不可见调整边框的外层矩形**（无边框后实测 左7 上0 右7 下7，非对称），不补偿的话全屏右边和下面各留一条缝 —— 用 `FullscreenOuterRect()` 在进全屏那一刻现量现补，别写死 7。`#trayBtn` → `hide`（`_appWindow.Hide()`） |
 
+**顶栏窗口组（置顶 · 缩小到托盘 · 全屏）——悬停解释与交互动效（2026-09-26 定稿）**
+
+三个按钮统一挂 **`.win-btn`**（外加各自的 `.win-btn-pin` / `.win-btn-tray` / `.win-btn-full`），共享一套交互语法：悬停抬 `--win-lift` + 微放大 `--win-pop` + 描边转品牌色，按下回落缩到 `--win-press` 立刻回弹。**动效全部只动 `transform` / `opacity`**——顶栏是 bento 的固定一行，动什么都不许把邻居挤走；时长 / 缓动 / 位移全部收在 `:root` 的 `--win-*` 令牌里，组件规则不硬写数值（§5 第 6 条）。
+
+| 控件 | 悬停解释（title） | 图元动作 |
+|---|---|---|
+| 置顶 `#topmostBtn` | `窗口置顶` ↔ `取消窗口置顶`（开关翻转跟着翻转） | 悬停图钉拧半圈（`calc(var(--win-pin-turn)/2)`），`.on` 停在整圈 —— 一眼区分开关态；`.on` 时 `.win-ring` 呼吸脉冲（`winPulse`），按下闪一下（`winFlare`）。钉尖 `.win-pin-needle` 单独回收，旋转时不像一根杆子扫过去。**`--win-pin-turn` 只能取奇数个 90°**：用 180° 会把图钉转成倒立（钉尖朝上），读起来像「拔出来了」，语义正好反了 —— 90° 横扎位才对 |
+| 缩小到托盘 `#trayBtn` | `缩小到托盘（后台常驻；托盘左键 / Ctrl+Alt+A 唤起）` | 图标 = **一根居中的横杠**（`.win-tray-bar`，就是托盘口那条缝）。**刻意只有这一根线条**——早前试过「竖箭头 + 横杠」的组合，两个图元一起动会互相撞（横杠上浮撞箭头、箭头下沉压横杠），放大看就是糊成一团；单线条反而干净。动作只能给它自己：悬停 `translateY(1.6px) scaleX(.86)`（下沉 + 收短），按下 `2.6px / .72` 更深更短 —— 往下收才是「缩进托盘」的语义方向 |
+| 全屏 `#fsBtn` | `全屏` ↔ `退出全屏` | 四角标各自向外撑开 `±1.2px`（用 `translate` 不用 `scale`——圆角方按钮里 scale 会把描边一起放大糊掉）；`.on`（进全屏）停在撑开位并 `winBreathe` 呼吸 |
+
+- **「铺满工作区」这个词被禁用**：用户不关心全屏怎么实现的，标题就叫「全屏」。有负向断言（`!/铺满工作区/`）同时锁 `index.html` 与 `app.js`，别再写回来。
+- **`.on` 的驱动是两个不同来源**，别搞混：置顶的 `.on` 由 `syncConsoleWindowControl()`（`S.windowState.topmost`，走 `/api/window` 路由）切；全屏的 `.on` 由壳回推的 **`chrome-state`** 切（`body.is-fullscreen` 同源）。全屏 `.on` 必须在回推监听里同步，否则按钮和窗口状态会漂移。
+- **缩小到托盘点了要有反馈**：窗口是「消失」不是「缩小」，`app.js` 在 `shellChromeCommand('hide')` 后紧跟一条 `toast()` 说明怎么唤回，不能静默无响应（§1「不得静默回退」的延伸）。
+- **`prefers-reduced-motion`**：开了系统「减少动态」就停掉全部位移与图元动画，只留颜色 / 描边反馈。
+
 **WebMessage 约定（都不走 API 路由**——`CheckRouteCoverage()` 会拿 `backend/app/main.py` 双向比对，多一条就得连 Python 后端一起改**）**
 
-- 页面 → 壳：`chrome-command`（`drag` / `hide` / `toggle-maximize`），`app.js` 的 `shellChromeCommand()`；`data-drag` 区域 `mousedown` 发 `drag`、`dblclick` 发 `toggle-maximize`
+- 页面 → 壳：`chrome-command`（`drag` / `hide` / `toggle-maximize` / `theme`），`app.js` 的 `shellChromeCommand()`；`data-drag` 区域 `mousedown` 发 `drag`、`dblclick` 发 `toggle-maximize`
 - 壳 → 页面：`chrome-state`（`{maximized}`），页面据此切 `body.is-fullscreen`（沿用 `.is-fullscreen .view` 限宽居中），按钮 / 双击 / 拖到屏幕顶端三条路状态一致
+
+**顶栏 8px 系统保留区（壳底色跟主题）**——无边框壳（`SetBorderAndTitleBar(false,false)`）顶部有一条约 8px 的带**始终由系统绘制**，WebView2 盖不住，深色主题下会露白带。覆盖它要**两件事一起做**，缺一仍露白：
+
+| 层 | 归属 | 收口 |
+|---|---|---|
+| 客户区内的 XAML 底 | `RootGrid.Background` / `Splash.Background` | `MainWindow.SetShellTheme()` |
+| 客户区外、由 DWM 画的 caption 残留 | `DWMWA_CAPTION_COLOR`（attr 35） | `WindowChrome.SetCaptionColor()` |
+
+- `app.js` 的 **`applyTheme`** 是唯一前端出口：写 `data-theme` 后调 `shellChromeCommand('theme', t)`，壳收到即改这两层底色并写 `%LOCALAPPDATA%\ApexShell\last-theme.txt`。
+- 壳启动先用 `last-theme.txt` 猜基调（`ApplyStoredShellTheme`，避免深色用户首帧白闪），页面加载后以**页面偏好为准**覆盖它——app.js 的 `loadPrefs()` 早于 `/bootstrap` 落地，所以权威值总是最后到达。
+- `index.html` 的 `<head>` 里有一段**同步内联脚本**（**必须在 `<link rel=stylesheet>` 之前**）读 localStorage 预置 `data-theme`：只靠 `app.js` 的话，深色用户每次启动都会先按 markup 的 `light` 渲染一帧再翻深色。它只读、不做白名单校验（那是 `normalizePrefs` 的活）。
+- 主题色值别硬编码猜：浅 `rgb(249,243,240)` / 深 `rgb(32,30,37)`，均取自页面 `body` 渐变的顶边合成色（`styles.css` 的 `--bg`），改 `--bg` 时要连这两个常量一起复核。
 
 **踩过的坑（都真踩过）**
 
@@ -313,5 +344,6 @@ powershell -ExecutionPolicy Bypass -File backend/start.ps1   # → http://127.0.
 4. **程序化拖拽前必须先把窗口变前台**（先点一下 / `SetForegroundWindow`），否则第一次 mouse-down 被「激活窗口」吃掉 → 拖拽**假阴性**。
 5. **`taskkill /F` 强杀壳会留孤儿 `msedgewebview2.exe`**，之后可能导航不完成（卡在启动遮罩、日志 `splash: 导航超时`）。构建前尽量让壳从托盘正常退出。
 6. **WinAppSDK 1.6 的 `AppWindowChangedEventArgs` 没有 `DidPresenterStateChange`**，最大化翻转要在 `WindowChrome` 里自己差分（`EmitMaximized`）。
+7. **页面发壳消息一律走 `shellChromeCommand()` 且传对象，绝不自己 `postMessage(JSON.stringify(...))`**：壳侧用 `e.WebMessageAsJson` 解析，自己 stringify 会把整条消息降级成一个 JSON **字符串**，`root.TryGetProperty("type")` 取不到，命令被**静默丢弃**（日志一条不留）。2026-09-26 的 `applyTheme` 就栽在这——代码看着完全正确、测试也过（旧断言只正则匹配源码字面量），但壳里主题切换永远不生效、`last-theme.txt` 从不生成。**排查这类「前端发了壳没收到」先看壳日志有没有对应行**（写了 `未知的 chrome-command` 是分发问题，一条都没有则是根本没解析出来）。
 
 **已知未验证（工具会话验不了）**：从工具会话启动的壳，WebView2 能 ready 但**导航不完成**（`splash: 导航超时`）。所以「空白区拖动手感、托盘 / 全屏按钮、顶栏观感」要由人从开始菜单的 lnk 打开验收。
