@@ -1,9 +1,9 @@
 # AGENTS.md · 控制台项目接手说明书
 
 > 给任何要读 / 改这个项目的 agent：**先读这一份，再动代码**。术语、硬约束、架构、验证方式与全部已踩过的坑都在这里。
-> 最后更新：2026-09-26 · 测试基线：**前端 `node smoke-test.js` ALL_PASS（766 项） + 后端 `pytest backend/tests -q` 102 通过（`test_apex_launcher` 4 项已重写为现存 API 的行为测试，见 §10 末）+ 壳自测 `ApexShell.exe --selftest`（242 项）**
+> 最后更新：2026-09-26 · 测试基线：**前端 `node smoke-test.js` ALL_PASS（766 项） + 后端 `pytest backend/tests -q` 102 通过 + 壳自测 `ApexShell.exe --selftest`（242 项）**
 >
-> **当前形态（先看这段）**：项目已从「静态前端 + Python 后端」演进为 **WinUI 3 壳（`shell/`）+ Web 三件套 + Python 后端（仅为浏览器模式保留）**的单仓库结构。**日常入口是壳**：`shell\bin\x64\Debug\net8.0-windows10.0.19041.0\win-x64\ApexShell.exe`（路径深，用快捷方式：桌面「APEX 总控台」，或跑 `ApexShell.exe --shortcuts` 重建）。**二期移植已全部完成**——51 条 API 路由都在壳内就地回答，壳可独立运行、不再探测或拉起 Python；Python 仍保留是因为浏览器模式（`backend/start.ps1` → `127.0.0.1:8765`）与 pytest 那 102 项对照基线还要用它。**两套栈共用同一个 SQLite 库**（`backend/data/apex-console.db`，`user_version` 协议），这是「边移植边不停机」的关键红利。
+> **当前形态（先看这段）**：**WinUI 3 壳（`shell/`）+ Web 三件套 + Python 后端**的单仓库结构。**日常入口是壳**（`shell\bin\...\win-x64\ApexShell.exe`，路径深——用桌面快捷方式，或跑 `ApexShell.exe --shortcuts` 重建）。**二期移植已完成**：51 条 API 路由都在壳内就地回答，壳可独立运行、不再探测或拉起 Python；Python 保留只为浏览器模式（`backend/start.ps1` → `127.0.0.1:8765`）与 pytest 对照基线。**两套栈共用同一个 SQLite 库**（`backend/data/apex-console.db`，`user_version` 协议）。
 
 ---
 
@@ -29,9 +29,8 @@
 | `shell/` | **WinUI 3 壳**（C# 源码 + 构建产物）。源码在 `shell/*.cs`，产物在 `shell/bin/...`（不进 git） |
 | `backend/` | Python FastAPI 应用、可执行模块包（`backend/modules/`）、运行数据（`backend/data/`）、后端测试 |
 
-- **根目录只放源码**：不加文档、截图、备份、快捷方式或构建产物（`shell/` 与 `backend/` 是仅有的两个子目录）。
-- `backend/.venv`、`backend/data`、`shell/bin`、`shell/obj` 是本机生成物，不属于源码。
-- 历史形态归档在 `../backups-2026-09-15.zip`；开发过程记录在 `D:\Projects\.workbuddy\memory\YYYY-MM-DD.md`（外层，不在本仓库）。
+- 根目录只放源码（细则见 §12）：不加文档 / 截图 / 备份 / 快捷方式 / 构建产物。`backend/.venv`、`backend/data`、`shell/bin`、`shell/obj` 是本机生成物，不属于源码。
+- 开发过程记录在 `D:\Projects\.workbuddy-ai\memory\YYYY-MM-DD.md`（外层，不在本仓库）。
 
 ---
 
@@ -98,7 +97,7 @@ powershell -ExecutionPolicy Bypass -File backend/start.ps1   # → http://127.0.
 ### 前端状态
 
 - `DATA`：种子数据（`projects / obsidian / apps / todosPlan / activities / notices / notes / sceneModes / devContext / projMeta / projectTemplate / modules` 等）。后端接入后大部分由 `/api/bootstrap` 重建。
-- `S`：运行时状态（**73 个字段**）。除 `S.obsidian` 与 **7 个外观偏好** `theme / accent / density / glass / notify / save / telemetry`（即 `PREF_KEYS`，**落 localStorage**）之外，其余刷新即重置。常用：`S.page` · `S.proj` / `S.wf`（项目 **id**）· `S.running` · `S.todos.plan` · `S.notes` · `S.wfEdit` · `S.zoneH` · `S.modTab` / `S.modQ` · `S.heatDays` / `S.heatDetail` / `S.heatMode` · `S.density` / `S.accent` / `S.theme` / `S.glass` / `S.notify` / `S.save` / `S.telemetry` · `S.windowState` / `S.windowUpdating`（窗口置顶控件）· `S.projectRuntime`。
+- `S`：运行时状态。除 `S.obsidian` 与 **7 个外观偏好** `theme / accent / density / glass / notify / save / telemetry`（即 `PREF_KEYS`，**落 localStorage**）之外，其余刷新即重置。常用：`S.page` · `S.proj` / `S.wf`（项目 **id**）· `S.running` · `S.todos.plan` · `S.notes` · `S.wfEdit` · `S.zoneH` · `S.modTab` / `S.modQ` · `S.heatDays` / `S.heatDetail` / `S.heatMode` · `S.density` / `S.accent` / `S.theme` / `S.glass` / `S.notify` / `S.save` / `S.telemetry` · `S.windowState` / `S.windowUpdating`（窗口置顶控件）· `S.projectRuntime`。
 - **`proj` 这个字段名装两种东西**：`S.proj` / `S.wf` 装项目 **id**；`todos.plan[].proj` / `modules[].proj` / `notes[].proj` / `activities[].proj` 与 `DATA.projMeta` / `DATA.devContext` 的**键**装项目 **名字**。按名字关联的靠 `renameProjRefs()` 迁移、`purgeProjRefs()` 清理。
 - 浏览器本机持久化**只有两个键**：`apex-console.obsidian.v1`（只允许 `vault/projectFolder/bindings`）与 `apex-console.prefs.v1`（**恰好 7 个字段**，新增偏好只能改 `PREF_KEYS` + `normalizePrefs` 白名单）。**不要再加第三个键**：其余一切归 SQLite。
 - 渲染：`render(keepScroll)` → `PAGES[S.page]()` 拿 HTML 字符串 → 写进 `#view`；全站**事件委托**（`data-act="动作名" data-id/data-v` → 底部 `switch`，新增交互 = 加 `case` + 挂 `data-act`）。
@@ -154,7 +153,7 @@ powershell -ExecutionPolicy Bypass -File backend/start.ps1   # → http://127.0.
 
 **关键设计**：
 - **可注入**：`LocalApi` 的每个依赖都可注入，`SelfTest` 因此能在无窗口进程里跑真业务逻辑（`initOnStart:false` 跳过启动期副作用）。
-- **启动路径（2026-09-26 提速）**：冷启动全程约 4s，其中 **~3.5s 是 WebView2 的固有成本**（环境创建 ≈1.5s + 导航到渲染 ≈2.05s，20 次实测稳定在 2.0–2.1s），应用侧能动的那 ~0.4s 才是我们的活。做法三条：① 构造里把 **LocalApi 初始化甩进 `Task.Run`**（实测只 ~60ms，但仍不许它占关键路径），② WebView2 环境创建同时起跑、两者并行，③ UI 线程只负责尽快画出 **启动遮罩**——`MainWindow.xaml` 的 `Splash` 是纯 XAML，先于 WebView2 绘制，窗口在 **+0.32s** 就带着 APEX 字标出现，遮罩一直盖到 `NavigationCompleted` 再淡出 260ms（这 260ms 正好盖住「bootstrap + render」那 ~160ms），**彻底消掉原来 2.4s 的纯白空窗**。失败与超时都如实报（`EnsureCoreWebView2Async` 异常直接写在遮罩上；20s 兜底提示超时），不假装在加载。**注意**：WinUI 里 WebView2 属于 external content，**只能被 XAML 盖在上面、不能被别的层透过去** —— 所以遮罩必须是「上层 + 整体淡出」，别去给 WebView2 做透明背景。
+- **启动路径（2026-09-26 提速）**：冷启动约 4s，其中 **~3.5s 是 WebView2 的固有成本**（环境创建 ≈1.5s + 导航到渲染 ≈2.05s，实测稳定），应用侧能动的那 ~0.4s 才是我们的活。三条做法：①构造里把 **LocalApi 初始化甩进 `Task.Run`**（实测只 ~60ms，但仍不许它占关键路径）；②WebView2 环境创建并行起跑；③UI 线程只负责尽快画出 **启动遮罩**——`MainWindow.xaml` 的 `Splash` 是纯 XAML，先于 WebView2 绘制，窗口在 **+0.32s** 就带着 APEX 字标出现，盖到 `NavigationCompleted` 再淡出 260ms（正好盖住「bootstrap + render」那 ~160ms），消掉原来 2.4s 的纯白空窗。失败与超时如实报（`EnsureCoreWebView2Async` 异常直接写在遮罩上；20s 兜底提示超时），不假装在加载。**注意**：WinUI 里 WebView2 属于 external content，**只能被 XAML 盖在上面、不能被别的层透过去**——所以遮罩必须是「上层 + 整体淡出」，别给 WebView2 做透明背景。
 - **还想更快只能省掉冷启动本身**：壳是单实例 + 托盘常驻，`开机自启` 已在设置页（`Run` + `StartupApproved\Run` 双写），托盘热键 **Ctrl+Alt+A** 秒唤起。点 X 是缩托盘不是退出——**从托盘右键「退出」再重点开，就是每次 4s 冷启动的那条路**。
 - **无头自测**：`--selftest [日志]` 走 `App.OnLaunched` 分支，**不建窗口不碰 WebView2**——工具会话出身也能跑（绕开安全软件对 WebView2 的拦截），结果**逐条落盘**（进程被掐也能看到死点）+ 退出码。阶段：`base` / `startup` / `scan` / `realscan` / `icon` / `catalog` / `registry` / `exec` / `window` / `activity` / `projects` / `modules` / `bootstrap` / `routes`。
 - **自测环境限制**：派生 `powershell.exe` 会被安全软件连根掐 → 扫描类测试用 `useShellLists:false`（只关 UWP 清单，其余全真）。应用绑定测试**必须用真扫描候选**（`source_key` 要能被重新验证，造假 key 一定 409）。
@@ -211,12 +210,12 @@ powershell -ExecutionPolicy Bypass -File backend/start.ps1   # → http://127.0.
 17. **「好几条一模一样」几乎总是「兜底值 + 标签缺主体」**：排查口诀——先问「这个字段缺省时是什么」，再看「这条标签里有没有能区分主体的信息」。
 18. **排序键必须是数值**：展示文案（如「9月22日 13:30」）按字符串比毫无意义。适配层另存毫秒数（`backendEpoch()`，缺失 / 非法为 `0` 让「从未运行」沉底），文案只负责显示；本地更新数据时顺手刷新排序键，但**不要用 `Date.now()` 凭空造时间**。
 19. **测试里断言 `let` 变量的实时值，导出必须用 getter**（`Object.defineProperty(__T, 'x', {get(){return x}})`），否则只快照成注入那一刻的值。
-19b. **「绝对定位铺满父容器」的层，可拖区只剩控件本身**（2026-09-26 实测，同一个 bug 连栽两次）：`.tb-drag{inset:0}` 的父级 `.topbar` **只有顶栏控件那么高**，于是顶栏的内边距、以及顶栏以上到窗口顶边那一整条碰哪都拖不动（用户原话「把鼠标放在顶部栏再往上就拖不动了，很鸡肋」）。修法见 **§13 的配方表**里「拖动区要铺满顶栏 + 侧栏顶棚」那一条。**四步之外，还有两个反直觉的收尾，缺了就是从「拖不动」变成「点不动」或「看不见」**：①`overflow:hidden` 的祖先会把负 inset 的越界矩形裁掉（向左扩尤其明显），要么祖先换 `overflow:clip`、要么改用伪元素假墙；②**拖动带挂在 `data-drag` 元素自己身上**，别挂在它内部的子元素上 —— 伪元素命中时 `elementFromPoint` 返回宿主元素，宿主不带 `data-drag` 就永远匹配不到，拖动带铺得再完美也是死的；③同理，**给了拖动带的那个元素要 `isolation:isolate`**，把行内 `z-index` 收在自己的层叠上下文里。四条线索一起看：既没看见带子、又点不动、导航还被盖住 —— 全是这两个坑的不同表现。**排查手段**：别只看矩形，用 `document.elementFromPoint(x,y).closest('[data-drag]')` 逐点问「这个坐标按下算不算拖动」，并拿真实 `index.html` 骨架跑（`setContent` 会引入约 20px 的 `body` 偏移假象，用 `data:` URI 或起本地服务才是真坐标）。
+19b. **「绝对定位铺满父容器」的层，可拖区只剩控件本身**（2026-09-26 实测，同一个 bug 连栽两次）：`.tb-drag{inset:0}` 的父级 `.topbar` **只有顶栏控件那么高**，于是顶栏的内边距、以及顶栏以上到窗口顶边那一整条碰哪都拖不动（用户原话「把鼠标放在顶部栏再往上就拖不动了，很鸡肋」）。**三个反直觉的坑**，缺一个就从「拖不动」变成「点不动」或「看不见」：①`overflow:hidden` 的祖先会裁掉负 inset 的越界矩形（向左扩尤其明显）；②伪元素命中时 `elementFromPoint` 返回**宿主元素**，所以拖动带必须挂在带 `data-drag` 的元素**自己身上**，挂它内部子元素上就永远匹配不到；③承载行要 `isolation:isolate`，否则行内 `z-index` 会跑出去盖住整条导航。**完整配方见 §13「拖动区要铺满顶栏 + 侧栏顶棚」那一条。排查手段**：别只看矩形，用 `document.elementFromPoint(x,y).closest('[data-drag]')` 逐点问「这个坐标按下算不算拖动」，并拿真实 `index.html` 骨架跑（`setContent` 会引入约 20px 的 `body` 偏移假象）。
 
 **后端 / 执行栈**
 
-20. **真实 APEX 模块不要改回长 PowerShell 启动器**：旧入口曾被 Defender 识别为 `HackTool:PowerShell/ApexToolkit.A`，脚本在参数解析前就被 AMSI 拦截。当前 `backend/modules/apex-launcher/runner.py` 由 APEX 自己的 Python 虚拟环境执行，通过 `runas` 请求提权；`module.json` 不含 PowerShell。不要用关防护 / 白名单规避。
-21. **一键入口只结束已验证的监听进程，不要改回 `taskkill /T`**：虚拟环境解释器有父子进程，`/T` 可能报「拒绝访问」。先用健康检查确认服务身份，再对监听 PID 使用最小权限。
+20. **真实 APEX 模块不要改回长启动脚本**：旧入口曾被 Defender 识别为 `HackTool:PowerShell/ApexToolkit.A`，脚本在参数解析前就被 AMSI 拦截。当前 `backend/modules/apex-launcher/runner.py` 由本仓库 venv（`{project_root}\backend\.venv`）执行，通过 `runas` 请求提权；`module.json` 只引用 venv 解释器与 `runner.py`。不要用关防护 / 白名单规避。
+21. **8766 端口被未知服务占用时绝不接管**：`runner.py` 的 `ensure_worker()` 先 `worker_healthy()` 探身份、再 `worker_port_occupied()` 探占用——**健康就复用、被占用但不是 APEX 就报错退出**，不启动、不 kill。旧版的 `stop_verified_backend` / `taskkill /T` 已随 09cd066 重构删除，别改回「先杀了再说」。这条有测试锁定（`test_worker_port_occupied_is_left_alone`）。
 22. **自管滚动不要捕获按钮的指针**：惯性滚动容器若对按钮 `setPointerCapture`，鼠标点击会被吞（键盘 Enter 却可用）。交互控件先经 `appScrollDragBlocked()` 排除。
 23. **无人值守的模块绝不能停在交互输入上**：Windows 上 `getpass` 会绕过 stdin 重定向直接读控制台，**永久挂住**（表现为项目卡在「运行中」）。交互式脚本被模块调用前必须加 `--no-prompt` 类开关 + 超时。
 24. **项目名来自 manifest**：新增模块必须在 `module.json` 显式声明 `projectName` / `projectDescription`，否则继承 `module_registry.DEFAULT_PROJECT_*` 的文案。
@@ -235,11 +234,11 @@ powershell -ExecutionPolicy Bypass -File backend/start.ps1   # → http://127.0.
     - 构建输出被运行中的壳锁住（**MSB3027**）：先 `taskkill` 旧壳再构建，新壳需重新启动。
     - **从工具会话启动的进程会被安全软件掐掉 WebView2**：壳一律由人双击 / 自启动拉起，agent 只做构建与无头自测。
     - 本机无系统级 dotnet，用全路径 `C:\Users\23221\.dotnet\dotnet.exe`。
-29. **后端测试基线（2026-09-26 已修复）**：`pytest backend/tests` 现为 **102 通过**。此前长期挂 4 项的真相是——`test_apex_launcher.py` 测的是 `09cd066`「内置 APEX 一键启动模块」重构**删掉的旧接口**（`backend_compatible` / `backend_owner_pid` / `stop_verified_backend` / `ensure_backend`，见 `3bd7e50`）；当时把 runner 从「自管 8765 后端」换成「管理 8766 内置 worker」，runner 与测试没同步。这些接口全仓库零调用，是死代码，**不是**「从来不存在」——旧的失败说明把它猜反了。现已重写为现存 API（`ensure_worker` / `execute_action` / `worker_port_occupied`）的行为测试。**基线必须真实**：既存失败会让「后端全绿」失去验收价值，与其降低标准，不如把它修掉。
+29. **测试基线必须真实（2026-09-26）**：`pytest backend/tests` 为 **102 通过**。此前 4 项长期失败被写进本文档当「既存失败」，还附一句「修掉之前别把后端全绿当验收前提」——**这等于把可修的 bug 合法化成降低标准**。真相是 `test_apex_launcher.py` 测着 09cd066 重构删掉的旧接口（`backend_compatible` 等，全仓库零调用），已重写为现存 API 的行为测试。**遇到失败先查是不是过时测试，别急着把失败记进文档当常态。**
 
 30. **壳里的模块子进程不能靠「不传 CREATE_NO_WINDOW」来给控制台**：`requires_admin` 分支在 Python 版写 `creationflags=0`，语义是「沿用后端自己那个控制台」；壳是 WinUI GUI 进程、**没有控制台可继承**，于是系统给子进程**新分配**一个控制台窗口，而它的 stdout/stderr 全被重定向进 `process.*.log` → 那个窗口永远空白，用户看到一块悬着的「黑屏」（2026-09-25 实测，项目「APEX 启动」的 `apex-launcher` 每次运行必现）。**壳侧恒为 `CreateNoWindow = true`，不要复刻 `requires_admin` 这条判断**（两套栈在这一处是**有意分歧**，别「对齐」回去）。判定手段：拿 `pythonw.exe` 当无控制台父进程，A/B 各跑一次，子进程自报 `GetConsoleWindow` / `IsWindowVisible` —— `flags=0` 得可见窗口，`CREATE_NO_WINDOW` 得 0。
-31. **`result.json` 必须先于 `runs.status` 可见（2026-09-26 修）**：`/api/projects/{id}/runtime` **不看** `runs.status`，它重新读 `result.json` 并取 `result.status.state`。原先 `_execute` 的 `finally` 直接翻 `runs.status`，而子进程写 `result.json` 的落盘可见性**不保证**早于父进程 `proc.wait()` 返回——负载高时窗口可达几十毫秒，于是「状态已 `succeeded`、`result.json` 却还读不到」，`state` 退化成 `unknown`（用户刚跑完就刷新看到空白）。症状是**偶发**：满负载跑 12s 时 8/8 全绿，同一份代码在 30s（机器繁忙）时红一次。现在 `finally` 在 `status == "succeeded"` 时先 `_wait_for_result_file()`（上限 2s）再落库。**别把这类偶发失败当成「重跑一次就好」**——它正是 §10 第 234 条那个竞态家族的同一类病；也提醒：轮询类测试断言「终态」时，先确认终态依赖的**所有**持久化副作用都已可见。
-32. **`apex_launcher` 的输入助手必须用被标记 `RUNASADMIN` 的解释器启动，别改成 `sys.executable`**：`processes.py` 的 `REFERENCE_INPUT_PYTHON` 两条口径差一行，后果却是整条流程停在第一步。**AK.exe 是提权运行的**（非提权进程对它 `SetWindowPos` 会得到 `(5, …, '拒绝访问。')`），**提权窗口在前台时非提权进程的 `SetCursorPos` 直接返回 0、指针纹丝不动**（2026-09-25 实测，AK 一退出就恢复正常）——所以「动鼠标的那个进程」必须同样提权。参考实现（旧启动脚本的 `.bat`、`D:\Py项目\APEX` 那份）正是靠写死 `C:\Users\23221\AppData\Local\Programs\Python\Python314\python.exe`（该 exe 在 `HKCU\…\AppCompatFlags\Layers` 里是 `~ RUNASADMIN`）来保证这一点；换成 venv 的 `sys.executable` 后助手不再被强制提权，`SetCursorPos` 被系统拒绝，而旧代码把真实原因吞掉、只留一个对不上的「实际坐标」，于是现象是「AK 打开后点不动、后面的 Steam/游戏全不执行」。**别把 `REFERENCE_INPUT_PYTHON` 改回 `sys.executable`**；环境变量 `APEX_INPUT_PYTHON` 是给别的机器留的出口。排查手段：`processes.move_mouse()` 的返回里现在带 `error` / `error_detail` / `returncode` / `elapsed_seconds`，非提权进程起 `Python314\python.exe` 会明确报 `[WinError 740] 请求的操作需要提升`。
+31. **`result.json` 必须先于 `runs.status` 可见（2026-09-26 修）**：`/api/projects/{id}/runtime` **不看** `runs.status`，它重新读 `result.json` 并取 `result.status.state`。原先 `_execute` 的 `finally` 直接翻 `runs.status`，而子进程写 `result.json` 的落盘可见性**不保证**早于父进程 `proc.wait()` 返回——负载高时窗口可达几十毫秒，于是「状态已 `succeeded`、`result.json` 却还读不到」，`state` 退化成 `unknown`（用户刚跑完就刷新看到空白）。症状是**偶发**：满负载跑 12s 时 8/8 全绿，同一份代码在 30s（机器繁忙）时红一次。现在 `finally` 在 `status == "succeeded"` 时先 `_wait_for_result_file()`（上限 2s）再落库。**别把这类偶发失败当成「重跑一次就好」**——它正是 §10 第 28 条「多线程竞态」的同一类病；也提醒：轮询类测试断言「终态」时，先确认终态依赖的**所有**持久化副作用都已可见。
+32. **`apex_launcher` 的输入助手必须用被标记 `RUNASADMIN` 的解释器启动，别改成 `sys.executable`**：AK.exe 是提权运行的——**提权窗口在前台时，非提权进程的 `SetCursorPos` 直接返回 0、指针纹丝不动**（对它 `SetWindowPos` 则得 `(5, …, '拒绝访问。')`），所以「动鼠标的那个进程」必须同样提权。`processes.py` 的 `REFERENCE_INPUT_PYTHON` 靠写死 `…\Python314\python.exe`（该 exe 在 `HKCU\…\AppCompatFlags\Layers` 里是 `~ RUNASADMIN`）保证这一点；换成 venv 的 `sys.executable` 后助手不再被强制提权，而旧代码吞掉真实原因、只留一个对不上的「实际坐标」，现象是「AK 打开后点不动、后面的 Steam / 游戏全不执行」。**别改回 `sys.executable`**；`APEX_INPUT_PYTHON` 是给别的机器留的出口。排查：`processes.move_mouse()` 返回里带 `error` / `error_detail` / `returncode` / `elapsed_seconds`，非提权进程会明确报 `[WinError 740]`。
 33. **读子进程 stdout 必须先并发读走再 `WaitForExit`，否则管道满 → 子进程永不退出**：`ApplicationScanner.ListStartApps()` 跑 `powershell.exe Get-StartApps` 会往 stdout 写 **17KB**（本机 203 条清单，stderr 还有 CLIXML 进度流），而匿名管道缓冲区只有 **4KB**。旧写法「先 `WaitForExit(15000)` 再 `ReadToEnd()`」让子进程卡在自己那次写操作上**永不退出** → 必然超时 → 商店/UWP 清单被判失败。后果不是报错而是**静默丢数据**：添加应用里搜不到任何商店应用，而已绑定 UWP 应用（如 ChatGPT/Codex）的项目一运行就撞 `ValidateLaunch` 的 409「入口已失效」——**当年被误记成「派生 powershell.exe 会被安全软件掐」，其实是 .NET 管道死锁**。正确写法（见 `ApplicationScanner.ListStartApps`）：
     ```csharp
     proc.Start();
@@ -267,11 +266,10 @@ powershell -ExecutionPolicy Bypass -File backend/start.ps1   # → http://127.0.
 - **75 条孤儿 CSS 规则**已清（现零孤儿，有全局护栏断言）。**注意护栏的子串匹配会放过**含相同子串的类名。
 - **无宿主的引用展示层 + 只写不读的状态字段**（2026-09-24 第二轮清扫）：前端删 `refBadgeOf` / `linkBadgeOf` / `notesLinkedTo` / `noteIsIdea` / `MOD_ENTRY_PH` / `IC` 的 6 个零引用键 / `S._modId` / `S.prepOpen` / `S.projectFileDeletePreview`；后端删 `_rename_tmp.py` / `ACTIVE_STATES`。**有负向断言锁定，不要加回来**。
 - **缺宿主的启动/关闭旧接口 + 零规则类钩子**（2026-09-25 第三轮清扫）：前端删 `S._modType` / `S._modProj` / `S.projectFileDeletePreview`（后者 2026-09-24 删过一次、又被当成键写回 `S` 字面量，当时的护栏只查 `S.xxx` 点号形式没拦住；现已改成**裸名字查**）与 5 个零规则类钩子（`dashboard-head` / `tile-menu` / `wf-steps-card` / `txt` / 概览编辑卡上的裸 `ov-edit`）；后端 `apex_launcher` 删 23 个零调用定义（`*_for_ui` / `test_mouse_move` / `launch_game` / `close_game` / `close_steam` / `save_config` / `capture_template` / `AUTOMATION_REVISION` / `ensure_ak_running` 一族，含 7 个连带孤儿，如 `_wait_state` 的调用点全在被删子树里）+ 3 处未使用 import。**有负向断言锁定**（前端 `smoke-test.js` + 后端 `tests/test_automation_dead_code.py`），不要加回来。
-- **第四轮清扫（2026-09-26）——子串护栏拦不住的伪装孤儿 + 无生产宿主的函数**：①「云同步」抽屉全链（`openTool` / `case 'syncNow'` / 导航的 `data-tool` 分支 / `IC.cloud` / `.track` / `.metrics` / `.metric b`）——没有任何元素带 `data-tool`，整条链不可达；② `applyBasicInfo`（本地落库兜底，生产保存一律走 `basicInfoApiPayload` + 后端 + `applyBackendBasicInfo`，此前只有测试在调）；③ `S.windowState` 的只写字段 `width` / `height`；④ `C` 的零引用色键 `ink2` / `ink3` / `brand`；⑤ 孤儿 CSS：`.chat` / `.msg` / `.typing` / `@keyframes bob`（旧对话气泡家族）、`.anim`、`.larder`、`.split`、`.app-tile.add`、`.cat-chip.ghost`、`.cnt.warn`、`.cnt.live`。**有负向断言锁定**（smoke-test「第四轮清理的孤儿规则」「无生产宿主的抽屉与本地落库兜底」两条），不要加回来。**教训**：孤儿护栏是子串匹配，`chatgpt` / `const typing` / `.split(` 这类无关同形词会掩护真孤儿——这轮靠「词边界扫描 + 人工排除运行时拼接」才挖出来；`h1..h4` 这类模板拼接类（`h${heatLevel(...)}`）不算孤儿。
+- **第四轮清扫（2026-09-26）——子串护栏拦不住的伪装孤儿 + 无生产宿主的函数**：①「云同步」抽屉全链（`openTool` / `case 'syncNow'` / 导航 `data-tool` 分支 / `IC.cloud` / `.track` / `.metrics` / `.metric b`）——无元素带 `data-tool`，整条不可达；② `applyBasicInfo`（本地落库兜底，生产一律走 `basicInfoApiPayload` + 后端 + `applyBackendBasicInfo`）；③ `S.windowState` 的只写字段 `width` / `height`；④ `C` 的零引用色键 `ink2` / `ink3` / `brand`；⑤ 孤儿 CSS：`.chat` / `.msg` / `.typing` / `@keyframes bob`、`.anim` / `.larder` / `.split` / `.app-tile.add` / `.cat-chip.ghost` / `.cnt.warn` / `.cnt.live`。**有负向断言锁定**（smoke-test 两条），不要加回来。**教训**：孤儿护栏是子串匹配，`chatgpt` / `const typing` / `.split(` 这类同形词会掩护真孤儿，得靠词边界扫描 + 人工排除运行时拼接；`h${heatLevel(...)}` 这类模板拼接不算孤儿。
 - **开发上下文卡头整行删除**：卡片直接以 `<div class="dev-cols">` 开场，**没有卡头、没有标题**——不要「顺手」补回来。
 - **任务行格式 `N. [待办][优先级] 正文（截止）`**：类型徽章**恒写「待办」**（「待修改」不出现在任何输出里），优先级三档全显式。**类型徽章刻意不参与解析**——否则模板恒写「待办」会在保存时把 `fix` 条目**静默改成 `todo`**。
 - **`0 项目白屏`**：`render()` 里任何在返回 HTML **之前**就取属性的写法，抛错都会造成「页面冻结」而不是报错。现为两层防护（拦「删除最后一个项目」+ 两页空态兜底）。
-- **历史副本与探针截图**、**三份旧文档**：归档在 `../backups-2026-09-15.zip`。
 
 ---
 
@@ -280,13 +278,13 @@ powershell -ExecutionPolicy Bypass -File backend/start.ps1   # → http://127.0.
 - **改完必跑**：`node smoke-test.js`（末行 `ALL_PASS`，766 项）；改壳代码还要跑 `ApexShell.exe --selftest`（242 项，逐条落盘便于定位死点）；改后端还要跑 `pytest backend/tests -q`（102 通过）。**结构变了补断言，删功能补负向断言**。
   - **删根目录文件后务必跑前端冒烟测试**：里面有一条「根目录白名单」断言（`expectedFiles`），删了文件不同步改断言就会红——2026-09-25 删 `00-启动 APEX 总控台.lnk` 时就漏跑过一次。
 - **本目录有 git**（`D:\Projects\apex-console`）：动手前先看 `git status`，别破坏性覆盖；提交粒度按主题，别把多个主题混在一个提交里。
-- **根目录只放源码**（Web 三件套 + `smoke-test.js` + `AGENTS.md`），其余一律进 `shell/` 或 `backend/`。源码**纯 LF**：批量改写后复核 `b.count(b'\r\n') === 0`（见 §10 第 11 条）。
+- **根目录只放源码**（Web 三件套 + `smoke-test.js` + `AGENTS.md` + `README.md`），其余一律进 `shell/` 或 `backend/`。源码**纯 LF**：批量改写后复核 `b.count(b'\r\n') === 0`（见 §10 第 11 条）。
 - 一次只做一个主题的改动，不顺手重构无关代码；需求不明确先问。
 - **交付习惯**：改完要给出「已验证可用」的结论（构建 / 测试 / 自测日志 / 无头验证都跑过），不要把「试一下」的循环丢给人；只有必须人眼确认的视觉细节才请人验收。
 
 ---
 
-## 13. 无边框卡片外壳（2026-09-26 新增，同日两次纠偏后定稿）
+## 13. 无边框卡片外壳（2026-09-26 定稿）
 
 **形态**：壳是「整窗一张卡片」——无边框、无系统标题栏三按钮、DWM 圆角 + 品牌红描边，内容顶到窗口最上沿。
 实现集中在 `shell/WindowChrome.cs`（新文件）；`MainWindow` 构造里 `new WindowChrome(this, _appWindow).Apply()`。
@@ -298,7 +296,7 @@ powershell -ExecutionPolicy Bypass -File backend/start.ps1   # → http://127.0.
 |---|---|
 | 去掉系统三按钮 | `SetBorderAndTitleBar(hasBorder:false, hasTitleBar:false)`，保留 `WS_THICKFRAME` 所以边缘缩放不受影响。**只剥 `WS_SYSMENU` 不够**——WinUI 的按钮是它自己画的，不走经典非客户区绘制，样式位剥了按钮照样在（真机 `WS_SYSMENU=无` 但三个按钮仍在）。若以后要 `ExtendsContentIntoTitleBar`，这条必须放在它之前 |
 | 整条顶栏可拖 | 页面 `.topbar` 里放一层绝对定位的 `.tb-drag`（控件 `z-index:1` 压在上面，照常能点），`mousedown` → `chrome-command: drag` → 壳用**专用后台线程**拖动：`timeBeginPeriod(1)` 拿真 8ms 节拍 + 原生 `SetWindowPos(SWP_ASYNCWINDOWPOS)` 异步落位，左键松开即停、30 秒保险丝。**两个坑都踩过**：`ReleaseCapture + SendMessage(WM_NCLBUTTONDOWN)` 在 WinUI 3 壳里无效；UI 线程的 DispatcherQueueTimer 拖起来掉帧（分辨率粗 + 被 WebView2 渲染挤占）。侧栏品牌区同样 `data-drag` |
-| 拖动区要铺满「顶栏 + 侧栏顶棚」（2026-09-26 补，踩了两次才定稿） | 只写 `inset:0` 的话，可拖区**只剩控件本身**（见 §10.19b）——顶栏内边距、顶栏以上到窗口顶边、侧栏左侧边距，碰哪都拖不动。正解是**按容器外扩 + 伪元素补方向**：①`.topbar` 定义 `--tb-drag-out:calc(var(--pad) + 8px)`，`.tb-drag{inset:calc(-1*var(--tb-drag-out)) calc(-1*var(--pad)) 0 0}`，向上吃掉主区内边距 + 8px 系统保留区、向右吃满右内边距；②**左侧 18px 不能用负 inset 吃**——`.main` 是 `overflow:hidden`，向左越界会被裁掉，改用 `.tb-drag::before` 假墙（`left:calc(-1*var(--pad));width:var(--pad)`）；③`.app` 加 **`overflow:clip`**（同样裁但不建滚动容器），否则负 inset 的越界矩形还没轮到 `.main` 裁就先在网格根被裁；④侧栏顶棚的拖动带挂在 **`.brand` 自己身上**（`.brand::before`，`left/right:calc(-1*var(--side-pad))`、`top:calc(-1*var(--brand-drag-up))`、`height:var(--brand-drag-h)`）。**两条不能忘的**：<br>**(a) 拖动带必须挂在带 `data-drag` 的元素上**——伪元素命中时 `elementFromPoint` 返回的是**宿主元素**，宿主不带 `data-drag` 就永远匹配不到 `closest('[data-drag]')`，按下纹丝不动（第一次就栽在这：拖动带铺好了、`.brand` 却不带 `data-drag`）。所以 `.brand` 自己带 `data-drag`，里面那个文字块反而可以去掉。<br>**(b) 承载行必须 `isolation:isolate`** ——`.brand` 建独立层叠上下文，`.brand-header`（折叠按钮）的 `z-index:1` 才只在行内比较；不隔离的话它会跑出去跟 `.nav` / `.user`（`z-index:auto`）按 DOM 顺序比，**整条导航被拖动带盖住、文字描述全不见**（第二次栽在这，用户截图报「侧栏文字不见了」）。<br>⑤`.sidebar{padding-top:8px}` + `.brand{padding-top:calc(var(--side-pad) + 8px)}`、`--brand-drag-up:26px`(=8+18) 让带子上沿顶到窗口最顶，brand 行正好落在内容起点上 |
+| 拖动区要铺满「顶栏 + 侧栏顶棚」 | 只写 `inset:0` 的话可拖区只剩控件本身（诊断与两个坑见 §10.19b）。正解是**按容器外扩 + 伪元素补方向**：①`.topbar` 定义 `--tb-drag-out:calc(var(--pad) + 8px)`，`.tb-drag{inset:calc(-1*var(--tb-drag-out)) calc(-1*var(--pad)) 0 0}`——向上吃掉主区内边距 + 8px 系统保留区、向右吃满右内边距；②**左侧那截不能用负 inset 吃**（`.main` 是 `overflow:hidden`，向左越界会被裁），改用 `.tb-drag::before` 假墙（`left:calc(-1*var(--pad));width:var(--pad)`）；③`.app` 加 `overflow:clip`，否则越界矩形还没轮到 `.main` 裁就先在网格根被裁；④侧栏顶棚的拖动带挂在 `.brand::before`（`left/right:calc(-1*var(--side-pad))`、`top:calc(-1*var(--brand-drag-up))`、`height:var(--brand-drag-h)`）；⑤`.sidebar{padding-top:8px}` + `.brand{padding-top:calc(var(--side-pad) + 8px)}`、`--brand-drag-up:26px`(=8+18) 让带子上沿顶到窗口最顶，brand 行正好落在内容起点 |
 | **为什么不用区域机制** | 空壳 + 程序化拖拽实测：**拖拽区 = `SetTitleBar` 那个元素的矩形**（元素内能拖、不在元素里也不在穿透区里就不能拖），穿透区挖不出额外可拖区；而且那个元素会盖住侧栏折叠按钮。所以整套 `SetTitleBar / 穿透区 / DragBar` 已删 |
 | 圆角 / 描边 | 33=`DWMWCP_ROUND`；描边线用 34=`DWMWA_COLOR_NONE`(0xFFFFFFFE) 关掉（2026-09-26 多弗朗：红边不要，层次感靠阴影）。DWM 圆角会把 WebView2 一起裁；阴影随 WS_THICKFRAME 自带，不用自己画 |
 | 最大化不压任务栏 | `WM_GETMINMAXINFO` 钳到工作区；`SetWindowSubclass` 装，**回调必须由字段持有**否则被 GC。无边框（无系统边框）时这条尤其必要 |
