@@ -2,7 +2,7 @@
 
 面向 Windows 的本地个人总控台：把项目、可执行模块、常用应用、项目任务、记录和运行历史收在一个界面中。
 
-这是一个本地优先的个人开发原型。前端由原生 HTML、CSS、JavaScript 构成；后端使用 FastAPI，仅监听 `127.0.0.1`，不会对外暴露服务。
+自用的真实工具，不是原型演示、也不是可上线产品。日常入口是桌面外壳（WinUI 3），界面是原生 HTML / CSS / JavaScript，数据全部落在本机磁盘。
 
 ## 当前能力
 
@@ -15,30 +15,46 @@
 - 真实应用：识别 Windows 开始菜单、已注册应用与 App Paths 中的可启动程序；添加后可从控制台启动，并显示 Windows 原生图标。
 - 项目上下文：在项目内维护待办、项目记录、文件关联和 Obsidian 主页连接。
 - 界面偏好：主题、强调色、信息密度、玻璃质感等外观选项保存在浏览器本机，刷新后保持。
-- 本地运行：桌面入口可检查服务状态，打开独立窗口；源码变更后安全重启本地服务。
+- 桌面外壳：托盘常驻（左键唤起 / 右键菜单）、全局热键 `Ctrl+Alt+A`、关窗缩托盘、单实例互斥、开机自启动、窗口置顶、全屏、无边框卡片外观。
+- 两种打开方式：**外壳**（日常入口，可独立运行）与**浏览器模式**（`127.0.0.1:8765`，保留用于对照测试）。两套栈共用同一个 SQLite 库。
 
 ## 运行环境
 
 - Windows 10 / 11
-- Python 3.12
-- Node.js（仅用于前端冒烟测试）
+- Python 3.12 —— **执行模块必需**（模块的 runner 都跑在这个 venv 里）；外壳本身不需要
+- .NET 8 SDK —— 仅构建外壳时需要（用 `dotnet --list-sdks` 确认有输出；只装运行时的话这里会是空的）。外壳的运行时自带，最终用户不必安装
+- Node.js —— 仅用于前端冒烟测试
 
 ## 快速开始
+
+### 方式一：桌面外壳（日常入口）
 
 ```powershell
 git clone https://github.com/duofulang007/apex-console.git apex-console
 cd apex-console
 
-# 创建后端虚拟环境并安装依赖
+# 1. 后端虚拟环境：执行模块要用它（外壳自身不依赖 Python）
 powershell -ExecutionPolicy Bypass -File backend\bootstrap.ps1
 
-# 启动本地服务
+# 2. 构建外壳（需 .NET 8 SDK：dotnet --list-sdks 必须有输出）
+dotnet build shell\ApexShell.csproj -c Debug -p:Platform=x64 -p:RuntimeIdentifier=win-x64
+
+# 3. 运行；也可用 --shortcuts 在桌面建快捷方式
+shell\bin\x64\Debug\net8.0-windows10.0.19041.0\win-x64\ApexShell.exe
+```
+
+外壳把 `https://apex.local/` 映射到仓库根，所以改完 Web 三件套**不必重新构建**，在壳里按 F5 即可生效。
+
+### 方式二：浏览器模式
+
+```powershell
+powershell -ExecutionPolicy Bypass -File backend\bootstrap.ps1
 powershell -ExecutionPolicy Bypass -File backend\start.ps1
 ```
 
 随后访问 [http://127.0.0.1:8765](http://127.0.0.1:8765)。
 
-首次启动脚本默认使用现有 APEX Python 3.12 环境作为引导解释器；若你的环境不同，可以显式指定：
+`bootstrap.ps1` 默认自动找本机 Python 3.12；找不到或想指定时显式传入：
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File backend\bootstrap.ps1 -Python "C:\Python312\python.exe"
@@ -65,15 +81,21 @@ apex-console/
 ├─ index.html                 前端入口
 ├─ app.js                     前端逻辑与页面渲染
 ├─ styles.css                 全站样式与设计令牌
-├─ smoke-test.js              前端冒烟测试
+├─ smoke-test.js              前端冒烟测试（同时是活规格）
+├─ shell/                     WinUI 3 桌面外壳（C# 源码）
+│  ├─ ApexShell.csproj
+│  ├─ MainWindow.xaml.cs      窗口 / 托盘 / WebView2 / WebMessage 桥
+│  ├─ LocalApi.cs             壳内路由分发器
+│  ├─ Db.cs                   SQLite 门面（与 Python 版逐条对齐）
+│  └─ SelfTest.cs             无头自测（--selftest）
 ├─ backend/
 │  ├─ app/                    FastAPI、数据访问与执行服务
 │  ├─ modules/                内置可执行模块（含 runner-lab 导入模块）
 │  ├─ tests/                  后端测试
 │  ├─ bootstrap.ps1           环境初始化
-│  ├─ start.ps1               本地服务启动
-│  └─ console_launcher.py     桌面一键入口
-└─ AGENTS.md                  项目约束与维护说明
+│  ├─ start.ps1               浏览器模式服务启动
+│  └─ console_launcher.py     旧桌面入口（仅外壳未构建时回退用）
+└─ AGENTS.md                  项目约束与维护说明（改代码前先读）
 ```
 
 `run-analytics/`（跑步数据看板）是**独立 git 仓库**，按「每个项目模块一个仓库」的约定
@@ -94,18 +116,19 @@ apex-console/
 ## 验证
 
 ```powershell
-# 前端
+# 前端（末行必须出现 ALL_PASS）
 node smoke-test.js
 
 # 后端
 backend\.venv\Scripts\python.exe -m pytest backend\tests -q
-```
 
-前端测试末行出现 `ALL_PASS` 才表示通过。
+# 外壳（无头自测：不建窗口、不碰 WebView2）
+shell\bin\x64\Debug\net8.0-windows10.0.19041.0\win-x64\ApexShell.exe --selftest
+```
 
 ## 本地数据与隐私
 
-- 运行数据保存在 `backend/data/`，包括本地 SQLite 数据库、运行记录与日志。
+- 运行数据保存在 `backend/data/`，包括本地 SQLite 数据库、运行记录与日志。外壳与浏览器模式共用这一个库。
 - 这些本机数据、虚拟环境与测试缓存已被 `.gitignore` 排除，不会提交到仓库。
 - 跑步健康数据（`data.js`）在独立的 run-analytics 仓库里同样被它自己的 `.gitignore` 排除；
   换机器后 clone 两个仓库、双击 `run-analytics\导入数据.cmd` 导入一次即可重建。
