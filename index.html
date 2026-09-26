@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta content="width=device-width, initial-scale=1" name="viewport">
 <title>APEX 控制台</title>
-<link href="styles.css?v=20260924D" rel="stylesheet">
+<link href="styles.css?v=20260926F" rel="stylesheet">
 </head>
 <body>
 
@@ -12,14 +12,20 @@
 
   <!-- ============ 侧边栏 ============ -->
   <aside class="sidebar">
-    <div class="brand">
-      <button class="icon-btn side-mini" id="miniBtn" title="折叠侧边栏">
-        <svg fill="none" viewBox="0 0 24 24" style="width:20px; height:20px">
-          <rect height="15" rx="3" stroke="var(--ink-2)" stroke-width="1.8" width="17" x="3.5" y="4.5"/>
-          <path d="M9.5 4.5v15" stroke="var(--ink-2)" stroke-width="1.8"/>
-        </svg>
-      </button>
-      <div data-drag title="拖动窗口">
+    <!-- .brand 自己就是侧栏顶棚的拖动区：::before 拖动带靠它命中（伪元素命中返回宿主元素，
+         宿主不带 data-drag 就永远拖不动）。isolation:isolate 保证它内部的 z-index 不外溢，
+         侧栏导航（.nav / .user）不会被拖动带盖住。
+         .brand-header 只装折叠按钮，撑出 --brand-drag-h 让它在图标条里居中也压得住拖动带。 -->
+    <div class="brand" data-drag title="拖动窗口">
+      <div class="brand-header">
+        <button class="icon-btn side-mini" id="miniBtn" title="折叠侧边栏">
+          <svg fill="none" viewBox="0 0 24 24" style="width:20px; height:20px">
+            <rect height="15" rx="3" stroke="var(--ink-2)" stroke-width="1.8" width="17" x="3.5" y="4.5"/>
+            <path d="M9.5 4.5v15" stroke="var(--ink-2)" stroke-width="1.8"/>
+          </svg>
+        </button>
+      </div>
+      <div>
         <div class="name">APEX</div>
         <div class="tag">掌控主动权 · 更进一步</div>
       </div>
@@ -69,7 +75,8 @@
   <!-- ============ 主区域 ============ -->
   <div class="main">
     <header class="topbar">
-      <!-- 拖动层：绝对定位铺满整条顶栏，控件都压在它上面（z-index:1）所以照常能点。
+      <!-- 拖动层：绝对定位铺满整条顶栏，还往外扩一圈（上到窗口最顶的系统保留区、左右到主区边缘），
+           控件都压在它上面（z-index:1）所以照常能点。侧栏顶部那块的拖动层是 .brand::before。
            按下它 → chrome-command: drag → 壳用 WM_NCLBUTTONDOWN(HTCAPTION) 进入系统拖拽循环；
            双击 = 最大化 / 还原。 -->
       <div class="tb-drag" data-drag aria-hidden="true"></div>
@@ -94,31 +101,56 @@
       </button>
 
       <!-- 窗口组：置顶 · 缩小到托盘 · 全屏。三个都走壳的原生能力，不再依赖浏览器 Fullscreen API。
-           组首用 margin-left:auto 把「窗口组 + 偏好组」一起推到右侧，搜索框左侧那段空白正好留给拖窗。 -->
-      <button class="icon-btn window-topmost" id="topmostBtn" title="窗口置顶：固定窗口在最上层显示" aria-label="窗口置顶" aria-pressed="false" disabled>
+           组首用 margin-left:auto 把「窗口组 + 偏好组」一起推到右侧，搜索框左侧那段空白正好留给拖窗。
+           三个按钮统一挂 .win-btn：悬停抬升 + 图元各自动作（图钉旋转 / 横杠下沉 / 角标呼吸），
+           动效全部走 :root 的 --win-* 令牌，见 styles.css「窗口组」一节。 -->
+      <button class="icon-btn win-btn win-btn-pin window-topmost" id="topmostBtn" title="窗口置顶" aria-label="窗口置顶" aria-pressed="false" disabled>
         <svg fill="none" viewBox="0 0 24 24" aria-hidden="true">
-          <path d="M8.5 4.5h7l-1 5 3 3v2h-11v-2l3-3-1-5zM12 14.5V20" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+          <g class="win-glyph">
+            <path d="M8.5 4.5h7l-1 5 3 3v2h-11v-2l3-3-1-5z" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+            <path class="win-pin-needle" d="M12 14.5V20" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+          </g>
+        </svg>
+        <span class="win-ring" aria-hidden="true"></span>
+      </button>
+
+      <button class="icon-btn win-btn win-btn-tray" id="trayBtn" title="缩小到托盘（后台常驻；托盘左键 / Ctrl+Alt+A 唤起）" aria-label="缩小到托盘">
+        <svg fill="none" viewBox="0 0 24 24" aria-hidden="true">
+          <g class="win-glyph">
+            <path class="win-tray-bar" d="M4.6 12h14.8" stroke="var(--ink-2)" stroke-linecap="round" stroke-width="1.8"/>
+          </g>
         </svg>
       </button>
 
-      <button class="icon-btn" id="trayBtn" title="缩小到托盘（后台常驻；托盘左键 / Ctrl+Alt+A 唤起）" aria-label="缩小到托盘">
+      <button class="icon-btn win-btn win-btn-full" id="fsBtn" title="全屏" aria-label="全屏" aria-pressed="false">
         <svg fill="none" viewBox="0 0 24 24" aria-hidden="true">
-          <path d="M12 4.5v9M8.4 10.1l3.6 3.6 3.6-3.6M4.5 18h15" stroke="var(--ink-2)" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8"/>
-        </svg>
-      </button>
-
-      <button class="icon-btn" id="fsBtn" title="全屏（铺满工作区）" aria-label="全屏" aria-pressed="false">
-        <svg fill="none" viewBox="0 0 24 24" aria-hidden="true">
-          <path d="M9 3.5H4.5V8M15 3.5h4.5V8M9 20.5H4.5V16M15 20.5h4.5V16" stroke="var(--ink-2)" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8"/>
+          <g class="win-glyph">
+            <path class="win-corner win-corner-tl" d="M9 3.5H4.5V8" stroke="var(--ink-2)" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8"/>
+            <path class="win-corner win-corner-tr" d="M15 3.5h4.5V8" stroke="var(--ink-2)" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8"/>
+            <path class="win-corner win-corner-bl" d="M9 20.5H4.5V16" stroke="var(--ink-2)" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8"/>
+            <path class="win-corner win-corner-br" d="M15 20.5h4.5V16" stroke="var(--ink-2)" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8"/>
+          </g>
         </svg>
       </button>
 
       <!-- 偏好组：主题 · 通知（左侧细竖线与窗口组分隔，见 styles.css 的 .icon-btns） -->
       <div class="icon-btns">
-        <button class="icon-btn" id="themeBtn" title="切换主题">
-          <svg fill="none" viewBox="0 0 24 24" style="width:20px; height:20px">
+        <!-- 主题切换：同一套图元按 <html data-theme> 显示太阳（浅色）或月亮（深色）——
+             光条在深色态收起，月盘在深色态撑开把日盘挖成月牙。JS 只写 data-theme 一个状态。 -->
+        <button class="icon-btn theme-btn" id="themeBtn" title="切换主题" aria-label="切换主题">
+          <svg class="theme-ico" fill="none" viewBox="0 0 24 24" aria-hidden="true">
             <circle cx="12" cy="12" r="4.2" stroke="var(--ink-2)" stroke-width="1.8"/>
-            <path d="M12 2.5v2.2M12 19.3v2.2M2.5 12h2.2M19.3 12h2.2M5.2 5.2l1.6 1.6M17.2 17.2l1.6 1.6M18.8 5.2l-1.6 1.6M6.8 17.2l-1.6 1.6" stroke="var(--ink-2)" stroke-linecap="round" stroke-width="1.8"/>
+            <circle class="theme-moon-fill" cx="12" cy="12" r="4.2" stroke="none"/>
+            <g class="theme-rays" stroke="var(--ink-2)" stroke-linecap="round" stroke-width="1.8">
+              <path d="M12 2.5v2.2" style="--i:0"/>
+              <path d="M12 19.3v2.2" style="--i:1"/>
+              <path d="M2.5 12h2.2" style="--i:2"/>
+              <path d="M19.3 12h2.2" style="--i:3"/>
+              <path d="M7.95 7.95l-1.5-1.5" style="--i:4"/>
+              <path d="M17.55 17.55l-1.5-1.5" style="--i:5"/>
+              <path d="M16.05 7.95l1.5-1.5" style="--i:6"/>
+              <path d="M6.45 16.05l1.5-1.5" style="--i:7"/>
+            </g>
           </svg>
         </button>
         <button class="icon-btn" id="bellBtn" title="通知">
@@ -172,6 +204,6 @@
 <!-- ============ 提示条 ============ -->
 <div class="toasts" id="toasts"></div>
 
-<script src="app.js?v=20260924D"></script>
+<script src="app.js?v=20260926F"></script>
 </body>
 </html>

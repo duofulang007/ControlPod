@@ -200,7 +200,7 @@ public sealed class ApplicationScanner
         {
             var db = new Db(ConsoleConfig.DbPath);
             db.Init();
-            var rows = db.FetchAll("SELECT id,name,source_key,launch_path FROM applications WHERE source_key<>''");
+            var rows = db.FetchAll("SELECT id,name,icon,source_key,launch_path FROM applications WHERE source_key<>''");
             lines.Add($"[库内带真实入口的应用] {rows.Count} 个");
             foreach (var row in rows)
             {
@@ -213,13 +213,64 @@ public sealed class ApplicationScanner
                     lines.Add($"  *** {name}: 入口路径变了\n        库内 {stored}\n        扫描 {hit.LaunchPath}");
                 else
                     lines.Add($"  OK  {name}: 入口可复验");
+
+                // 图标单独报一格：入口可复验 ≠ 图标出得来。历史上这两件事被混为一谈，
+                // 结果是应用行全部渲染成破图，而 --scan 依然一路 OK。
+                var iconSource = (row.GetValueOrDefault("icon") as string) ?? "";
+                var iconFail = IconDiagnose(name, stored, iconSource, out var iconDetail);
+                lines.Add(iconFail ? $"  *** {name}: {iconDetail}" : $"  OK  {name}: 图标可出图（{iconDetail}）");
             }
+
+            // 图标路由的图源是「扫描候选」而不是库内 icon 字段，两处都可能掉链子：
+            // 这里把每个候选的图源也过一遍抽图，直接定位到是哪一个 app 出不了图。
+            var broken = new List<string>();
+            foreach (var c in candidates)
+            {
+                var src = c.IconSource.Length > 0 ? c.IconSource : c.LaunchPath;
+                if (src.Length == 0 || ExtractIconPng(src) is null) broken.Add($"{c.Name}（{c.Id}）");
+            }
+            lines.Add(broken.Count == 0
+                ? $"[图标扫描] {candidates.Count} 个候选全部可出图"
+                : $"[图标扫描] {broken.Count}/{candidates.Count} 个候选抽图失败：{string.Join("、", broken.Take(10))}"
+                  + (broken.Count > 10 ? " …" : ""));
         }
         catch (Exception ex)
         {
             lines.Add($"[库内应用] 读取失败：{ex.GetType().Name}: {ex.Message}");
         }
         return lines;
+    }
+
+    /// <summary>诊断单个应用的图标可出图性（--scan 用）。返回 true 表示抽图失败。
+    /// 同时把「icon 字段形态不对」单独点出来 —— 这是最隐蔽的一类：icon 既不是内置 SVG 键
+    /// 也不是 native:{source_key}，前端就渲染成兜底方块，看着像「图标坏了」但其实是数据问题。</summary>
+    private static bool IconDiagnose(string name, string launchPath, string iconField, out string detail)
+    {
+        if (iconField.Length == 0)
+        {
+            detail = "icon 字段为空 → 前端走兜底图标";
+            return true;
+        }
+        if (!iconField.StartsWith("native:", StringComparison.Ordinal))
+        {
+            // 非 native: 会被前端当内置 SVG 键查表；查不到就退回 add 占位图
+            detail = $"icon=\"{iconField}\" 不是 native:{{source_key}} 形态，"
+                   + "前端会按内置图标键渲染（大概率渲染成占位方块）";
+            return true;
+        }
+        if (launchPath.Length == 0)
+        {
+            detail = "没有 launch_path，无图源可抽";
+            return true;
+        }
+        var png = ExtractIconPng(launchPath);
+        if (png is null)
+        {
+            detail = $"从 {launchPath} 抽图失败（SHGetFileInfoW 取不到图标）";
+            return true;
+        }
+        detail = $"{png.Length}B PNG";
+        return false;
     }
 
     /* ---------- 分类 / ID / 过滤（与 Python 版逐条对齐） ---------- */

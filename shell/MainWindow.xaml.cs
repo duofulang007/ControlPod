@@ -34,6 +34,7 @@ public sealed partial class MainWindow : Window
         InitializeComponent();
         Title = "APEX 总控台";
 
+        ApplyStoredShellTheme();   // 深色用户启动不白闪：壳底色先对齐上次页面主题
         ApplyDefaultPlacement(1440, 900);
         SetupTrayBehavior();
 
@@ -58,6 +59,11 @@ public sealed partial class MainWindow : Window
         _chrome = new WindowChrome(this, _appWindow!);
         _chrome.Apply();
 
+        // 顶部 8px 保留区的 DWM 段（caption 残留底色）：启动恢复时 _chrome 还没建，
+        // 在这里按已恢复的基调补上，深色用户开窗首帧就不露白。
+        var tone = _shellTone == ShellTone.Dark ? ToneDarkColor : ToneLightColor;
+        _chrome.SetCaptionColor(tone.R, tone.G, tone.B);
+
         // 最大化状态回推给页面：body.is-fullscreen 由壳状态驱动，按钮和双击两条路都不漂移
         _chrome.MaximizedChanged += maximized => PushChromeState(maximized);
 
@@ -79,6 +85,66 @@ public sealed partial class MainWindow : Window
 
     private bool IsMaximized() =>
         _appWindow?.Presenter is OverlappedPresenter p && p.State == OverlappedPresenterState.Maximized;
+
+    /* ---------- 壳底色跟随页面主题 ---------- */
+
+    /// <summary>壳底色的两种基调：对应页面 body 渐变在顶边的合成色。</summary>
+    private enum ShellTone { Light, Dark }
+
+    /// <summary>浅色主题页面顶部合成色（探针实测 F3F3F3 白带旁的页面色，取近似顶值）。</summary>
+    private static readonly Windows.UI.Color ToneLightColor = new() { A = 255, R = 0xF9, G = 0xF3, B = 0xF0 };
+
+    /// <summary>深色主题页面顶部合成色（探针实测 rgb(32,30,37)）。</summary>
+    private static readonly Windows.UI.Color ToneDarkColor = new() { A = 255, R = 0x20, G = 0x1E, B = 0x25 };
+
+    /// <summary>壳主题记忆文件：页面 applyTheme 推送时写入，壳下次启动读回。</summary>
+    private static string ThemeStorePath => Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+        "ApexShell", "last-theme.txt");
+
+    /// <summary>启动恢复：读记忆文件把壳底色对齐上次主题；读不到按浅色起。</summary>
+    private void ApplyStoredShellTheme()
+    {
+        var v = "light";
+        try
+        {
+            if (File.Exists(ThemeStorePath))
+                v = File.ReadAllText(ThemeStorePath).Trim();
+        }
+        catch { /* 读不到按浅色起，不影响启动 */ }
+        SetShellTheme(v == "dark" ? ShellTone.Dark : ShellTone.Light, persist: false);
+    }
+
+    /// <summary>当前壳基调：ApplyStoredShellTheme 在 _chrome 就绪前跑，先记下，构造尾部补设 caption 色。</summary>
+    private ShellTone _shellTone = ShellTone.Light;
+
+    /// <summary>RootGrid / Splash 底色 = 页面顶部合成色；persist=true 时写入记忆文件。
+    ///
+    /// 背景：无边框壳在窗口顶部有 8 物理像素系统保留区（WinAppSDK 对
+    /// SetBorderAndTitleBar(false,false) 窗口的既定行为；WM_NCCALCSIZE 覆写与
+    /// TitleBar.PreferredHeightOption=Collapsed 两路实验均已证伪改不动）。
+    /// 它分两层：客户区内的 XAML 底（RootGrid 兜底）+ 客户区外由 DWM 画的
+    /// 标题栏残留底色（F3F3F3），后者走 WindowChrome.SetCaptionColor 一并跟主题。</summary>
+    private void SetShellTheme(ShellTone tone, bool persist)
+    {
+        _shellTone = tone;
+        var dark = tone == ShellTone.Dark;
+        var c = dark ? ToneDarkColor : ToneLightColor;
+        var brush = new Microsoft.UI.Xaml.Media.SolidColorBrush(c);
+        RootGrid.Background = brush;
+        Splash.Background = brush;
+        _chrome?.SetCaptionColor(c.R, c.G, c.B);   // 构造早期 _chrome 未建，跳过；构造尾部补设
+        if (persist)
+        {
+            try
+            {
+                Directory.CreateDirectory(Path.GetDirectoryName(ThemeStorePath)!);
+                File.WriteAllText(ThemeStorePath, dark ? "dark" : "light");
+            }
+            catch { /* 记不住只影响下次启动首帧，不影响运行 */ }
+        }
+        ShellLog.Log($"shell: 壳底色={tone}{(persist ? "（已记忆）" : "（启动恢复）")}");
+    }
 
     /* 关窗 = 缩到托盘常驻（退出走托盘右键菜单）；Toast 通知留待独立主题。 */
     private Microsoft.UI.Windowing.AppWindow? _appWindow;
@@ -261,18 +327,24 @@ public sealed partial class MainWindow : Window
             var api = await _localApiTask;
             var (bytes, contentType, cacheControl) = await Task.Run(() => BuildIconBody(api, scanId));
             var headers = $"Content-Type: {contentType}\r\nCache-Control: {cacheControl}";
-            // CreateWebResourceResponse 要 IRandomAccessStream；404 也给一个空流，别传 null
-            using var body = new MemoryStream(bytes ?? Array.Empty<byte>());
+            using var body = new MemoryStream(bytes);
+            // 恒 200：BuildIconBody 保证有降级产物，破图占位比 404 更没用。
+            // 只有它内部意外抛错（catch 分支）才落到空响应，那种情况才回 500。
             e.Response = _webEnv.CreateWebResourceResponse(
-                body.AsRandomAccessStream(),
-                bytes is null ? 404 : 200,
-                bytes is null ? "Not Found" : "OK",
-                headers);
-            ShellLog.Log($"local-icon {scanId} -> {(bytes is null ? 404 : 200)}");
+                body.AsRandomAccessStream(), 200, "OK", headers);
+            ShellLog.Log($"local-icon {scanId} -> 200 {contentType} {bytes.Length}B");
         }
         catch (Exception ex)
         {
             ShellLog.Log($"local-icon {scanId} 失败：{ex.Message}");
+            try
+            {
+                var fallback = LetterIconSvg("");
+                e.Response = _webEnv.CreateWebResourceResponse(
+                    new MemoryStream(fallback).AsRandomAccessStream(), 200, "OK",
+                    "Content-Type: image/svg+xml\r\nCache-Control: no-store");
+            }
+            catch { /* 连降级响应都建不出来：留空，WebView2 自己处理 */ }
         }
         finally
         {
@@ -280,21 +352,64 @@ public sealed partial class MainWindow : Window
         }
     }
 
-    /// <summary>返回 (PNG 字节, image/png, 缓存头)；候选失效返回 (null, application/json, no-store)。</summary>
-    private static (byte[]? Bytes, string ContentType, string CacheControl) BuildIconBody(
+    /// <summary>返回 (字节, Content-Type, 缓存头)。
+    /// **永远返回 200 + 一张能看的图**：这条路由是 &lt;img src&gt; 的图源，一旦回 404 / 空图，
+    /// 浏览器只会画出破图占位（图标「无法识别」），用户拿不到任何可判断的信息。
+    /// 三级降级：真图标 → 首字母色块 → 通用方框，逐级都留下 content-type 可辨的产物。
+    /// 注意：候选失效（扫描结果里找不到这个 scan_id）不算「没图」，走首字母块即可 —— 图标坏了
+    /// 不该顺带把应用行渲染成破图。</summary>
+    private static (byte[] Bytes, string ContentType, string CacheControl) BuildIconBody(
         LocalApi api, string scanId)
     {
         var candidate = api.FindScanCandidate(scanId);
-        if (candidate is null)
-            return (null, "application/json", "no-store");
-        var source = candidate.IconSource.Length > 0 ? candidate.IconSource : candidate.LaunchPath;
-        var png = ApplicationScanner.ExtractIconPng(source);
-        if (png is not null)
-            return (png, "image/png", "private, max-age=300");
-        var svg = "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 32 32\"><rect width=\"32\" height=\"32\" rx=\"8\" fill=\"#E8402A\"/>" +
-                  "<path d=\"M10 10h12v12H10z\" fill=\"none\" stroke=\"white\" stroke-width=\"2\"/></svg>";
-        return (System.Text.Encoding.UTF8.GetBytes(svg), "image/svg+xml", "private, max-age=60");
+        // 首选图源：icon_source（UWP 走 shell 路径）→ launch_path（.lnk / .exe）
+        var source = candidate is null
+            ? ""
+            : (candidate.IconSource.Length > 0 ? candidate.IconSource : candidate.LaunchPath);
+        if (source.Length > 0)
+        {
+            foreach (var png in IconSourceFallbacks(source))
+            {
+                var bytes = ApplicationScanner.ExtractIconPng(png);
+                // 抽图失败时 Python 侧曾回退到 shell:AppsFolder，保留同样的第二跳（对 UWP 尤其有用：
+                // shell:AppsFolder\AUMID 与 AUMID 原串在 SHGetFileInfoW 上行为不同）
+                if (bytes is not null)
+                    return (bytes, "image/png", "private, max-age=300");
+            }
+        }
+        // 二级降级：首字母色块（按名称散出一色，至少让不同应用看得出来是不同应用）
+        return (LetterIconSvg(candidate?.Name ?? ""), "image/svg+xml", "private, max-age=60");
     }
+
+    /// <summary>图标图源候选：原串 + 对 UWP 追加 shell:AppsFolder 前缀形式。</summary>
+    private static IEnumerable<string> IconSourceFallbacks(string source)
+    {
+        yield return source;
+        // 形如 OpenAI.Codex_2p2nqsd0c76g0!App 的 AUMID：补 shell:AppsFolder\ 再试一次
+        if (!source.StartsWith("shell:", StringComparison.OrdinalIgnoreCase)
+            && !source.StartsWith(@"\\", StringComparison.Ordinal)
+            && !Path.IsPathRooted(source))
+            yield return @"shell:AppsFolder\" + source;
+    }
+
+    /// <summary>首字母色块 SVG：抽图失败时的兜底，保证 &lt;img&gt; 永远有内容。</summary>
+    private static byte[] LetterIconSvg(string name)
+    {
+        var letter = string.IsNullOrWhiteSpace(name) ? "?" : name.Trim()[..1].ToUpperInvariant();
+        // 简单的名称散列取色，同一应用每次同色
+        var hue = 0;
+        foreach (var ch in name) hue = (hue * 31 + ch) % 360;
+        var bg = $"hsl({hue},52%,58%)";
+        var svg = "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 32 32\">" +
+                  $"<rect width=\"32\" height=\"32\" rx=\"8\" fill=\"{bg}\"/>" +
+                  "<text x=\"16\" y=\"21\" text-anchor=\"middle\" font-family=\"Segoe UI,Microsoft YaHei,sans-serif\" " +
+                  $"font-size=\"16\" font-weight=\"600\" fill=\"#FFFFFF\">{System.Security.SecurityElement.Escape(letter)}</text></svg>";
+        return System.Text.Encoding.UTF8.GetBytes(svg);
+    }
+
+    /// <summary>自测入口：验证降级产物形态（不依赖 LocalApi / 不建窗口）。</summary>
+    internal static (byte[] Bytes, string ContentType, string CacheControl) BuildIconFallbackForTest(
+        string scanId, string name) => (LetterIconSvg(name), "image/svg+xml", "private, max-age=60");
 
     /// <summary>默认尺寸 + 居中到显示器工作区（不含任务栏）。
     /// 与 AppWindow.Resize 同一时机（窗口已建、尚未 Activate），所以首帧就是对的尺寸和位置。
@@ -380,6 +495,12 @@ public sealed partial class MainWindow : Window
                     else if (command == "toggle-maximize")
                     {
                         _chrome.ToggleMaximize();
+                    }
+                    else if (command == "theme")
+                    {
+                        // 页面 applyTheme 唯一收口推送：壳底色跟随，深色下顶部保留区不露白带
+                        var value = root.TryGetProperty("value", out var vv) ? vv.GetString() : null;
+                        SetShellTheme(value == "dark" ? ShellTone.Dark : ShellTone.Light, persist: true);
                     }
                     else
                     {

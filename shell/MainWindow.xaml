@@ -5,7 +5,11 @@
     xmlns:wv2="using:Microsoft.UI.Xaml.Controls"
     Title="APEX 总控台">
 
-    <Grid Background="#FFFFFF">
+    <!-- RootGrid 底色 = 页面 body 顶部的合成色：无边框壳在顶部有 8px 系统保留区（WinAppSDK
+         对 SetBorderAndTitleBar(false,false) 窗口的既定行为，NCCALCSIZE/PreferredHeightOption
+         均不可改，2026-09-26 实验两轮证伪），WebView2 盖不满这里——底色必须跟页面主题一致，
+         否则深色主题下露一条 F3F3F3 白带。初值浅色顶值，启动后由 last-theme.txt / 页面推送校正。 -->
+    <Grid x:Name="RootGrid" Background="#F9F3F0">
 
         <wv2:WebView2 x:Name="Web" />
 
@@ -13,8 +17,9 @@
              不再拿 2 秒纯白空窗去等 WebView2 冷启动。
              在 WinUI 里 WebView2 属于 external content —— 它能被别的 XAML 盖在上面，
              但盖在它下面的东西透不过去（所以这层必须在上、退出时整体淡出，而不是给它做透明）。
-             遮罩自身的文案 / 进度条都由 code-behind 驱动，见 MainWindow.xaml.cs 的「启动遮罩」段。 -->
-        <Grid x:Name="Splash" Background="#FFFFFF" IsHitTestVisible="False">
+             遮罩自身的文案 / 进度条都由 code-behind 驱动，见 MainWindow.xaml.cs 的「启动遮罩」段。
+             背景色初值 = 浅色页面顶值，构造函数读 last-theme.txt 校正（深色用户启动不白闪）。 -->
+        <Grid x:Name="Splash" Background="#F9F3F0" IsHitTestVisible="False">
 
             <StackPanel x:Name="SplashPanel" Opacity="0"
                         HorizontalAlignment="Center" VerticalAlignment="Center">
@@ -33,7 +38,7 @@
                          Width="200" Height="2" Margin="0,0,0,84"
                          HorizontalAlignment="Center" VerticalAlignment="Bottom"
                          Minimum="0" Maximum="100" BorderThickness="0"
-                         Foreground="#E8402A" Background="#EDEFF3" />
+                         Foreground="#E8402A" Background="#22000000" />
         </Grid>
     </Grid>
 </Window>

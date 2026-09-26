@@ -74,6 +74,7 @@ src += `\nglobalThis.__T = { viewHome, viewApps, viewProjects, viewModules, view
   normalizeObsidianState, persistObsidianState, loadObsidianState,
   PREFS_STORE_KEY, DENSITY_STEPS, DENSITY_LABELS, normalizePrefs, persistPrefs, loadPrefs, applyDensity,
   THEME_VALUES, ACCENTS, PREF_KEYS, BOOL_PREF_DEFAULTS, isDensityStep, applyTheme, applyAccent, applyGlass, applyPrefs,
+  toggleTheme,
   TASK_KIND, KIND_SHOW, taskKindOf, allTodos, projTasks, projTodos, projFixes, projNotes, devCounts, devTaskOf,
   noteLinksOf, detachTodoRefs, newNote,
   priOf, moveTaskZone, pruneCurTasks, devTidsOf,
@@ -1919,7 +1920,7 @@ try {
   /* 根目录瘦身护栏：只保留源码、Git 元数据和工具元数据。
      `.git` 与 `.workbuddy` 都是工具自己写的元数据目录，不是产物，一并排除；
      不排除的话 WorkBuddy 一旦在根目录生成 .workbuddy/ 就会让这条断言无端测挂。 */
-  const dirFiles = require('fs').readdirSync(__dirname).filter(name=>name!=='.git' && name!=='.workbuddy').sort();
+  const dirFiles = require('fs').readdirSync(__dirname).filter(name=>name!=='.git' && name!=='.workbuddy' && name!=='.workbuddy-ai').sort();
   const expectedFiles = ['.gitattributes', '.gitignore', 'AGENTS.md', 'README.md', 'app.js', 'backend', 'index.html', 'shell', 'smoke-test.js', 'styles.css'].sort();
   check(JSON.stringify(dirFiles) === JSON.stringify(expectedFiles),
     '根目录只保留源码与 Git 配置（实际：' + dirFiles.join(', ') + '）');
@@ -2133,6 +2134,39 @@ try {
   check(/data-drag/.test(html2) && /closest\('\[data-drag\]'\)/.test(app2)
     && app2.includes("shellChromeCommand('drag')") && app2.includes("shellChromeCommand('toggle-maximize')"),
     '顶栏拖动层 / 侧栏品牌区声明 data-drag：按下即拖窗，双击即最大化');
+  /* 拖动层必须铺满「整条顶栏 + 上方空白」，鼠标压到顶栏以上也要能拖：
+     单条 inset 放不下（左侧 -18px 会被 .main 的 overflow:hidden 裁掉），
+     所以纵向 / 右侧走负 inset、左侧换成 ::before 假墙——两处都丢了就等于退回旧行为。 */
+  const tbDrag = (css2.match(/\.tb-drag\{([^}]*)\}/) || [,''])[1];
+  check(/inset:calc\(-1 \* var\(--tb-drag-out\)\)/.test(css2)
+    && /--tb-drag-out:calc\(var\(--pad\) \+ 8px\)/.test(css2)
+    && /inset:calc\(-1 \* var\(--tb-drag-out\)\)[\s\S]{0,90}?calc\(-1 \* var\(--pad\)\) 0 0/.test(tbDrag),
+    '顶栏拖动层向「上（含 8px 保留区）/ 右 / 下」扩到 .main 内边距之外，顶栏以上照旧可拖');
+  check(/\.tb-drag::before\{[^}]*left:calc\(-1 \* var\(--pad\)\)[^}]*width:var\(--pad\)/.test(css2),
+    '拖动层左侧用 ::before 假墙补齐 --pad（负 inset 向左会被 .main 的 overflow:hidden 裁掉）');
+  /* .app 必须 overflow:clip：拖动层的越界矩形（顶部 8px 保留区、侧栏左右内边距）
+     只有在这里不被裁掉，才轮得到 .main / .brand 自己裁；侧栏顶棚的拖动带是 .brand::before。
+     **两条不可回退的教训**（2026-09-26 连续踩两次，见 §10.19b）：
+     ① 拖动带必须挂在 **带 data-drag 的那个元素**上 —— 伪元素命中时 elementFromPoint 返回宿主元素，
+        宿主不带 data-drag 就永远匹配不到，按下纹丝不动；
+     ② `.brand` 必须 isolation:isolate，把内部 z-index 收在行内，否则 .brand-header 的 z-index:1
+        会跑出去跟 .nav / .user（z-index:auto）按 DOM 顺序比较，整条导航被拖动带盖住、文字全不见。 */
+  check(/\.app\{[^}]*overflow:clip/.test(css2) && /--side-pad:16px/.test(css2)
+    && /--brand-drag-h:/.test(css2) && /--brand-head-h:/.test(css2) && /--brand-drag-up:/.test(css2)
+    && /\.brand::before\{[^}]*left:calc\(-1 \* var\(--side-pad\)\)[^}]*right:calc\(-1 \* var\(--side-pad\)\)/.test(css2)
+    && /\.brand::before\{[^}]*top:calc\(-1 \* var\(--brand-drag-up\)\)[^}]*height:var\(--brand-drag-h\)/.test(css2),
+    '侧栏顶棚拖动带的几何全走令牌：左右吃满 --side-pad、上沿 --brand-drag-up、高度 --brand-drag-h');
+  check(/\.brand\{[^}]*isolation:isolate/.test(css2),
+    '.brand 建独立层叠上下文：品牌行的 z-index 不外溢，侧栏导航不会被拖动带盖住（文字描述必须可见）');
+  check(/class="brand"[^>]*data-drag/.test(html2),
+    'data-drag 落在 .brand 自己身上：::before 拖动带的命中返回宿主元素，宿主不带 data-drag 就永远拖不动');
+  check(html2.includes('class="brand-header"') && /\.brand-header\{[^}]*z-index:1;isolation:isolate/.test(css2),
+    '折叠按钮包在 .brand-header 里：它自带层叠上下文，压得住 .brand::before 拖动带（按钮照常能点）');
+  const app3 = require('fs').readFileSync(path.join(__dirname, 'app.js'), 'utf8');
+  check(/closest\('\[data-drag\]'\)/.test(app3)
+    && !/\.brand>[^,{]*(?<!:not\(\.brand-header\))\{[^}]*z-index:1\}/.test(css2)
+    && !/\.brand\[data-drag\]>\*\{/.test(css2),
+    '拖动判定统一走 closest([data-drag])；不给 .brand 子元素乱上 z-index（那会连带把导航拉进同一场比较）');
   check(app2.includes("type:'chrome-command'") && /function shellChromeCommand\(/.test(app2)
     && /shellChromeCommand\('toggle-maximize'\)/.test(app2)
     && /shellChromeCommand\('hide'\)/.test(app2),
@@ -2142,6 +2176,66 @@ try {
   check(/msg\.type !== 'chrome-state'/.test(app2) && /is-fullscreen/.test(app2)
     && html2.includes('id="trayBtn"') && html2.includes('id="fsBtn"'),
     '壳回推 chrome-state 驱动 body.is-fullscreen，顶栏保留「缩小到托盘 + 全屏」两个窗口控件');
+  /* 窗口组三个控件的悬停解释只讲它自己干什么：置顶 =「窗口置顶」，全屏 =「全屏」。
+     「铺满工作区」这种解释实现细节的措辞一律不再出现在文案里（用户不关心怎么实现的），
+     有它就得连负向断言一起改。 */
+  check(!/铺满工作区/.test(html2) && !/铺满工作区/.test(app2),
+    '窗口控件的悬停解释已去掉「铺满工作区」：全屏就叫全屏，不解释实现方式');
+  check(/id="topmostBtn"[^>]*title="窗口置顶"/.test(html2)
+    && /id="fsBtn"[^>]*title="全屏"/.test(html2)
+    && !/id="topmostBtn"[^>]*title="[^"]*：/.test(html2),
+    '置顶按钮首屏悬停解释就是「窗口置顶」，全屏按钮是「全屏」（不带后缀 / 冒号解释）');
+  check(/取消窗口置顶/.test(app2) && /on \? '退出全屏' : '全屏'/.test(app2),
+    '开关翻转后悬停解释跟着翻转：置顶 ↔ 取消窗口置顶，全屏 ↔ 退出全屏');
+  /* 三个窗口控件共用 .win-btn，动效全部走 :root 的 --win-* 令牌（组件里不许硬写时长 / 位移）。 */
+  check(/--win-ease:/.test(css2) && /--win-dur-fast:/.test(css2) && /--win-dur:/.test(css2)
+    && /--win-lift:/.test(css2) && /--win-pop:/.test(css2) && /--win-press:/.test(css2)
+    && /--win-pin-turn:/.test(css2),
+    '窗口控件的交互动效走 --win-* 令牌（缓动 / 时长 / 抬升 / 放大 / 回弹 / 图钉角度），组件不硬写数值');
+  check((html2.match(/icon-btn win-btn/g) || []).length === 3,
+    '窗口组三个按钮统一挂 .win-btn（置顶 / 缩小到托盘 / 全屏共一套交互语法）');
+  /* 置顶：悬停图钉拧半圈、钉住停在整圈 —— 这一条是「带旋转动效」的落点，不能退化成只换色。 */
+  check(/\.win-btn-pin:hover[^{]*\.win-glyph\{[^}]*rotate\(calc\(var\(--win-pin-turn\) \/ 2\)\)/.test(css2)
+    && /\.win-btn-pin\.on \.win-glyph\{[^}]*rotate\(var\(--win-pin-turn\)\)/.test(css2),
+    '置顶按钮：悬停图钉旋转半圈，已置顶停在整圈（旋转动效不是只换底色）');
+  check(/\.win-ring\{/.test(css2) && /@keyframes winPulse\{/.test(css2)
+    && /\.win-btn-pin\.on \.win-ring\{[^}]*animation:winPulse/.test(css2),
+    '已置顶时按钮带呼吸脉冲圈：状态变化有交代，不只靠描边变色');
+  /* 缩小到托盘：**只有一根居中横杠**（托盘口那条缝），不再有竖箭头 / 折角箭头。
+     动作也只能给它自己：悬停下沉 + 收短，按下再深一点、收得更短 —— 语义就是「缩进去」。 */
+  check(/class="win-tray-bar" d="M4\.6 12h14\.8"/.test(html2)
+    && !/win-tray-chevron/.test(html2) && !/win-tray-chevron/.test(css2)
+    && /\.win-btn-tray:hover \.win-tray-bar\{[^}]*translateY\(1\.6px\)[^}]*scaleX\(\.86\)/.test(css2)
+    && /\.win-btn-tray:active \.win-tray-bar\{[^}]*translateY\(2\.6px\)[^}]*scaleX\(\.72\)/.test(css2),
+    '缩小到托盘：图标就是一根居中横杠（无竖箭头 / 折角），悬停下沉收短、按下更深更短');
+  /* 全屏：悬停 / 全屏态四角向外撑开，进全屏后角标呼吸；on 态由 chrome-state 回推驱动。 */
+  check((html2.match(/class="win-corner win-corner-/g) || []).length === 4
+    && /\.win-btn-full:hover \.win-corner-tl,\.win-btn-full\.on \.win-corner-tl\{[^}]*translate\(-/.test(css2)
+    && /@keyframes winBreathe\{/.test(css2),
+    '全屏按钮四个角标各自向外撑开，全屏态（.on）停在撑开位并呼吸');
+  check(/prefers-reduced-motion:reduce/.test(css2)
+    && /\.win-btn:hover,\.win-btn:active,/.test(css2)
+    && /\.win-btn-tray:hover \.win-tray-bar,\.win-btn-tray:active \.win-tray-bar\{transform:none\}/.test(css2),
+    '窗口控件动效尊重系统「减少动态」偏好：关掉位移与动画（含横杠下沉 / 收短），只留颜色反馈');
+  check(/shellChromeCommand\('hide'\)[\s\S]{0,160}?toast\(/.test(app2),
+    '缩小到托盘的点击给即时反馈：窗口是「消失」不是「缩小」，不能默默无响应');
+  /* 壳顶部有 8px 系统保留区（WebView2 盖不住，壳用 XAML 底色兜底）：applyTheme 必须把
+     归一后的主题推给壳（shellChromeCommand('theme', t)），深色下壳底色才不会留着 F3F3F3 白带。
+     必须走统一出口 + 传对象：壳用 WebMessageAsJson 解析，自己 JSON.stringify 会把消息
+     降成 JSON 字符串、壳侧 type 取不到，命令被静默丢弃（2026-09-26 实测踩到）。 */
+  check(/function applyTheme\(v\)\{[\s\S]*?shellChromeCommand\('theme',\s*t\)[\s\S]*?\}/.test(app2),
+    'applyTheme 经 shellChromeCommand 推送归一后主题给壳，壳底色跟随页面主题');
+  check(/function shellChromeCommand\(command,\s*value\)\{[\s\S]*?msg\.value = value[\s\S]*?\}/.test(app2)
+    && /postMessage\(msg\)/.test(app2),
+    'shellChromeCommand 支持可选 value，且一律传对象（不经 JSON.stringify 自拼消息）');
+  check(!/postMessage\(JSON\.stringify/.test(app2),
+    '页面侧不再自拼 JSON 字符串发壳消息（必须传对象，否则壳解析不到 type）');
+  /* 首帧主题预置脚本已按需求删除：<head> 只留样式表链接，不再预读 localStorage。
+     （删掉后深色用户在启动首帧会按 markup 的浅色初值渲染一次，随即由 app.js 的
+       loadPrefs 翻到深色 —— 这是「只换肤、不做过渡」的取舍，不再做预置对齐。） */
+  const headSeg = html2.slice(0, html2.indexOf('</head>'));
+  check(!headSeg.includes('apex-console.prefs.v1') && !headSeg.includes('dataset.theme'),
+    '<head> 不再内联预置 data-theme（预置脚本已删，只留样式表链接）');
   /* 全局交互基线：禁用文本选择 + 输入控件放行（顺序不能反，否则输入框无法打字） */
   const iNone = css2.indexOf('user-select:none');
   const iText = css2.indexOf('user-select:text !important');
@@ -2708,6 +2802,64 @@ try {
   check(!appPref.includes('tight'),
     '死类名 tight 在 app.js 里零残留（样式侧 0 条规则，markup 侧也必须 0 次）');
 } catch (e) { console.log('FAIL 外观偏好 → ' + e.message); fail++; }
+
+/* 34b. 主题切换：只换肤，不做过渡动效（用户决定撤掉整套切换动画）
+   （历史上试过「全屏渐变交叉淡出」「独立涟漪层」「按钮 ::after 扩张体」「背景板」
+     「快照揭罩 + 呼吸节拍」五版，全部否掉。这里既不实现，也钉成负向断言防回潮。） */
+try {
+  const cssT = fs.readFileSync(path.join(__dirname, 'styles.css'), 'utf8');
+  const htmlT = fs.readFileSync(path.join(__dirname, 'index.html'), 'utf8');
+  const appT = fs.readFileSync(path.join(__dirname, 'app.js'), 'utf8');
+
+  /* ---- 形态仍在：太阳（浅色）/ 月亮（深色）由 data-theme 切换，但走硬切 ---- */
+  check(/class="icon-btn theme-btn"[^>]*id="themeBtn"/.test(htmlT),
+    '主题按钮仍挂 #themeBtn（app.js 的绑定按这个 id 取元素）');
+  check(htmlT.includes('class="theme-rays"') && htmlT.includes('class="theme-moon-fill"'),
+    '主题按钮仍是「日盘 + 光条 + 月盘」这一套图元，不是两张图片替换');
+  check(/\.theme-ico \.theme-rays path\{[\s\S]*?transform:scale\(1\)\}/.test(cssT)
+     && /\[data-theme="dark"\] \.theme-ico \.theme-rays path\{transform:scale\(0\)\}/.test(cssT),
+    '光条：浅色 scale(1) 显示、深色 scale(0) 收起');
+  check(/\.theme-ico \.theme-moon-fill\{[\s\S]*?transform:scale\(0\)\}/.test(cssT)
+     && /\[data-theme="dark"\] \.theme-ico \.theme-moon-fill\{[\s\S]*?rotate\(var\(--theme-moon-turn\)\)/.test(cssT),
+    '月盘：浅色 scale(0) 隐藏、深色撑开并转出月牙开口');
+  check(/--theme-moon-turn:\s*-?\d+deg/.test(cssT),
+    '月牙开口角度有独立令牌 --theme-moon-turn（与太阳光芒方向拉开差别）');
+
+  /* ---- 零过渡：本按钮不许再有任何 transition / animation ---- */
+  check(!/\.theme-ico[^{]*\{[^}]*transition/.test(cssT)
+     && !/\.theme-btn[^{]*\{[^}]*animation/.test(cssT)
+     && !/themeIconBreath/.test(cssT),
+    '主题图元零过渡：没有 transition、没有呼吸 keyframes（形态随主题硬切）');
+
+  /* ---- 整套切换动效的痕迹必须清干净 ---- */
+  check(!/theme-mask/.test(cssT) && !/theme-mask/.test(htmlT),
+    '揭罩层已删净（.theme-mask 在 CSS 与 markup 里都为零）');
+  check(!/themeHoleOpen|theme-hole-r|theme-hole-x|theme-hole-y|--theme-floor/.test(cssT),
+    '揭罩的几何与地板令牌已删净（themeHoleOpen / --theme-hole-* / --theme-floor-*）');
+  check(!/--theme-breath|--theme-reveal|--theme-morph|--theme-rays-scale/.test(cssT),
+    '切换动效的时长 / 曲线令牌已删净（--theme-breath / --theme-reveal / --theme-morph / --theme-rays-scale）');
+  check(!/@property/.test(cssT),
+    '@property 注册块已删净（那些注册只为补间服务，动效撤掉后不该留）');
+  check(!/maskAutoRefresh|armThemeBurst|themeBurstDurations|burstOriginOf|burstRadiusFor|burstSkinFrom/.test(appT),
+    '切换动效的 JS 函数已删净（burstOriginOf / burstRadiusFor / burstSkinFrom / armThemeBurst / themeBurstDurations）');
+  check(!/theme-burst|theme-cascading|theme-breathing/.test(cssT + htmlT + appT),
+    '历代被否的方案零残留（theme-burst-* / theme-cascading / theme-breathing）');
+
+  /* ---- 首帧主题预置脚本也已删除：<head> 只留样式表链接 ---- */
+  check(!/localStorage\.getItem\('apex-console\.prefs\.v1'\)/.test(htmlT),
+    '首帧主题预置内联脚本已删除（head 不再预读 localStorage 猜主题）');
+
+  /* ---- 行为：一次 toggle 必须真的换肤（同步、无动画） ---- */
+  T.applyTheme(T.S.theme);                       /* 先对齐状态与 DOM，不受前面用例污染 */
+  const beforeTheme = T.S.theme;
+  const beforeDom = ctx.document.documentElement.dataset.theme;
+  let threw = false;
+  try { T.toggleTheme(); } catch (_) { threw = true; }
+  check(!threw, 'toggleTheme 在任何环境下都不抛错');
+  check(T.S.theme !== beforeTheme && ctx.document.documentElement.dataset.theme === T.S.theme,
+    'toggleTheme 同步翻转主题：S.theme 与 <html data-theme> 一起变，且同拍到位');
+  ctx.document.documentElement.dataset.theme = beforeDom; T.S.theme = beforeTheme;   /* 复原 */
+} catch (e) { console.log('FAIL 主题切换 → ' + e.message); fail++; }
 
 /* 35. 流程名缺失时的呈现：占位符不许当数据
    （后端 projects 表没有流程名字段，走控制台新建的项目也从未填过 —— 「没有名字」才是常态。

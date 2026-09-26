@@ -50,13 +50,17 @@ function shellToast(message, title){
    无边框壳的拖拽区 = 顶栏搜索框左边缘（= 侧栏宽 + 顶栏左内边距），侧栏折叠或紧凑窗口切
    side-flyout 会让它变——壳量的是旧值就会把搜索框左半截压在拖拽区下面点不动。
    浏览器 / vm 环境无 webview，空操作（同 shellToast）。 */
-/* 壳窗口命令：前端 → 壳的单向指令（拖动窗口 / 缩小到托盘 / 全屏铺满）。
+/* 壳窗口命令：前端 → 壳的单向指令（拖动窗口 / 缩小到托盘 / 全屏铺满 / 主题跟随）。
    不走 API 路由 —— 壳自测会把路由清单和 backend/app/main.py 双向比对，多一条就得连 Python 后端一起改。
-   壳的状态回推走 chrome-state（见下方监听），所以「按钮点出来的最大化」和「双击拖动区」状态一致。 */
-function shellChromeCommand(command){
+   壳的状态回推走 chrome-state（见下方监听），所以「按钮点出来的最大化」和「双击拖动区」状态一致。
+   value 可选：需要带参数的命令（如 theme 带 light/dark）用它，别自己再拼一条 postMessage ——
+   壳用 WebMessageAsJson 解析，传字符串会整条被当成 JSON 字符串，命令静默丢失。 */
+function shellChromeCommand(command, value){
   if (!IN_SHELL) return;
   try {
-    window.chrome.webview.postMessage({ type:'chrome-command', command });
+    const msg = { type:'chrome-command', command };
+    if (value !== undefined) msg.value = value;
+    window.chrome.webview.postMessage(msg);
   } catch (_) {}
 }
 
@@ -149,11 +153,16 @@ const APP_ICONS = {
   office:`<svg viewBox="0 0 36 36" fill="none"><rect width="36" height="36" rx="10" fill="#2B579A"/><path d="M11 9h9l5 5v13a1 1 0 0 1-1 1H12a1 1 0 0 1-1-1V10a1 1 0 0 1 1-1z" fill="#FFFFFF"/><path d="M14 18h8M14 21.5h8M14 14.5h5" stroke="#2B579A" stroke-width="1.8" stroke-linecap="round"/></svg>`,
   add:`<svg viewBox="0 0 36 36" fill="none"><rect x="1.2" y="1.2" width="33.6" height="33.6" rx="10" stroke="#C9CDD5" stroke-width="2.2" stroke-dasharray="5 4.5"/><path d="M18 11.5v13M11.5 18h13" stroke="#8A909C" stroke-width="2.4" stroke-linecap="round"/></svg>`
 };
+/* 本机应用图标：native:{scan_id} 走壳内的 /api/applications/scan/{id}/icon（<img> 直出 PNG）。
+   onerror 兜底：图标请求只要失败（后端断开 / 抽图失败 / 404），换回内置 SVG 兜底图标 ——
+   否则浏览器会画出破图占位，用户看到的是「图标无法识别」而不是一个能接受的替代。 */
 function appIconHTML(icon){
   const value = String(icon || '');
   if (value.startsWith('native:')){
     const scanId = value.slice('native:'.length);
-    return `<img class="native-app-icon" src="/api/applications/scan/${esc(scanId)}/icon" alt="">`;
+    const fb = value.slice('native:'.length).replace(/[^A-Za-z0-9_-]/g, '').slice(-8) || 'add';
+    return `<img class="native-app-icon" src="/api/applications/scan/${esc(scanId)}/icon" alt=""`
+      + ` onerror="this.onerror=null;this.outerHTML=APP_ICONS['${esc(fb)}']||APP_ICONS.add;">`;
   }
   return APP_ICONS[value] || APP_ICONS.add;
 }
@@ -503,7 +512,15 @@ function applyDensity(v){
   S.density = i;
   return i;
 }
-function applyTheme(v){ document.documentElement.dataset.theme = THEME_VALUES.includes(v) ? v : 'light'; }
+function applyTheme(v){
+  const t = THEME_VALUES.includes(v) ? v : 'light';
+  document.documentElement.dataset.theme = t;
+  /* 壳内同步：无边框壳顶部有 8px 系统保留区（WebView2 盖不住，壳用 XAML 底色兜底），
+     壳底色必须跟页面主题走才不会在深色下露白带。
+     必须走 shellChromeCommand 且传对象 —— 壳用 WebMessageAsJson 解析，自己 JSON.stringify
+     会把整条消息变成 JSON 字符串、壳侧 type 取不到，命令被静默丢弃。 */
+  shellChromeCommand('theme', t);
+}
 function applyAccent(v){ document.documentElement.style.setProperty('--brand', ACCENTS.includes(v) ? v : ACCENTS[0]); }
 function applyGlass(on){ document.documentElement.classList.toggle('no-blur', on !== true); }
 function applyPrefs(){ applyTheme(S.theme); applyAccent(S.accent); applyDensity(S.density); applyGlass(S.glass); }
@@ -1980,9 +1997,9 @@ function syncConsoleWindowControl(){
   button.disabled = !available || S.windowUpdating;
   button.classList.toggle('on', topmost);
   button.setAttribute('aria-pressed', topmost ? 'true' : 'false');
-  button.title = !available
-    ? '未检测到 APEX 固定窗口：请从桌面入口打开总控台'
-    : topmost ? '取消窗口置顶' : '窗口置顶：固定窗口在最上层显示';
+  /* 悬停解释统一口径：只讲这个按钮干什么（「窗口置顶 / 取消窗口置顶」）。
+     壳不可用时不改文案 —— 仍由 disabled + 未置顶态表达，原因走 toast（见 updateConsoleWindowTopmost）。 */
+  button.title = topmost ? '取消窗口置顶' : '窗口置顶';
 }
 async function loadConsoleWindowState(){
   try {
@@ -4568,12 +4585,16 @@ function todoMenu(id){
 }
 
 /* ---------------- 行为 ---------------- */
+/* 主题切换：只换肤，不带过渡动效。
+   形态（太阳 / 月亮）由 <html data-theme> 决定，CSS 里硬切 —— 本函数只负责改状态、
+   落偏好、必要时重绘设置页，并在壳内把主题同步给壳（否则深色下顶部会露白带）。 */
 function toggleTheme(){
   S.theme = S.theme==='light' ? 'dark' : 'light';
-  applyTheme(S.theme);            /* 顶栏按钮与设置页共用同一套 applier，避免两处写法分叉 */
+  applyTheme(S.theme);            /* 顶栏按钮与设置页共用同一套 applier，壳内同步也在这里 */
   persistPrefs();
-  toast(S.theme==='light' ? '已切换到浅色主题' : '已切换到深色主题');
+  /* 设置页的「浅色 / 深色」两枚按钮直接读 S.theme 渲染，所以就地重绘一次。 */
   if (S.page==='settings') render(true);
+  toast(S.theme==='light' ? '已切换到浅色主题' : '已切换到深色主题');
 }
 function launch(id){
   const a = S.apps.find(x=>x.id===id); if(!a) return;
@@ -5423,7 +5444,7 @@ $('#drawerMask').addEventListener('click', closeDrawer);
 const topmostBtn = $('#topmostBtn');
 if (topmostBtn) topmostBtn.addEventListener('click', () => { void updateConsoleWindowTopmost(); });
 
-/* ---------- 全屏：无边框壳里「全屏」= 窗口铺满工作区 ----------
+/* ---------- 全屏：无边框壳里「全屏」= 铺满整块屏幕 ----------
    原来的浏览器 Fullscreen API 在 WebView2 里走不通（壳没接 ContainsFullScreenElementChanged），
    现在改成发 chrome-command 让壳走 OverlappedPresenter；壳回推 chrome-state 再切 body.is-fullscreen，
    「按钮点出来的最大化」和「双击拖拽区的最大化」两条路都会同步，状态不漂移。
@@ -5431,8 +5452,14 @@ if (topmostBtn) topmostBtn.addEventListener('click', () => { void updateConsoleW
 const fsBtn = $('#fsBtn');
 if (fsBtn) fsBtn.addEventListener('click', () => shellChromeCommand('toggle-maximize'));
 
-/* 缩小到托盘：进程常驻，托盘左键 / Ctrl+Alt+A 唤起，彻底退出走托盘右键「退出」 */
-if ($('#trayBtn')) $('#trayBtn').addEventListener('click', () => shellChromeCommand('hide'));
+/* 缩小到托盘：进程常驻，托盘左键 / Ctrl+Alt+A 唤起，彻底退出走托盘右键「退出」。
+   点击给一条即时反馈 —— 窗口是「消失」而不是「缩小」，没有提示会让人以为程序崩了；
+   反馈里带上怎么回来，是这类隐藏动作唯一能让用户安心的说法。 */
+const trayBtn = $('#trayBtn');
+if (trayBtn) trayBtn.addEventListener('click', () => {
+  shellChromeCommand('hide');
+  toast('已缩小到托盘，后台常驻：托盘图标左键或 Ctrl+Alt+A 随时唤起');
+});
 
 /* 壳回推窗口状态：同步 body.is-fullscreen 与全屏按钮按下态（浏览器 / vm 无此通道，自动跳过） */
 if (IN_SHELL) window.chrome.webview.addEventListener('message', (e) => {
@@ -5444,7 +5471,8 @@ if (IN_SHELL) window.chrome.webview.addEventListener('message', (e) => {
     const btn = $('#fsBtn');
     if (btn){
       btn.setAttribute('aria-pressed', on ? 'true' : 'false');
-      btn.title = on ? '退出全屏' : '全屏（铺满工作区）';
+      btn.classList.toggle('on', on);          // 全屏态：四角停在「撑开」位并轻微呼吸（见 .win-btn-full.on）
+      btn.title = on ? '退出全屏' : '全屏';
     }
   } catch (_) {}
 });

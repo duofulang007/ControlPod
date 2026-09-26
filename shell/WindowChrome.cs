@@ -46,6 +46,7 @@ internal sealed class WindowChrome
 
     private const int DwmwaWindowCornerPreference = 33;
     private const int DwmwaBorderColor = 34;
+    private const int DwmwaCaptionColor = 35;
     private const int DwmcpRound = 2;
 
     /// <summary>不画边框线（DWMWA_COLOR_NONE）。多弗朗 2026-09-26：品牌红描边不要了，
@@ -215,6 +216,25 @@ internal sealed class WindowChrome
         catch (Exception ex)
         {
             ShellLog.Log("chrome: 设置 DWM 圆角/描边失败 " + ex.Message);
+        }
+    }
+
+    /// <summary>DWM 标题栏底色（DWMWA_CAPTION_COLOR）跟随页面主题。
+    ///
+    /// 顶部 8px 保留区在客户区之外、由 DWM 画成浅色标题栏默认色 F3F3F3（Win11 caption 默认值，
+    /// 2026-09-26 PrintWindow 像素取证 y=1~7=243）：RootGrid 底色是客户区内的，够不着这里，
+    /// 唯有把 caption 色一并换掉才能让深色页面下这 8px 不露白。colorref 按 0x00BBGGRR。</summary>
+    public void SetCaptionColor(byte r, byte g, byte b)
+    {
+        try
+        {
+            var colorref = r | (g << 8) | (b << 16);
+            var hr = DwmSetWindowAttribute(_hwnd, DwmwaCaptionColor, ref colorref, sizeof(int));
+            ShellLog.Log($"chrome: dwm caption 色 hr={hr} rgb({r},{g},{b})");
+        }
+        catch (Exception ex)
+        {
+            ShellLog.Log("chrome: 设置 caption 色失败 " + ex.Message);
         }
     }
 

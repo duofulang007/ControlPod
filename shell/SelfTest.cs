@@ -467,6 +467,19 @@ public static class SelfTest
             }
             Check("坏路径返回 null（不抛错）", ApplicationScanner.ExtractIconPng(@"C:\no\such\file.exe") is null);
             Check("空路径返回 null", ApplicationScanner.ExtractIconPng("") is null);
+
+            // 图标路由必须恒有产物：<img src> 的图源一旦回 404 / 空图，浏览器只画破图占位。
+            // 抽图失败的候选（本机 226 个候选里约三分之一是 UWP，SHGetFileInfoW 取不到）
+            // 必须退到首字母色块，而不是让整行显示成「图标无法识别」。
+            var missing = MainWindow.BuildIconFallbackForTest("scan-does-not-exist", "");
+            Check("候选失效仍返回 200 图源（不落 404）", missing.Bytes.Length > 0, $"{missing.Bytes.Length}B {missing.ContentType}");
+            Check("降级产物是 SVG 且带 200 语义", missing.ContentType == "image/svg+xml");
+            var named = MainWindow.BuildIconFallbackForTest("", "ChatGPT");
+            var svgText = Encoding.UTF8.GetString(named.Bytes);
+            Check("首字母块用名称首字母", svgText.Contains(">C<") || svgText.Contains("C<"), svgText.Length + "B");
+            // 名称里的 XML 元字符必须转义，否则 SVG 解析失败又变回破图
+            var esc = Encoding.UTF8.GetString(MainWindow.BuildIconFallbackForTest("", "<a&b>").Bytes);
+            Check("首字母块转义 XML 元字符", !esc.Contains("<a&b>") && esc.Contains("&lt;"));
         }
         catch (Exception ex)
         {

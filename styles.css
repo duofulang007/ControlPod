@@ -2,6 +2,7 @@
    视觉系统：沿用 APEX 品牌红 + 玻璃白卡 + 柔和渐变底
    结构纪律：圆角分级、4px 间距基准、字重分三档、扁平优先、阴影只用于交互层 */
 
+
 /* ---------- 全局交互基线：禁用默认文本选择（桌面 / Electron 沉浸感） ----------
    拖拽列表、拖动卡片时不再出现蓝色选区。输入类控件必须放行，否则无法打字/复制。 */
 *{
@@ -59,24 +60,65 @@ textarea,
   /* 表单校验错误色：身份卡内联编辑窗口的必填提示 / 出错态描边共用 */
   --err:#D93025;      --err-bg:rgba(217,48,37,.08);   --err-line:rgba(217,48,37,.42);
 
+  /* 圆角分级：只保留 4 档，同层卡片必须同圆角。
+     --r-card  = 大卡 / 页面级容器（总控台 bento、抽屉、弹窗、页头）
+     --r-tile  = 中卡 / 列表内的可点卡片（项目卡、常用应用卡、概览卡）
+     嵌在卡片里的小块（KPI 格、步骤条、终端）用 --r-inner，再小的按钮 / 输入用 --r-sm，
+     相邻层的圆角差 ≈ (外层圆角 - 内边距) 才不会出现「里外弧线打架」的脏边。
+     ⚠️ --r-inner 保留旧值：KPI 格等仍按原尺寸渲染，不参与本次卡片统一。 */
   --r-card:20px;
+  --r-tile:16px;
   --r-inner:14px;
   --r-sm:10px;
   --r-pill:999px;
 
-  --sh:0 8px 24px rgba(74,61,84,.08);
-  --sh-lg:0 18px 44px rgba(74,61,84,.14);
+  /* 卡片投影：**必须由真实模糊半径自回落到 0 结束**，否则多层阴影会在卡片下方
+     拖出一条灰糊糊的尾巴（旧值 0 8px 24px 在 20px 圆角卡上就是这个问题）。
+     两段式：贴着卡片下沿的一小段实影负责「托起来」，一段大范围软影负责「离开背景」。
+     --sh     = 静息态（静物层）
+     --sh-hov = 悬停态（悬起 2px 时投影跟着长一点，符合物理直觉）
+     --sh-lg  = 浮层层（抽屉 / 弹窗 / 气泡） */
+  --sh:0 1px 2px rgba(28,32,44,.05),
+       0 8px 20px -8px rgba(28,32,44,.10);
+  --sh-hov:0 2px 4px rgba(28,32,44,.06),
+           0 16px 30px -12px rgba(28,32,44,.16);
+  --sh-lg:0 24px 56px -16px rgba(28,32,44,.20),
+          0 2px 6px rgba(28,32,44,.05);
   --blur:saturate(150%) blur(18px);
 
   --pg:20px;
   --pg-sm:12px;
+  --side-pad:16px;       /* 侧栏内边距：折叠态与移动浮层用的是同一个值（.app.mini / .side-flyout） */
   --gap:16px;
   --pad:18px;
+  /* 侧栏顶棚的拖动带（.brand::before）几何：h = 整条带子高度，head = 里面留给折叠按钮那一段，
+     up = 带子顶边离 brand 行顶边的距离（= 侧栏 padding-top 8 + brand padding-top）。
+     改这三个值要连着 .sidebar / .brand 的 padding-top 一起复核，否则拖动带会跟按钮错位。 */
+  --brand-drag-h:76px;
+  --brand-head-h:36px;
+  --brand-drag-up:26px;
   --ctl-h:40px;          /* 顶栏控件直径：图标按钮 / 语音 / 窗口置顶共用同一尺寸 */
   --ctl-r:12px;          /* 顶栏控件圆角：圆角方形（与卡片圆角分级同族），原先一律 50% 圆形 */
   --topbar-pin-ico:16px;
   --topbar-search-max:360px;  /* 搜索框宽度上限：腾出右侧空间给窗口组 / 偏好组，顶栏也留出可拖窗的空白 */
   --topbar-div:var(--line);   /* 顶栏组与组之间的细竖线 */
+
+  /* 窗口组（置顶 · 缩小到托盘 · 全屏）的交互动效：手感全部集中在这里，组件规则不硬写时长。
+     --win-ease 是「快出慢收」的丝滑曲线，--win-ease-pop 给需要一点回弹的按下 / 脉冲。 */
+  --win-ease:cubic-bezier(.22,1,.36,1);
+  --win-ease-pop:cubic-bezier(.34,1.56,.64,1);
+  --win-dur-fast:120ms;   /* 悬停 / 按下这类「手在按钮上」的即时反馈 */
+  --win-dur:220ms;        /* 图元动作（旋转 / 下沉 / 角标呼吸）主时长 */
+  --win-lift:1.5px;       /* 悬停抬升高度：只抬一点点，顶栏控件不许「浮起来」 */
+  --win-pop:1.08;         /* 悬停放大倍率 */
+  --win-press:0.92;       /* 按下回弹倍率 */
+  --win-pin-turn:90deg;   /* 图钉钉住时的旋转角度。**只能取奇数个 90°**：180° 会把图钉转成倒立
+                             （钉尖朝上），读起来像「拔出来了」，与「已钉住」正好相反。
+                             90° = 图钉横过来扎住，和静息的竖立态一眼分得开，语义也不拧。 */
+
+  /* 主题按钮的月牙开口角度：与太阳光芒的放射方向拉开差别，一眼读得出是月亮。
+     只表达形态，不参与任何过渡（主题切换无动效）。 */
+  --theme-moon-turn:-90deg;
 
   /* 项目仪表盘：首页仅呈现项目状态、活动和推进，不重复应用入口；所有密度与热力图尺寸集中在这里。 */
   /* 连续缩放：clamp(下限, 随视口宽线性, 上限) —— 断点之间不跳变，压到下限由断点接手 */
@@ -198,8 +240,13 @@ textarea,
   /* 表单校验错误色：深色态提亮，保持与正文同等的可读性 */
   --err:#FF6B5E;      --err-bg:rgba(255,107,94,.12);  --err-line:rgba(255,107,94,.48);
 
-  --sh:0 8px 24px rgba(0,0,0,.34);
-  --sh-lg:0 18px 44px rgba(0,0,0,.5);
+  /* 深色底上投影不靠不透明度吃饭（黑底叠黑投影等于没有），靠大范围软影把卡片「托离」背景 */
+  --sh:0 1px 2px rgba(0,0,0,.30),
+       0 8px 20px -8px rgba(0,0,0,.44);
+  --sh-hov:0 2px 4px rgba(0,0,0,.34),
+           0 16px 30px -12px rgba(0,0,0,.60);
+  --sh-lg:0 24px 56px -16px rgba(0,0,0,.70),
+          0 2px 6px rgba(0,0,0,.32);
 
   /* 拖拽中的卡片阴影：深色态用纯黑加不透明度，避免浅色投影在暗底上发灰 */
   --pjt-sh-drag:0 22px 46px rgba(0,0,0,.62);
@@ -240,7 +287,12 @@ input,select{font:inherit;color:inherit}
 
 /* ---------- 布局骨架 ---------- */
 /* 布局骨架：侧栏固定 240px（1260 标准窗口下主区约 1020px） */
-.app{display:grid;grid-template-columns:var(--side-w) minmax(0,1fr);height:100vh;height:100dvh;transition:grid-template-columns var(--motion-panel) var(--ease-out)}
+/* overflow:clip 不是为了自己滚动 —— 侧栏 / 主区两块各自 overflow:hidden 就够了；
+   它是给「声明的拖动层」清场的：拖动层要铺到窗口最顶那条系统保留区、也要压进侧栏内边距，
+   这些越界矩形只有在这里不被裁掉才轮得到 .main / .brand 自己裁（.side-flyout 的 240px 浮层
+   和 76px 图标条都靠它们）。clip 与 hidden 一样裁，但不建滚动容器，不会多出一条滚动条。 */
+.app{display:grid;grid-template-columns:var(--side-w) minmax(0,1fr);height:100vh;height:100dvh;
+  overflow:clip;transition:grid-template-columns var(--motion-panel) var(--ease-out)}
 .app.mini{grid-template-columns:76px minmax(0,1fr)}
 
 .sidebar{
@@ -249,7 +301,7 @@ input,select{font:inherit;color:inherit}
   -webkit-backdrop-filter:var(--blur);
   border-right:1px solid rgba(255,255,255,.7);
   display:flex;flex-direction:column;gap:10px;
-  padding:16px;overflow:hidden;
+  padding:var(--side-pad);padding-top:8px;overflow:hidden;
 }
 [data-theme="dark"] .sidebar{border-right-color:var(--line)}
 
@@ -262,16 +314,43 @@ input,select{font:inherit;color:inherit}
 .view.no-scroll{overflow:hidden}
 
 /* ---------- 侧边栏 ---------- */
-.brand{display:flex;align-items:center;gap:10px;min-width:0}
+/* padding-top 比左右内边距各多 8px：让 brand 行顶在「主区内容起点」（侧栏 padding-top 8 + 这段 16
+   = 24px；主区侧是 8px 保留区 + .main 的 --pad 20px 取较接近的值）。拖动带（.brand::before）
+   再往上吃掉这段空隙——它不占文档流，所以这段 padding 只负责「把内容推下去」。 */
+.brand{display:flex;align-items:center;gap:10px;min-width:0;position:relative;
+  padding-top:calc(var(--side-pad) + 8px);
+  /* isolation 把 .brand 变成独立层叠上下文：这样下面给子元素（.brand-header）的 z-index:1
+     只在本行内部比较，不会跑出去跟 .nav / .user（z-index:auto）按 DOM 顺序平起平坐。
+     缺了它就是 2026-09-26 那个事故：拖动带盖住整条导航，文字描述全部看不见。 */
+  isolation:isolate}
+/* 侧栏顶棚的拖动带（顶栏那条 [data-drag] 的左边一截，同一个 data-drag 语义）：
+   up 由 --brand-drag-up 给出 = 侧栏 padding-top(8) + brand padding-top(16+8)，
+   正好顶到侧栏最上沿；左右各吃满侧栏内边距。
+   **为什么挂在 .brand 上而不是 [data-drag] 那个子 div 上**：伪元素命中时 elementFromPoint
+   返回的是「宿主元素」，宿主若不带 data-drag，按下就永远匹配不到 → 拖不动（2026-09-26 实测）。
+   所以拖动区必须落在 .brand 自己身上，文字块那层 data-drag 反而可以去掉。 */
+.brand::before{content:"";position:absolute;left:calc(-1 * var(--side-pad));
+  right:calc(-1 * var(--side-pad));top:calc(-1 * var(--brand-drag-up));height:var(--brand-drag-h);
+  z-index:0;cursor:default}
+/* .brand-header 是 brand 行的首个子元素（目前只装折叠按钮）：它自带层叠上下文，
+   内部控件（z-index:1）才压得住 ::before 拖动带。 */
+.brand-header{position:relative;z-index:1;isolation:isolate;height:var(--brand-head-h);display:flex;align-items:center}
+/* 品牌文字块不是控件，不该抢命中：让它跟 ::before 拖动带同层、由 .brand 统一代表拖动语义。
+   不写这条的话它会盖住拖动带左右两侧，文字块那一小块就成了死区。 */
+.brand>div:not(.brand-header){position:relative;z-index:0}
 .brand .name{font-family:Inter,sans-serif;font-size:19px;font-weight:700;letter-spacing:-.2px;line-height:1.1}
 .brand .tag{font-size:10px;color:var(--ink-4);white-space:nowrap}
 /* ---------- 折叠态（.app.mini）：侧栏收成图标条 ----------
    规则集中在这里，避免分散隐藏导致遗漏与错位：
-   1) brand 行只保留折叠按钮本身，其余子元素（logo / 文字 / 以后新增的）自动隐去；
+   1) brand 行只保留折叠按钮本身（.brand-header 里除它以外的子元素、以及品牌文字块）自动隐去；
    2) 导航项只留图标并水平居中；文字与数字徽标一并隐藏；
-   3) 侧栏次级内容（分组小标题 / 用户名）整体隐藏。 */
-.app.mini .brand{gap:0;justify-content:center}
-.app.mini .brand>*:not(.side-mini){display:none}
+   3) 侧栏次级内容（分组小标题 / 用户名）整体隐藏。
+   注意 `.brand::before`（侧栏顶部拖动带）不在隐藏之列 —— 它是伪元素、不是子元素。 */
+.app.mini .brand{gap:0;justify-content:center;padding-top:0}
+.app.mini .brand-header{height:var(--brand-drag-h);flex:0 0 100%}
+.app.mini .brand-header>*:not(.side-mini),
+.app.mini .brand>*:not(.brand-header){display:none}
+.app.mini .brand::before{bottom:0;height:var(--brand-drag-h)}
 .app.mini .side-label,
 .app.mini .nav-item span,
 .app.mini .user>div:last-child{display:none}
@@ -311,12 +390,18 @@ input,select{font:inherit;color:inherit}
 
 /* ---------- 顶栏 ---------- */
 /* min-width:0 让顶栏本身可缩（否则整条 .main 会被子项的最小内容宽顶住）；
-   position:relative 给 .tb-drag 拖动层当定位基准 */
-.topbar{display:flex;align-items:center;gap:12px;flex:0 0 auto;min-width:0;position:relative}
-/* 无边框壳的拖动层：整条顶栏默认可拖（按下 → chrome-command: drag → 壳进入系统拖拽循环，
-   双击 = 最大化 / 还原）。控件一律抬到它上面（z-index:1），所以照常能点。 */
+   position:relative 给拖动层当定位基准；拖动层再往外扩 --tb-drag-out，
+   把 .main 的内边距 + 顶栏以上的空白一起吃掉（见 .tb-drag） */
+.topbar{display:flex;align-items:center;gap:12px;flex:0 0 auto;min-width:0;position:relative;
+  --tb-drag-out:calc(var(--pad) + 8px)}
+/* 无边框壳的拖动层：铺满整条顶栏（含 .main 内边距 + 顶部系统保留区，见 --tb-drag-out 的算式），
+   按下 → chrome-command: drag → 壳进入系统拖拽循环，双击 = 最大化 / 还原。
+   控件一律抬到它上面（z-index:1），所以照常能点；拖动层自己也不能被裁——祖先 .main 是
+   overflow:hidden，所以负 inset 只往「上 / 右 / 下」扩，左侧靠 ::before 假墙把左内边距补上。 */
 .topbar > :not(.tb-drag){position:relative;z-index:1}
-.tb-drag{position:absolute;inset:0;cursor:default;z-index:0}
+.tb-drag{position:absolute;inset:calc(-1 * var(--tb-drag-out)) calc(-1 * var(--pad)) 0 0;
+  cursor:default;z-index:0}
+.tb-drag::before{content:"";position:absolute;top:0;bottom:0;left:calc(-1 * var(--pad));width:var(--pad)}
 .search{
   flex:1;min-width:0;max-width:var(--topbar-search-max);height:44px;border-radius:var(--r-pill);
   background:var(--card);border:1px solid rgba(255,255,255,.9);
@@ -336,6 +421,77 @@ input,select{font:inherit;color:inherit}
    搜索框左侧到窗口组之间因此成了无控件区 —— 壳把顶栏这一段当拖拽区（见 shell/WindowChrome.cs）。 */
 .window-topmost{margin-left:auto;flex:0 0 auto}
 .window-topmost svg{width:var(--topbar-pin-ico);height:var(--topbar-pin-ico)}
+
+/* ---------- 窗口组三个控件的交互与图元动效 ----------
+   设计口径：悬停 = 抬 1.5px + 微放大 + 描边转品牌色（丝滑 220ms），按下 = 回落缩到 .92 立刻回弹，
+   图元各自动作（图钉旋转 / 横杠下沉 / 四角呼吸），全部只动 transform 与 opacity —— 不触发布局，
+   顶栏是 bento 的固定一行，动什么都不许把邻居挤走。 */
+.win-btn{overflow:visible;transition:border-color var(--win-dur-fast) ease,
+  background var(--win-dur-fast) ease,box-shadow var(--win-dur) var(--win-ease),
+  transform var(--win-dur) var(--win-ease)}
+.win-btn:hover{transform:translateY(calc(-1 * var(--win-lift))) scale(var(--win-pop));
+  box-shadow:0 10px 22px -12px var(--brand-line)}
+.win-btn:active{transform:translateY(0) scale(var(--win-press));
+  transition-duration:var(--win-dur-fast);transition-timing-function:var(--win-ease-pop)}
+.win-btn .win-glyph{transform-box:fill-box;transform-origin:center;
+  transition:transform var(--win-dur) var(--win-ease)}
+.win-btn svg{overflow:visible}
+
+/* ① 窗口置顶：悬停时图钉先「拧」半圈，点中之后停在旋转位（钉住 = 扎进顶栏，一眼看清开关态）。
+   钉尖单独往回收一点，旋转时不像一根杆子扫过去。角度、时长都走 --win-* 令牌。 */
+.win-btn-pin .win-pin-needle{transition:transform var(--win-dur) var(--win-ease);transform-origin:12px 14.5px}
+.win-btn-pin:hover .win-glyph,.win-btn-pin:focus-visible .win-glyph{transform:rotate(calc(var(--win-pin-turn) / 2))}
+.win-btn-pin.on .win-glyph{transform:rotate(var(--win-pin-turn))}
+.win-btn-pin.on:hover .win-glyph{transform:rotate(var(--win-pin-turn)) translateY(-1px)}
+.win-btn-pin.on .win-pin-needle{transform:translateY(-1px)}
+/* 钉住的脉冲圈：只在「已置顶」时呼吸，按下瞬间闪一下 —— 状态变化有交代，不是默默变个色 */
+.win-ring{position:absolute;inset:0;border-radius:var(--ctl-r);pointer-events:none;opacity:0;
+  box-shadow:0 0 0 1px var(--brand-line),0 0 0 0 transparent}
+.win-btn-pin.on .win-ring{opacity:1;animation:winPulse 2.8s var(--win-ease) infinite}
+.win-btn-pin:active .win-ring{animation:winFlare var(--win-dur) var(--win-ease)}
+@keyframes winPulse{
+  0%{box-shadow:0 0 0 1px var(--brand-line),0 0 0 0 var(--brand-soft)}
+  60%{box-shadow:0 0 0 1px var(--brand-line),0 0 0 7px transparent}
+  100%{box-shadow:0 0 0 1px var(--brand-line),0 0 0 0 transparent}
+}
+@keyframes winFlare{
+  from{box-shadow:0 0 0 1px var(--brand-line),0 0 0 0 var(--brand-soft);opacity:1}
+  to{box-shadow:0 0 0 1px var(--brand-line),0 0 0 10px transparent;opacity:.6}
+}
+
+/* ② 缩小到托盘：**一根居中的横杠**（就是托盘口那一条缝）。
+   没有别的图元，所以动作只能给它自己：悬停时横杠下沉一格并略微收短（像一道正在合拢的槽），
+   按下再沉一点、同时收得更短 —— 读起来就是「缩进去」。整支下沉比「上浮」顺，
+   因为托盘在下方，「往下收」才是这个动作的语义方向。 */
+.win-btn-tray .win-tray-bar{transition:transform var(--win-dur) var(--win-ease)}
+.win-btn-tray:hover .win-tray-bar{transform:translateY(1.6px) scaleX(.86)}
+.win-btn-tray:active .win-tray-bar{transform:translateY(2.6px) scaleX(.72)}
+
+/* ③ 全屏：悬停时四角向外「撑开」一点点，点中进入全屏后角标停在撑开位、并轻微呼吸。
+   用 translate 而非 scale —— 圆角方按钮里 scale 会把描边一起放大，糊掉 */
+.win-btn-full .win-corner{transition:transform var(--win-dur) var(--win-ease)}
+.win-btn-full:hover .win-corner-tl,.win-btn-full.on .win-corner-tl{transform:translate(-1.2px,-1.2px)}
+.win-btn-full:hover .win-corner-tr,.win-btn-full.on .win-corner-tr{transform:translate(1.2px,-1.2px)}
+.win-btn-full:hover .win-corner-bl,.win-btn-full.on .win-corner-bl{transform:translate(-1.2px,1.2px)}
+.win-btn-full:hover .win-corner-br,.win-btn-full.on .win-corner-br{transform:translate(1.2px,1.2px)}
+.win-btn-full.on .win-glyph{animation:winBreathe 3.2s var(--win-ease) infinite}
+@keyframes winBreathe{
+  0%,100%{opacity:1}
+  50%{opacity:.72}
+}
+
+/* 键盘可达性：焦点环跟悬停同一套反馈，键盘用户也能看到「图元在动」 */
+.win-btn:focus-visible{outline:none;border-color:var(--brand-line);
+  box-shadow:0 0 0 3px var(--brand-soft)}
+
+/* 减少动态偏好：图元动作全部停掉，只保留颜色 / 描边这类非位移反馈 */
+@media (prefers-reduced-motion:reduce){
+  .win-btn,.win-btn .win-glyph,.win-ring,
+  .win-btn-tray .win-tray-bar,.win-btn-full .win-corner{
+    transition:none;animation:none}
+  .win-btn:hover,.win-btn:active,
+  .win-btn-tray:hover .win-tray-bar,.win-btn-tray:active .win-tray-bar{transform:none}
+}
 
 /* 图标组（偏好组：主题 · 通知）：左侧细竖线做组分隔；允许收缩 + 内部换行 ——
    窄窗口下这组固定直径按钮会把 .main 的最小内容宽顶到 400px 以上（内容被裁切）。
@@ -362,7 +518,60 @@ input,select{font:inherit;color:inherit}
 .icon-btn .badge{position:absolute;top:7px;right:7px;width:8px;height:8px;padding:0;border-radius:50%;
   background:var(--brand);box-shadow:0 0 0 2px var(--card-strong)}
 
-/* ---------- 卡片 ---------- */
+/* ---------- 主题切换按钮：太阳 ↔ 月亮（一枚 SVG，按 data-theme 切换形态）----------
+   形态只由 <html data-theme> 决定，切主题不动 DOM —— 浅色态显示太阳（日盘 + 8 根光条），
+   深色态显示月亮（光条收起、月盘撑开把日盘挖成月牙）。
+   本按钮**不带任何过渡**：形态随主题硬切，与整页换肤同一拍到位，不做补间。
+
+   两处硬约束：
+   1) --theme-moon-ink 必须是**不透明**色。这不是美观问题：SVG 的 fill 认 alpha ——
+      底色一旦带透明度（--card 正是 rgba），月盘就成了半透明玻璃，底下的日盘会透出来，
+      日、月同时看见，根本不是月牙。所以浅色写死 #fff（--card 压在 --bg 上的读数），
+      深色取 --card-strong（本身近不透明）。改按钮底色时这两处要跟着改。
+   2) 唯一错过的场景是「初始就是深色 + 静态截图」：此时月亮已是静态形态，没有问题。 */
+.theme-btn{--theme-moon-ink:#fff}
+.theme-ico{width:20px;height:20px;display:block;overflow:visible}
+/* 光条：浅色态在 scale(1)（太阳光芒），深色态收回圆心（scale(0)）。 */
+.theme-ico .theme-rays path{
+  transform-origin:12px 12px;
+  transform:scale(1)}
+/* 月盘：浅色态停在 scale(0)（不显示）。变换是常量，直接写在规则里。 */
+.theme-ico .theme-moon-fill{
+  fill:var(--theme-moon-ink);
+  transform-origin:12px 12px;
+  transform:scale(0)}
+/* 深色态：光条收回圆心、月盘推入 + 转正（月牙开口朝右上）。 */
+[data-theme="dark"] .theme-ico .theme-rays path{transform:scale(0)}
+/* 位移 (4.38, -2.41) 不是随手写的：日盘描边外沿半径 5.1，月盘半径 3.91，
+   两圆心距必须让「月盘盖住日盘右上外沿」但又「盖不到左下外沿」，缺口才真的被挖穿、
+   左下才留得下月牙肚（此参数下肚厚 ≈5.3px）。距再小就挖不穿（退化成甜甜圈），
+   再大月亮就飘出日盘、看着像两个图形。改半径 / 描边宽时这两个数要重新算。 */
+[data-theme="dark"] .theme-ico .theme-moon-fill{
+  transform:scale(.93) translate(4.38px,-2.41px) rotate(var(--theme-moon-turn))}
+/* 悬停：光条向外微张，按钮表达的是「这里可以切换」。 */
+.icon-btn.theme-btn:hover .theme-ico .theme-rays path{transform:scale(1.06)}
+/* 深色悬停时月亮先撤一步（与浅色态悬停的月亮语义一致：都表示「将切换到对面」）。 */
+[data-theme="dark"] .icon-btn.theme-btn:hover .theme-ico .theme-rays path{transform:scale(0)}
+.icon-btn.theme-btn:hover .theme-ico .theme-moon-fill{
+  transform:scale(0) translate(2px,0)}
+[data-theme="dark"] .icon-btn.theme-btn:hover .theme-ico .theme-moon-fill{
+  transform:scale(.93) translate(4.9px,-2.41px) rotate(var(--theme-moon-turn))}
+[data-theme="dark"] .theme-btn{--theme-moon-ink:var(--card-strong)}
+
+/* 主区抬到地板之上：它是网格容器、自身没有背景色（底色在 body 上），
+   真正不透明的只有 .sidebar 与各卡片，且它们都是半透明毛玻璃、采样其下的地板。 */
+#app{position:relative;z-index:1}
+
+/* 前两代的主题切换遮罩（「全屏渐变交叉淡出」「独立涟漪层」）与第三代「色彩级联」
+   都已整条链路废弃（又卡又闪、且级联的 260ms 错峰与用户要的「扫过即定色」相冲），
+   选择器一并删掉 —— 留一个 display:none 的死类只会被孤儿护栏抓出来
+   （styles.css 里不允许存在 app.js / index.html 从不出现的类名）。 */
+
+
+/* ---------- 卡片 ----------
+   静息态卡片**不加位移动效**：总控台是单屏 bento，卡片一浮动就贴不住网格边线。
+   投影用 --sh（真实模糊回落到 0，见令牌注释），保证每张卡片下面是独立的一段软影，
+   不会和邻卡投影连成一片。悬停只给描边 / 底色反馈，交给各卡片自己的规则加 --sh-hov。 */
 .card{
   background:var(--card);
   border:1px solid rgba(255,255,255,.85);
@@ -480,7 +689,9 @@ button:focus-visible,input:focus-visible,.row:focus-visible,.tab:focus-visible{
 .dashboard-overview-foot{display:flex;align-items:center;gap:calc(var(--dash-gap) / 2);flex-wrap:wrap}
 .dashboard-actions{display:flex;align-items:center;gap:calc(var(--dash-gap) / 2);flex-wrap:wrap}
 .dashboard-kpis{display:grid;grid-template-columns:repeat(4,minmax(72px,1fr));gap:calc(var(--dash-gap) / 2);min-height:0}
-.dashboard-kpis>div{display:flex;min-width:0;min-height:0;flex-direction:column;justify-content:center;gap:calc(var(--dash-gap) / 5);padding:calc(var(--dash-gap) / 1.6) calc(var(--dash-gap) / 1.5);border:1px solid var(--line-2);border-radius:var(--r-inner);background:var(--tile-2);overflow:hidden}
+.dashboard-kpis>div{display:flex;min-width:0;min-height:0;flex-direction:column;justify-content:center;gap:calc(var(--dash-gap) / 5);padding:calc(var(--dash-gap) / 1.6) calc(var(--dash-gap) / 1.5);border:1px solid var(--line-2);border-radius:var(--r-inner);background:var(--tile-2);overflow:hidden;
+  box-shadow:0 1px 2px rgba(28,32,44,.035)}
+[data-theme="dark"] .dashboard-kpis>div{box-shadow:0 1px 2px rgba(0,0,0,.22)}
 .dashboard-kpis span,.dashboard-kpis small{font-size:var(--dash-stat-label);color:var(--ink-3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .dashboard-kpis strong{font-size:var(--dash-stat);font-weight:650;line-height:1;color:var(--ink)}
 /* 活跃度热力图：26 列 = 周、7 行 = 周几。
@@ -592,7 +803,7 @@ button:focus-visible,input:focus-visible,.row:focus-visible,.tab:focus-visible{
   margin:-10px 0 2px;padding:10px 14px;
   background:var(--card);border:1px solid var(--line);border-radius:var(--r-card);
   -webkit-backdrop-filter:var(--blur);backdrop-filter:var(--blur);
-  box-shadow:0 10px 24px rgba(74,61,84,.12)}
+  box-shadow:var(--sh)}
 .page-head h1{font-size:24px;font-weight:700;letter-spacing:-.4px;line-height:1.2;margin:0}
 .page-head p{font-size:12.5px;color:var(--ink-3);margin:4px 0 0}
 .page-head .right{margin-left:auto;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
@@ -867,15 +1078,20 @@ svg{display:block}
 }
 .pjt-card{
   position:relative;display:flex;flex-direction:column;min-width:0;
-  border:1px solid rgba(255,255,255,.85);border-radius:var(--r-inner);
+  border:1px solid rgba(255,255,255,.85);border-radius:var(--r-tile);
   background:var(--card);box-shadow:var(--sh);
-  transition:border-color .18s ease,box-shadow .18s ease,background .18s ease,transform .18s ease;
+  transition:border-color var(--motion-panel) var(--ease-out),
+             box-shadow var(--motion-panel) var(--ease-out),
+             background var(--motion-panel) var(--ease-out),
+             transform var(--motion-panel) var(--ease-out);
 }
 [data-theme="dark"] .pjt-card{border-color:var(--line)}
-.pjt-card:hover{box-shadow:var(--sh-lg);border-color:var(--brand-line);background:var(--card-strong);transform:translateY(-2px)}
+/* 悬停：抬起 2px 的同时投影换到 --sh-hov（更长但同样回落到 0），
+   两者同时发生才有「卡片离地」的确定感；只加阴影不位移会显得发虚 */
+.pjt-card:hover{box-shadow:var(--sh-hov);border-color:var(--brand-line);background:var(--card-strong);transform:translateY(-2px)}
 /* 信息区：进入详情的唯一入口；flex:1 保证操作条贴着卡片底部（同行卡片等高时也不留缝） */
 .pjt-main{flex:1;display:flex;flex-direction:column;gap:9px;min-width:0;cursor:pointer;
-  padding:var(--tile-pad) var(--tile-pad) 11px;border-radius:var(--r-inner) var(--r-inner) 0 0}
+  padding:var(--tile-pad) var(--tile-pad) 11px;border-radius:var(--r-tile) var(--r-tile) 0 0}
 .pjt-main:focus-visible{outline:2px solid var(--brand);outline-offset:-2px}
 .pjt-top{display:flex;align-items:flex-start;gap:10px;min-width:0}
 .pjt-ico{width:36px;height:36px;flex:0 0 36px;border-radius:11px;display:grid;place-items:center;overflow:hidden}
@@ -935,7 +1151,7 @@ svg{display:block}
 /* 尾部占位卡：虚线 + 居中加号，和项目卡同栅格同高度 */
 .pjt-new{align-items:center;justify-content:center;gap:7px;min-height:150px;
   border-style:dashed;border-color:var(--line);background:transparent;box-shadow:none;color:var(--ink-3)}
-.pjt-new:hover{border-color:var(--brand-line);background:var(--card);box-shadow:var(--sh);transform:translateY(-2px)}
+.pjt-new:hover{border-color:var(--brand-line);background:var(--card);box-shadow:var(--sh-hov);transform:translateY(-2px)}
 .pjt-new-ico{width:34px;height:34px;border-radius:50%;display:grid;place-items:center;
   background:var(--tile);border:1px dashed var(--line);color:var(--ink-3)}
 .pjt-new-ico>svg{width:16px;height:16px}
@@ -1261,13 +1477,15 @@ svg{display:block}
 /* ---------- 最近打开的应用（紧凑横排：桌面一屏一行，把高度让给下方列表） ---------- */
 .fav-grid{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:10px}
 .fav-card{
-  display:flex;align-items:center;gap:9px;padding:10px 12px;border-radius:var(--r-inner);
+  display:flex;align-items:center;gap:9px;padding:10px 12px;border-radius:var(--r-tile);
   background:var(--card);border:1px solid rgba(255,255,255,.85);box-shadow:var(--sh);text-align:left;
-  transition:transform .22s cubic-bezier(.2,.7,.3,1),box-shadow .22s,border-color .22s;
+  transition:transform var(--motion-panel) var(--ease-out),
+             box-shadow var(--motion-panel) var(--ease-out),
+             border-color var(--motion-panel) var(--ease-out);
 }
 [data-theme="dark"] .fav-card{border-color:var(--line)}
-.fav-card:hover{transform:translateY(-2px);box-shadow:var(--sh-lg);border-color:var(--brand-line)}
-.fav-card:active{transform:translateY(0) scale(.99)}
+.fav-card:hover{transform:translateY(-2px);box-shadow:var(--sh-hov);border-color:var(--brand-line)}
+.fav-card:active{transform:translateY(0) scale(.985)}
 .fav-ico{width:30px;height:30px;flex:0 0 30px}
 .fav-ico>svg{width:100%;height:100%}
 .fav-body{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
@@ -1475,8 +1693,11 @@ svg{display:block}
    规则与 .app.mini 一一对应，但用 .app:not(.mini) 书写 —— 手动折叠时由 .mini 自己的规则接管，两套来源不打架 */
 @media (max-width:1199.98px){
   .app{grid-template-columns:76px minmax(0,1fr)}
-  .app:not(.mini):not(.side-flyout) .brand{gap:0;justify-content:center}
-  .app:not(.mini):not(.side-flyout) .brand>*:not(.side-mini){display:none}
+  .app:not(.mini):not(.side-flyout) .brand{gap:0;justify-content:center;padding-top:0}
+  .app:not(.mini):not(.side-flyout) .brand-header{height:var(--brand-drag-h);flex:0 0 100%}
+  .app:not(.mini):not(.side-flyout) .brand-header>*:not(.side-mini),
+  .app:not(.mini):not(.side-flyout) .brand>*:not(.brand-header){display:none}
+  .app:not(.mini):not(.side-flyout) .brand::before{bottom:0;height:var(--brand-drag-h)}
   .app:not(.mini):not(.side-flyout) .side-label,
   .app:not(.mini):not(.side-flyout) .nav-item span,
   .app:not(.mini):not(.side-flyout) .user>div:last-child{display:none}
