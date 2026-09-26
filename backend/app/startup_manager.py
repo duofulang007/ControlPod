@@ -41,8 +41,9 @@ class WindowsStartupManager:
     def _launcher_command() -> str:
         """开机要执行的命令：直接拉 WinUI 壳。
 
-        壳（shell/ApexShell.exe）启动时会自己打开总控台窗口，并托管 Python 后端
-        （探测 8765，没跑就静默拉起 uvicorn），所以注册表只需指向壳这一个入口。
+        壳（shell/ApexShell.exe）启动时会自己打开总控台窗口；二期移植后壳内 LocalApi
+        已接管全部路由，**不再探测或拉起 Python**（8765 只服务浏览器模式），所以注册表
+        只需指向壳这一个入口。
         壳还没构建（路径不存在，比如刚 clone 没编译）时回退旧的 console_launcher
         方案，保证开机自启动不倒退。要静默起服务请手动跑
         ``console_launcher.py --no-open``，别写回启动项。

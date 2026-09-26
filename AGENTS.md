@@ -233,7 +233,7 @@ powershell -ExecutionPolicy Bypass -File backend/start.ps1   # → http://127.0.
     - **多线程竞态**：「任务收摊」与「finally 落库对其他连接可见」之间有窗口（Python 单线程事件循环没有），等待方见 `RunIsLive=false` 就收手会闪失——收手前重查一拍。
     - 构建输出被运行中的壳锁住（**MSB3027**）：先 `taskkill` 旧壳再构建，新壳需重新启动。
     - **从工具会话启动的进程会被安全软件掐掉 WebView2**：壳一律由人双击 / 自启动拉起，agent 只做构建与无头自测。
-    - 本机无系统级 dotnet，用全路径 `C:\Users\23221\.dotnet\dotnet.exe`。
+    - PATH 上的 `dotnet`（`C:\Program Files\dotnet`）**只装了运行时、没有 SDK**（`dotnet --list-sdks` 为空，`dotnet build` 会报 "No .NET SDKs were found"）。构建壳一律用全路径 `C:\Users\23221\.dotnet\dotnet.exe`（SDK 8.0.425）。
 29. **测试基线必须真实（2026-09-26）**：`pytest backend/tests` 为 **102 通过**。此前 4 项长期失败被写进本文档当「既存失败」，还附一句「修掉之前别把后端全绿当验收前提」——**这等于把可修的 bug 合法化成降低标准**。真相是 `test_apex_launcher.py` 测着 09cd066 重构删掉的旧接口（`backend_compatible` 等，全仓库零调用），已重写为现存 API 的行为测试。**遇到失败先查是不是过时测试，别急着把失败记进文档当常态。**
 
 30. **壳里的模块子进程不能靠「不传 CREATE_NO_WINDOW」来给控制台**：`requires_admin` 分支在 Python 版写 `creationflags=0`，语义是「沿用后端自己那个控制台」；壳是 WinUI GUI 进程、**没有控制台可继承**，于是系统给子进程**新分配**一个控制台窗口，而它的 stdout/stderr 全被重定向进 `process.*.log` → 那个窗口永远空白，用户看到一块悬着的「黑屏」（2026-09-25 实测，项目「APEX 启动」的 `apex-launcher` 每次运行必现）。**壳侧恒为 `CreateNoWindow = true`，不要复刻 `requires_admin` 这条判断**（两套栈在这一处是**有意分歧**，别「对齐」回去）。判定手段：拿 `pythonw.exe` 当无控制台父进程，A/B 各跑一次，子进程自报 `GetConsoleWindow` / `IsWindowVisible` —— `flags=0` 得可见窗口，`CREATE_NO_WINDOW` 得 0。
