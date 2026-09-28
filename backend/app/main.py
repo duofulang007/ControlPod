@@ -1102,7 +1102,7 @@ def create_app(
         return await start_execution(project_id, "stop")
 
     @app.post("/api/projects/{project_id}/restart", status_code=202)
-    async     def restart_project(project_id: str) -> dict:
+    async def restart_project(project_id: str) -> dict:
         return await start_execution(project_id, "restart")
 
     @app.get("/api/projects/{project_id}/runtime")

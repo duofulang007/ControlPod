@@ -29,7 +29,7 @@ public static class SelfTest
     {
         _stages = stages?.ToHashSet(StringComparer.Ordinal) ?? new HashSet<string>(StringComparer.Ordinal);
         _logPath = logPath;
-        if (Stage("base")) { CheckUtcNow(); CheckDbMigrationsOnTemp(); CheckDbSchemaMatchesPythonRealDb(); CheckDbCrudRoundtrip(); }
+        if (Stage("base")) { CheckUtcNow(); CheckDbMigrationsOnTemp(); CheckDbSchemaMatchesPythonRealDb(); CheckDbCrudRoundtrip(); CheckDeadDeclarations(); }
         if (Stage("startup")) { CheckStartupManagerRoundtrip(); CheckStartupManagerReadonlyRealRegistry(); }
         if (Stage("scan")) { CheckScannerIdParity(); CheckScannerFiltering(); CheckStartAppGate(); }
         if (Stage("realscan")) CheckRealScan();
@@ -1931,6 +1931,41 @@ public static class SelfTest
             }
         }
         return "";
+    }
+
+    /// <summary>删过的声明不得回流（2026-09-28 清理）。
+    ///
+    /// 这几个都是「功能早没了、声明还留着」的残骸：DragBarHeight 是 SetTitleBar 那版拖拽区
+    /// 拆掉后剩下的常量（MainWindow.xaml 里已经没有 DragBar），FallbackDragWidth 与
+    /// GetDpiForWindow 从没被任何调用点用过，ModuleRegistry 那个 Root 是没人读的转发属性。
+    /// 留着只会让人以为它们还在生效 —— 顺手加回来时，这里先红。</summary>
+    private static void CheckDeadDeclarations()
+    {
+        foreach (var (file, dead) in new[]
+        {
+            ("WindowChrome.cs", "DragBarHeight"),
+            ("WindowChrome.cs", "FallbackDragWidth"),
+            ("WindowChrome.cs", "GetDpiForWindow"),
+            ("ModuleRegistry.cs", "Root => _root"),
+        })
+        {
+            var path = Path.Combine(ConsoleConfig.ProjectDir, "shell", file);
+            Check($"shell/{file} 不含已删声明（{dead}）",
+                File.Exists(path) && !File.ReadAllText(path).Contains(dead, StringComparison.Ordinal),
+                path);
+        }
+        /* 正面对照：清扫不能过头 —— 同两个文件里真正在用的成员必须还在。 */
+        foreach (var (file, live) in new[]
+        {
+            ("WindowChrome.cs", "SetWindowPos"),
+            ("ModuleRegistry.cs", "ConsoleRoot"),
+        })
+        {
+            var path = Path.Combine(ConsoleConfig.ProjectDir, "shell", file);
+            Check($"shell/{file} 里在用的成员还在（{live}）",
+                File.Exists(path) && File.ReadAllText(path).Contains(live, StringComparison.Ordinal),
+                path);
+        }
     }
 
     /// <summary>Python 下线证据：main.py 定义的路由与 LocalApi.CoveredRoutes 双向完全一致。</summary>

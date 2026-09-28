@@ -31,7 +31,6 @@ import os
 from pathlib import Path
 import socket
 import subprocess
-import sys
 import tempfile
 import time
 import urllib.error
@@ -39,7 +38,6 @@ import urllib.request
 from typing import Any
 
 
-GUI_SCRIPT = Path("tools") / "import_gui.py"      # 降级入口（另开的 Tkinter 窗口）
 SERVE_SCRIPT = Path("tools") / "serve.py"         # 本地桥 + 看板
 DASHBOARD = "index.html"
 # 真正被启动的那个脚本。**它是唯一的启动真相** —— 端口扫描、解释器挑选、

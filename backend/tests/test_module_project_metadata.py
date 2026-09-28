@@ -111,6 +111,11 @@ def test_runner_lab_module_opens_the_dashboard_with_the_tool_rail() -> None:
     # 桥起不来时的报错必须把「手动双击哪个文件」写清楚，别只说「起不来」。
     assert "LAUNCHER_SCRIPT} 手动起" in runner
     assert "selftest" in runner
+    # 已删的降级入口不得回流：--gui 参数去掉之后，runner 里那个只指向 tools/import_gui.py
+    # 的 GUI_SCRIPT 常量（零引用）也一并清掉 —— 留着会让人以为总控台还能开那个 Tkinter 窗口。
+    assert "GUI_SCRIPT" not in runner
+    # 重写后 sys 已无用，留着就是未使用 import。
+    assert "import sys" not in runner
 
 
 def test_action_placeholders_expand_to_an_existing_interpreter() -> None:

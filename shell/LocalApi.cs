@@ -351,10 +351,6 @@ public sealed class LocalApi
 
     /// <summary>
     /// 这个 pid 的进程还在吗（main.py _pid_alive 的 C# 版）。
-    /// 用 Process.GetProcessById 探一下：抛异常就是不存在。查得到就再确认没退出。
-    /// </summary>
-    /// <summary>
-    /// 这个 pid 的进程还在吗（main.py _pid_alive 的 C# 版）。
     /// Process.GetProcessById 拿不到就是不存在；拿得到再读 HasExited。
     /// 对应 Python 侧的 OpenProcess + GetExitCodeProcess —— **两边都不能用
     /// 「发个 0 号信号」那类探测**：进程已死但句柄还被持有时会误报成活。

@@ -31,12 +31,6 @@ namespace ApexShell;
 /// </summary>
 internal sealed class WindowChrome
 {
-    /// <summary>拖拽区高度（逻辑像素）。必须与 MainWindow.xaml 里 DragBar 的 Height 一致。</summary>
-    public const double DragBarHeight = 32;
-
-    /// <summary>量不到页面时的兜底拖拽区宽度（= styles.css 的 --side-w，宽窗口下的侧栏宽度）。</summary>
-    private const int FallbackDragWidth = 240;
-
     private const int GwlStyle = -16;
     private const int WsSysMenu = 0x00080000;
     private const uint SwpNosize = 0x0001;
@@ -455,9 +449,6 @@ internal sealed class WindowChrome
     [DllImport("user32.dll")]
     private static extern bool SetWindowPos(IntPtr hWnd, IntPtr after, int x, int y,
         int cx, int cy, uint flags);
-
-    [DllImport("user32.dll")]
-    private static extern uint GetDpiForWindow(IntPtr hWnd);
 
     [DllImport("user32.dll")]
     private static extern IntPtr MonitorFromWindow(IntPtr hWnd, uint flags);

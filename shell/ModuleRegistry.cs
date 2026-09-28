@@ -46,8 +46,6 @@ public sealed class ModuleRegistry
 
     public ModuleRegistry(string root) => _root = root;
 
-    public string Root => _root;
-
     /// <summary>modules 目录默认 &lt;console&gt;/backend/modules，往上两级即 console 根。
     /// manifest 的 projectRoot 与动作参数都可写 {console_root}，两处必须同一口径。</summary>
     public string ConsoleRoot => Path.GetFullPath(Path.Combine(_root, "..", ".."));
