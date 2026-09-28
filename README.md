@@ -7,7 +7,7 @@
 ## 当前能力
 
 - 项目管理：创建、复制、编辑、删除项目，拖拽调整项目卡顺序，并查看项目运行状态与历史。
-- 执行模块：维护可复用的网站模块与内置 APEX 启动模块，将模块组合到项目中运行。
+- 执行模块：维护可复用的网站模块与内置模块（APEX 启动、跑步数据导入、抖音链接气泡），将模块组合到项目中运行。
 - 开发者活跃度：首页热力图，底色表达控制台在线时长（页面每分钟静默上报一次），悬停显示当日在线分钟与代码新增 / 删减行数；代码行数由本机 git 仓库只读扫描得出，可在每日 / 每周 / 累计三个口径间切换。
 - 跑步数据看板：解析小米运动健康官方导出包，本地生成跑步数据分析看板
   （训练负荷模型、跑姿体检、每日建议）。看板是**独立仓库** `../run-analytics`，
@@ -90,7 +90,7 @@ apex-console/
 │  └─ SelfTest.cs             无头自测（--selftest）
 ├─ backend/
 │  ├─ app/                    FastAPI、数据访问与执行服务
-│  ├─ modules/                内置可执行模块（含 runner-lab 导入模块）
+│  ├─ modules/                内置可执行模块（runner-lab 导入、dou-link 剪贴板链接）
 │  ├─ tests/                  后端测试
 │  ├─ bootstrap.ps1           环境初始化
 │  ├─ start.ps1               浏览器模式服务启动
@@ -102,6 +102,10 @@ apex-console/
 放在本仓库的同级目录（`D:\Projects\run-analytics`），`backend/modules/runner-lab/module.json`
 的 `projectRoot` 用相对路径 `..\run-analytics` 指向它。总控台仓库不跟踪其任何文件。
 （接入层目录沿用历史名 `runner-lab`，与运行历史、模块 id 绑定，**不要改名**。）
+
+`dou-link/`（抖音链接气泡）是另一个同级模块仓库，接入层在 `backend/modules/dou-link/`，
+`module.json` 的 `projectRoot` 用相对路径 `..\dou-link` 指向它，负责调起项目自带的
+`start.ps1` / `stop.ps1` 并核对进程状态。
 
 ## 模块仓库约定
 
