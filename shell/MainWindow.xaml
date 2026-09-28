@@ -8,18 +8,89 @@
     <!-- RootGrid 底色 = 页面 body 顶部的合成色：无边框壳在顶部有 8px 系统保留区（WinAppSDK
          对 SetBorderAndTitleBar(false,false) 窗口的既定行为，NCCALCSIZE/PreferredHeightOption
          均不可改，2026-09-26 实验两轮证伪），WebView2 盖不满这里——底色必须跟页面主题一致，
-         否则深色主题下露一条 F3F3F3 白带。初值浅色顶值，启动后由 last-theme.txt / 页面推送校正。 -->
-    <Grid x:Name="RootGrid" Background="#F9F3F0">
+         否则深色主题下露一条 F3F3F3 白带。初值浅色顶值，启动后由 last-theme.txt / 页面推送校正。
+         看板窗口（url 参数模式）另有底色，见 MainWindow.xaml.cs 的 ApplyDashboardTone。
 
-        <wv2:WebView2 x:Name="Web" />
+         注意：XML 注释里不能出现连续两个短横线，所以下面一律写「url 参数模式」、
+         「bg 色」而不是带短横线的写法——写了 XamlCompiler 只回一个退出码 1，
+         不给任何错误文本（2026-09-28 踩）。 -->
+    <Grid x:Name="RootGrid" Background="#F9F3F0">
+        <Grid.RowDefinitions>
+            <!-- 看板窗口条。总控台模式下这条被折叠，Auto 量到 0，WebView2 照旧铺满整窗。 -->
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+
+        <!-- ============ 看板窗口条（仅 url 参数模式显示） ============
+             多弗朗 2026-09-28：「这个改成运行项目，直接桌面」之后，看板是个无边框窗口，但页面
+             自己没有任何拖动区声明（run-analytics 不是为壳写的），于是窗口拖不动、也关不掉。
+
+             ★ 为什么单独占一行、而不是把拖动层盖在页面顶栏上：实测跑步看板顶栏两端被占满
+               （logo 在 x30 到 64，「1 天前导入」chip 的右缘 = 窗口宽减 30px），中间没有能塞下
+               关闭按钮的空位，盖上去必然压住信息。所以壳自己让出一条 32px 的条，页面整体
+               下移 32px —— 谁也不挡谁，而且对任意 url 页面都成立（不依赖页面有几个元素）。
+
+             ★ 背景色写死看板的 bg 色 #EAF0F2：看板只有浅色主题，跟着它才是一条无缝的顶边。
+               总控台模式这条不显示，所以这里的硬编码不会渗到总控台。 -->
+        <Grid x:Name="DashChrome" Grid.Row="0" Height="32" Visibility="Collapsed"
+              Background="#EAF0F2">
+
+            <!-- 拖动层：铺满整条。Background 必须是非 null 画刷才可命中（Transparent 也算，
+                 清空成 null 就拖不动——这是 WinUI 命中测试的规矩，别"优化"掉）。
+                 关闭按钮是它的兄弟、且排在后面（z 更高），所以点按钮不会落进拖动层。 -->
+            <Border x:Name="DashDragZone" Background="Transparent"
+                    PointerPressed="OnDashDragPressed"
+                    IsDoubleTapEnabled="True"
+                    DoubleTapped="OnDashDragDoubleTapped" />
+
+            <!-- 窗口按钮组：全屏 · 关闭。靠右排成一行，两键之间留 2px 缝。
+                 组本身**不设背景**：null 画刷在 WinUI 里不可命中，于是组内空隙（以及组与
+                 拖动层之间的空白）照样落回下面的拖动层，缝隙处仍然能拖窗。
+                 关闭排在最后 = z 最高，与「最右那颗最优先」的直觉一致。 -->
+            <StackPanel x:Name="DashButtons" Orientation="Horizontal" Spacing="2"
+                        HorizontalAlignment="Right" VerticalAlignment="Center"
+                        Margin="0,0,8,0">
+
+                <!-- 全屏：切「铺满整块屏幕」的全屏态（含盖住任务栏），不是避开任务栏的最大化。
+                     与双击拖动区、以及总控台顶栏那颗 fsBtn 走的是同一个
+                     WindowChrome.ToggleMaximize，所以三条路的状态永远一致、不会漂移。
+                     图标由 code-behind 翻转（E740 四角向外 / E73F 四角向内）。
+
+                     ★ 全屏态下这条 32px 窗口条**保持可见**，是刻意的：无边框窗口没有系统按钮，
+                       一旦连条一起藏掉，用户就只能靠 Esc 回来 —— 而 Esc 会被 WebView2 里的页面
+                       吃掉，壳的 WndProc 收不到，等于把人锁死在全屏里。留条 = 永远有路可退。 -->
+                <Border x:Name="DashFull" Width="30" Height="26" CornerRadius="6"
+                        Background="Transparent"
+                        Tapped="OnDashFullTapped"
+                        PointerEntered="OnDashFullPointerEntered"
+                        PointerExited="OnDashFullPointerExited"
+                        ToolTipService.ToolTip="全屏">
+                    <FontIcon x:Name="DashFullIcon" Glyph="&#xE740;" FontSize="11" Foreground="#52646C" />
+                </Border>
+
+                <!-- 关闭：整窗关掉（不是缩到托盘）。看板窗口是随用随开的次级窗口，
+                     「关闭」就该真的关；缩到托盘会在通知区多留一个图标，用户反而找不到它。 -->
+                <Border x:Name="DashClose" Width="30" Height="26" CornerRadius="6"
+                        Background="Transparent"
+                        Tapped="OnDashCloseTapped"
+                        PointerEntered="OnDashClosePointerEntered"
+                        PointerExited="OnDashClosePointerExited"
+                        ToolTipService.ToolTip="关闭看板窗口">
+                    <FontIcon Glyph="&#xE711;" FontSize="11" Foreground="#52646C" />
+                </Border>
+            </StackPanel>
+        </Grid>
+
+        <wv2:WebView2 x:Name="Web" Grid.Row="1" />
 
         <!-- 启动遮罩：纯 XAML，比 WebView2 先画出来，窗口一出现就有品牌内容，
              不再拿 2 秒纯白空窗去等 WebView2 冷启动。
              在 WinUI 里 WebView2 属于 external content —— 它能被别的 XAML 盖在上面，
              但盖在它下面的东西透不过去（所以这层必须在上、退出时整体淡出，而不是给它做透明）。
              遮罩自身的文案 / 进度条都由 code-behind 驱动，见 MainWindow.xaml.cs 的「启动遮罩」段。
-             背景色初值 = 浅色页面顶值，构造函数读 last-theme.txt 校正（深色用户启动不白闪）。 -->
-        <Grid x:Name="Splash" Background="#F9F3F0" IsHitTestVisible="False">
+             背景色初值 = 浅色页面顶值，构造函数读 last-theme.txt 校正（深色用户启动不白闪）。
+             跨两行：遮罩要把看板窗口条也一起盖住，否则窗口一出现就先亮出一颗关闭按钮。 -->
+        <Grid x:Name="Splash" Grid.Row="0" Grid.RowSpan="2" Background="#F9F3F0" IsHitTestVisible="False">
 
             <StackPanel x:Name="SplashPanel" Opacity="0"
                         HorizontalAlignment="Center" VerticalAlignment="Center">

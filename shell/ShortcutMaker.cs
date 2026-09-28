@@ -35,6 +35,22 @@ public static class ShortcutMaker
         return desktopPath;
     }
 
+    /// <summary>开始菜单里**已存在**的同名快捷方式，一并重指到当前 exe（没有则返回 null）。
+    /// 日常入口往往就是开始菜单这一条：它若还指着旧构建（Debug / 老路径），
+    /// 后面改多少代码都白改。**只更新已存在的，不凭空创建**——免得给开始菜单塞新东西。</summary>
+    public static string? UpdateExistingStartMenuShortcut()
+    {
+        var exe = Environment.ProcessPath;
+        if (string.IsNullOrEmpty(exe)) return null;
+        var programs = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+            "Microsoft", "Windows", "Start Menu", "Programs");
+        var path = Path.Combine(programs, ShortcutName + ".lnk");
+        if (!File.Exists(path)) return null;
+        CreateOne(path, exe);
+        return path;
+    }
+
     private static void CreateOne(string linkPath, string target)
     {
         var shellType = Type.GetTypeFromProgID("WScript.Shell")

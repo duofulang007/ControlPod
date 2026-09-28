@@ -313,8 +313,10 @@ public sealed class LocalApi
         if (_db.FetchOne("SELECT id FROM projects WHERE id=@p0", projectId) is null)
             return Error(404, "项目不存在");
         var latest = _db.FetchOne(
+            // rowid DESC 兜底：同一秒落库的 run 时间戳相同，只靠 finished_at, id
+            // 排序不定（id 是 uuid 字符串，字典序不等于时间序）。与 main.py 对齐。
             "SELECT id FROM runs WHERE project_id=@p0 AND status='succeeded' " +
-            "ORDER BY finished_at DESC, id DESC LIMIT 1", projectId);
+            "ORDER BY finished_at DESC, rowid DESC LIMIT 1", projectId);
         if (latest is null)
             return new Reply(200, Json(new Dictionary<string, object?>
             {
@@ -323,18 +325,50 @@ public sealed class LocalApi
         var run = _runner.GetRun((latest.GetValueOrDefault("id") as string)!) ?? new Dictionary<string, object?>();
         var result = run.GetValueOrDefault("result") as JsonElement?;
         var state = "unknown";
+        int? pid = null;
         // Nullable 属性模式：模式直接作用在解包后的 JsonElement 上，wrapper 绑定即为 JsonElement
         if (result is { ValueKind: JsonValueKind.Object } wrapper
             && wrapper.TryGetProperty("status", out var stEl) && stEl.ValueKind == JsonValueKind.Object
             && stEl.TryGetProperty("state", out var stateEl) && stateEl.ValueKind == JsonValueKind.String
             && stateEl.GetString() is { } s and ("running" or "stopped"))
+        {
             state = s;
+            if (stEl.TryGetProperty("pid", out var pidEl) && pidEl.ValueKind == JsonValueKind.Number
+                && pidEl.TryGetInt32(out var p))
+                pid = p;
+        }
+        // pid 交叉校验：桥被 taskkill /F 强杀时来不及改写状态，result.json 会永远
+        // 留着 running。拿记录下来的 pid 验进程是否还活着，死了就如实回落成 stopped。
+        if (state == "running" && pid is > 0 && !IsProcessAlive(pid.Value))
+            state = "stopped";
         return new Reply(200, Json(new Dictionary<string, object?>
         {
             ["state"] = state,
             ["runId"] = run.GetValueOrDefault("id"),
             ["action"] = run.GetValueOrDefault("action"),
         }));
+    }
+
+    /// <summary>
+    /// 这个 pid 的进程还在吗（main.py _pid_alive 的 C# 版）。
+    /// 用 Process.GetProcessById 探一下：抛异常就是不存在。查得到就再确认没退出。
+    /// </summary>
+    /// <summary>
+    /// 这个 pid 的进程还在吗（main.py _pid_alive 的 C# 版）。
+    /// Process.GetProcessById 拿不到就是不存在；拿得到再读 HasExited。
+    /// 对应 Python 侧的 OpenProcess + GetExitCodeProcess —— **两边都不能用
+    /// 「发个 0 号信号」那类探测**：进程已死但句柄还被持有时会误报成活。
+    /// </summary>
+    private static bool IsProcessAlive(int pid)
+    {
+        if (pid <= 0) return false;
+        try
+        {
+            using var proc = System.Diagnostics.Process.GetProcessById(pid);
+            return !proc.HasExited;
+        }
+        catch (ArgumentException) { return false; }   // 查无此 pid
+        catch (InvalidOperationException) { return false; } // 进程已退出
     }
 
     /// <summary>main.py /api/applications* 路由组。未匹配的 applications 子路径返回 null 走 Python 代理。</summary>

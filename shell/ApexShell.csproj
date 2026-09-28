@@ -24,6 +24,16 @@
     <ImplicitUsings>enable</ImplicitUsings>
   </PropertyGroup>
 
+  <!-- Release 发布（日常入口用它）：预编译成 ReadyToRun，冷启动不再现 JIT 上万个方法；
+       符号一并关掉，省掉启动时的 PDB 查找与磁盘读。Debug 只用于调试，不受影响。
+       实测背景：SelfContained + WinAppSDK 自带 200+ 个 DLL，纯托管冷加载一段就占 ~1.5s，
+       dotnet publish -c Release 能把这段砍掉大半。 -->
+  <PropertyGroup Condition="'$(Configuration)' == 'Release'">
+    <PublishReadyToRun>true</PublishReadyToRun>
+    <DebugType>none</DebugType>
+    <DebugSymbols>false</DebugSymbols>
+  </PropertyGroup>
+
   <ItemGroup>
     <PackageReference Include="Microsoft.WindowsAppSDK" Version="1.6.*" />
     <PackageReference Include="Microsoft.Windows.SDK.BuildTools" Version="10.0.26100.*" />

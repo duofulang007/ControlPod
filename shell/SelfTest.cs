@@ -42,6 +42,7 @@ public static class SelfTest
         if (Stage("projects")) CheckProjectDomainRoutes();
         if (Stage("modules")) CheckModuleDomainRoutes();
         if (Stage("bootstrap")) CheckBootstrapPayload();
+        if (Stage("dashchrome")) CheckDashboardChrome();
         if (Stage("routes")) CheckRouteCoverage();
 
         var verdict = Failed.Count == 0 ? "PASS" : "FAIL";
@@ -787,6 +788,32 @@ public static class SelfTest
             Check("runtime state=running（result.json 的 status.state）",
                 runtime is { Status: 200 }
                 && JsonDocument.Parse(runtime.Text).RootElement.GetProperty("state").GetString() == "running");
+
+            // 场景 B2：pid 交叉校验 —— 桥被强杀时 result.json 会永远留着 running，
+            // 拿记录下来的 pid 验进程，死了就必须回落成 stopped（否则红点长亮）。
+            if (runPayload?["run_dir"].GetString() is { Length: > 0 } liveDir)
+            {
+                var resultPath = Path.Combine(liveDir, "result.json");
+                var saved = File.ReadAllText(resultPath);
+                try
+                {
+                    File.WriteAllText(resultPath,
+                        """{"ok":true,"status":{"state":"running","pid":999999}}""");
+                    var dead = stack.Api.HandleAsync("GET", "/projects/e2e-proj/runtime", null).Result;
+                    Check("pid 已死时 running 回落成 stopped",
+                        dead is { Status: 200 }
+                        && JsonDocument.Parse(dead.Text).RootElement.GetProperty("state").GetString() == "stopped");
+
+                    File.WriteAllText(resultPath,
+                        "{\"ok\":true,\"status\":{\"state\":\"running\",\"pid\":"
+                        + Environment.ProcessId + "}}");
+                    var alive = stack.Api.HandleAsync("GET", "/projects/e2e-proj/runtime", null).Result;
+                    Check("pid 还活着时 running 保持不变",
+                        alive is { Status: 200 }
+                        && JsonDocument.Parse(alive.Text).RootElement.GetProperty("state").GetString() == "running");
+                }
+                finally { File.WriteAllText(resultPath, saved); }
+            }
 
             // 场景 C：执行中再 run → 409；stop 能打断执行中的 run
             var slowStart = stack.Api.HandleAsync("POST", "/projects/e2e-proj/executions",
@@ -1739,6 +1766,171 @@ public static class SelfTest
         {
             Check("bootstrap 套件无异常", false, ex.GetType().Name + ": " + ex.Message);
         }
+    }
+
+    /// <summary>看板窗口条（拖动 + 关闭）的接线守卫（2026-09-28）。
+    ///
+    /// 为什么专门钉这两件事 —— 它们都属于「删一行就坏，而且坏了不报错、只是没反应」：
+    /// ① <b>拖动层的 <c>Background="Transparent"</c> 不能删</b>：WinUI 里 <c>null</c> 画刷的元素
+    ///    是<b>不可命中</b>的，看着"多余的一个透明背景"被清掉之后，窗口就静默拖不动了。
+    /// ② <b>关闭按钮必须先置 <c>_exitFromTray</c> 再 <c>Close()</c></b>：<c>AppWindow.Closing</c>
+    ///    里有一道「点 X 只隐藏到托盘」的拦截，不先放行的话，点 × 的表现为"窗口没关"。
+    /// </summary>
+    private static void CheckDashboardChrome()
+    {
+        try
+        {
+            var xamlPath = Path.Combine(ConsoleConfig.ProjectDir, "shell", "MainWindow.xaml");
+            var csPath = Path.Combine(ConsoleConfig.ProjectDir, "shell", "MainWindow.xaml.cs");
+            if (!File.Exists(xamlPath) || !File.Exists(csPath))
+            {
+                Check("能找到 MainWindow.xaml / MainWindow.xaml.cs", false, xamlPath);
+                return;
+            }
+
+            var xaml = File.ReadAllText(xamlPath);
+            var cs = File.ReadAllText(csPath);
+
+            /* ---- XAML 侧 ---- */
+            var strip = System.Text.RegularExpressions.Regex.Match(
+                xaml, "<Grid x:Name=\"DashChrome\"[\\s\\S]*?>");
+            Check("看板窗口条 DashChrome 存在", strip.Success);
+            Check("窗口条默认折叠（总控台模式不该平白多出 32px 空白）",
+                strip.Success && strip.Value.Contains("Visibility=\"Collapsed\""));
+
+            var zone = System.Text.RegularExpressions.Regex.Match(
+                xaml, "<Border x:Name=\"DashDragZone\"[\\s\\S]*?/>");
+            Check("拖动层 DashDragZone 存在", zone.Success);
+            Check("拖动层背景是 Transparent（null 画刷不可命中，会静默拖不动）",
+                zone.Success && zone.Value.Contains("Background=\"Transparent\""));
+            Check("拖动层接了 PointerPressed → OnDashDragPressed",
+                zone.Success && zone.Value.Contains("PointerPressed=\"OnDashDragPressed\""));
+
+            var close = System.Text.RegularExpressions.Regex.Match(
+                xaml, "<Border x:Name=\"DashClose\"[\\s\\S]*?>");
+            Check("关闭按钮 DashClose 存在", close.Success);
+            Check("关闭按钮接了 Tapped → OnDashCloseTapped",
+                close.Success && close.Value.Contains("Tapped=\"OnDashCloseTapped\""));
+            Check("关闭按钮排在拖动层之后（z 更高，否则点下去只会拖动窗口）",
+                zone.Success && close.Success && close.Index > zone.Index);
+
+            /* ---- 全屏按钮（2026-09-28 「再加一个全屏按钮」） ---- */
+            var full = System.Text.RegularExpressions.Regex.Match(
+                xaml, "<Border x:Name=\"DashFull\"[\\s\\S]*?>");
+            Check("全屏按钮 DashFull 存在", full.Success);
+            Check("全屏按钮接了 Tapped → OnDashFullTapped",
+                full.Success && full.Value.Contains("Tapped=\"OnDashFullTapped\""));
+            Check("全屏按钮背景是 Transparent（同拖动层：null 画刷不可命中，点了会没反应）",
+                full.Success && full.Value.Contains("Background=\"Transparent\""));
+            Check("关闭按钮排在全屏按钮之后（最右一颗是关闭，符合 Windows 惯例）",
+                full.Success && close.Success && close.Index > full.Index);
+
+            /* 按钮组自己不能有背景：有背景就等于在拖动层之上盖了一层不可穿透的板，
+               组内空隙与组左侧那片空白都会变成「点上去没反应」的死区。 */
+            var btnGroup = System.Text.RegularExpressions.Regex.Match(
+                xaml, "<StackPanel x:Name=\"DashButtons\"[\\s\\S]*?>");
+            Check("按钮组 DashButtons 存在", btnGroup.Success);
+            Check("按钮组本身不设背景（否则按钮之间的缝会变成拖不动的死区）",
+                btnGroup.Success && !btnGroup.Value.Contains("Background="));
+
+            /* XML 注释里出现 ASCII 双短横线会让 XamlCompiler 直接失败，而且**只回一个退出码 1、
+               不给任何错误文本**（2026-09-28 给这条窗口条写注释时踩过）。扫一遍所有注释内文，
+               把这个「报错等于没报错」的坑钉死在自检里。 */
+            var commentBad = new List<string>();
+            foreach (System.Text.RegularExpressions.Match m in
+                     System.Text.RegularExpressions.Regex.Matches(xaml, "<!--([\\s\\S]*?)-->"))
+            {
+                if (m.Groups[1].Value.Contains("--")) commentBad.Add(m.Groups[1].Value.Trim());
+            }
+            Check("XAML 注释里没有 ASCII 双短横线（写了 XamlCompiler 只回退出码 1，不给错误文本）",
+                commentBad.Count == 0,
+                string.Join(" | ", commentBad.Select(b => b[..Math.Min(50, b.Length)])));
+
+            /* ---- code-behind 侧 ---- */
+            var drag = MethodBody(cs, "private void OnDashDragPressed(");
+            Check("按下窗口条真的发起拖窗（_chrome.BeginDrag）", drag.Contains("_chrome.BeginDrag()"));
+
+            var dbl = MethodBody(cs, "private void OnDashDragDoubleTapped(");
+            Check("双击窗口条 = 最大化/还原（与总控台拖拽区行为对齐）",
+                dbl.Contains("_chrome.ToggleMaximize()"));
+
+            var fullBody = MethodBody(cs, "private void OnDashFullTapped(");
+            Check("全屏按钮走窗口条同一条路（_chrome.ToggleMaximize，与双击 / fsBtn 三路合一）",
+                fullBody.Contains("_chrome.ToggleMaximize()"));
+
+            var syncIcon = MethodBody(cs, "private void SyncDashFullscreenIcon()");
+            Check("全屏图标按真实窗口状态翻转（不另记一个自己的 bool，避免状态漂移）",
+                syncIcon.Contains("IsFullscreenOrMaximized"));
+            Check("两档字形齐备：E740 进全屏 / E73F 退出全屏",
+                syncIcon.Contains("\\uE740") && syncIcon.Contains("\\uE73F"));
+            Check("窗口状态变化时会同步图标（MaximizedChanged 里调 SyncDashFullscreenIcon）",
+                cs.Contains("PushChromeState(maximized);") && cs.Contains("SyncDashFullscreenIcon();"));
+
+            var closeBody = MethodBody(cs, "private void OnDashCloseTapped(");
+            var exitAt = closeBody.IndexOf("_exitFromTray = true", StringComparison.Ordinal);
+            var closeAt = closeBody.IndexOf("Close()", StringComparison.Ordinal);
+            Check("关闭按钮先放行 Closing 拦截（否则只会缩到托盘，窗口关不掉）",
+                exitAt >= 0 && closeAt > exitAt);
+            Check("关闭按钮摘掉托盘图标（不在通知区留残影）", closeBody.Contains("_tray?.Dispose()"));
+
+            var ctor = MethodBody(cs, "public MainWindow(string? externalUrl)");
+            Check("窗口条只在看板模式启用（总控台拖动仍走页面自己的 data-drag）",
+                ctor.Contains("_externalUrl is not null") && ctor.Contains("EnableDashboardChrome();"));
+
+            var tone = MethodBody(cs, "private void ApplyDashboardTone()");
+            Check("看板窗口底色不写 last-theme.txt（否则开一次看板会冲掉总控台的主题记忆）",
+                tone.Length > 0 && !tone.Contains("File.WriteAllText"));
+
+            /* ---- 藏掉看板页面自带的滚动条（2026-09-28 多弗朗：「这个滑动条删掉。不要显示」） ---- */
+            var noBar = MethodBody(cs, "private const string NoScrollbarScript");
+            Check("只看视觉、不停用滚动：html/body 与内层面板两套都设了",
+                noBar.Contains("html,body{scrollbar-width:none") &&
+                noBar.Contains("body *{scrollbar-width:none"));
+            Check("WebKit 与标准两条路都写了（前者还会让 Chromium 从 Fluent 滚动条切回可自定义那条）",
+                noBar.Contains("::-webkit-scrollbar") && noBar.Contains("display:none!important") &&
+                noBar.Contains("scrollbar-width:none!important"));
+            Check("注入样式带 data-apex 标记（供视口探针自证「生效了没有」）",
+                noBar.Contains("setAttribute('data-apex','no-scrollbar')"));
+
+            /* 位置很关键：**只在看板分支、且在 Navigate 之前**注册。
+               放到总控台分支会平白改掉总控台的观感；放到 Navigate 之后则首个文档已经建好，来不及生效。 */
+            var dashHint = cs.IndexOf("SetSplashHint(\"正在载入看板…\")", StringComparison.Ordinal);
+            var injectAt = cs.IndexOf("AddScriptToExecuteOnDocumentCreatedAsync", StringComparison.Ordinal);
+            var navAt = cs.IndexOf("Web.CoreWebView2.Navigate(_externalUrl)", StringComparison.Ordinal);
+            Check("藏滚动条只在看板分支注册、且在导航之前（否则首个文档来不及生效）",
+                dashHint >= 0 && injectAt > dashHint && navAt > injectAt,
+                $"看板分支={dashHint} 注入={injectAt} 导航={navAt}");
+
+            var probe2 = cs.IndexOf("viewport ", StringComparison.Ordinal);
+            Check("视口探针会报 bar / hid（滚动条宽度与「藏条样式是否落地」，让这件事能被数字证明）",
+                probe2 > 0 && cs.Contains("innerWidth-document.documentElement.clientWidth")
+                && cs.Contains("data-apex=no-scrollbar"));
+        }
+        catch (Exception ex)
+        {
+            Check("看板窗口条套件无异常", false, ex.GetType().Name + ": " + ex.Message);
+        }
+    }
+
+    /// <summary>按签名抓出 C# 方法体（大括号配对）。用来断言某个 handler 里到底写了什么，
+    /// 而不是靠全局 grep —— 全局 grep 命中不了「这段代码在不在这个方法里」。</summary>
+    private static string MethodBody(string source, string signature)
+    {
+        var at = source.IndexOf(signature, StringComparison.Ordinal);
+        if (at < 0) return "";
+        var open = source.IndexOf('{', at + signature.Length - 1);
+        if (open < 0) return "";
+        var depth = 0;
+        for (var i = open; i < source.Length; i++)
+        {
+            if (source[i] == '{') depth++;
+            else if (source[i] == '}')
+            {
+                depth--;
+                if (depth == 0) return source.Substring(open, i - open + 1);
+            }
+        }
+        return "";
     }
 
     /// <summary>Python 下线证据：main.py 定义的路由与 LocalApi.CoveredRoutes 双向完全一致。</summary>

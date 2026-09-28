@@ -38,13 +38,17 @@ public partial class App : Application
             return;
         }
 
-        // 一键生成快捷方式：--shortcuts（桌面一个，指向当前 exe）
+        // 一键生成快捷方式：--shortcuts（桌面一个；开始菜单里若有同名旧 lnk，一并重指过来）
         if (Array.IndexOf(cli, "--shortcuts") >= 0)
         {
             try
             {
                 var desktopLnk = ShortcutMaker.CreateDesktopShortcut();
                 Console.WriteLine($"shortcut created:\n  {desktopLnk}");
+                var startLnk = ShortcutMaker.UpdateExistingStartMenuShortcut();
+                Console.WriteLine(startLnk is null
+                    ? "start menu: 没有同名快捷方式，跳过"
+                    : $"start menu updated:\n  {startLnk}");
                 Environment.Exit(0);
             }
             catch (Exception ex)
@@ -72,12 +76,32 @@ public partial class App : Application
             return;
         }
 
+        // 壳当「看板窗口」用：--url=<地址> 时本进程加载该外部地址而不是总控台。
+        // 用途：run-analytics 的跑步看板要在无边框壳里打开（浏览器小窗口观感差）。
+        // 关键：它用**独立的单实例锁与独立的窗口标题** —— 总控台和看板窗口各自单实例、
+        // 可同时存在，互不唤醒（共用一个锁的话，点看板会把总控台唤到前台，反了）。
+        string? externalUrl = null;
+        var urlIdx = Array.IndexOf(cli, "--url");
+        if (urlIdx >= 0 && urlIdx + 1 < cli.Length) externalUrl = cli[urlIdx + 1];
+        else
+        {
+            foreach (var a in cli)
+                if (a.StartsWith("--url=", StringComparison.OrdinalIgnoreCase))
+                    externalUrl = a["--url=".Length..];
+        }
+
+        var isConsole = string.IsNullOrWhiteSpace(externalUrl);
+        var mutexName = isConsole
+            ? @"Local\ApexShell_SingleInstance"
+            : @"Local\ApexShell_SingleInstance_Dashboard_" + StableHash(externalUrl!);
+        var windowTitle = isConsole ? "APEX 总控台" : "APEX 看板";
+
         // 单实例：已有实例在跑时，二次启动 = 唤起已有窗口，不再开新进程
-        _singleInstance = new Mutex(true, @"Local\ApexShell_SingleInstance", out var isNew);
+        _singleInstance = new Mutex(true, mutexName, out var isNew);
         if (!isNew)
         {
-            var hwnd = TrayHost.Native.FindWindowW(null, "APEX 总控台");
-            ShellLog.Log($"second launch → activate existing hwnd={hwnd}");
+            var hwnd = TrayHost.Native.FindWindowW(null, windowTitle);
+            ShellLog.Log($"second launch ({windowTitle}) → activate existing hwnd={hwnd}");
             if (hwnd != IntPtr.Zero)
             {
                 TrayHost.Native.ShowWindow(hwnd, 9);            // SW_RESTORE
@@ -87,7 +111,19 @@ public partial class App : Application
             return;
         }
 
-        _window = new MainWindow();
+        _window = new MainWindow(externalUrl);
         _window.Activate();
+    }
+
+    /// <summary>把 URL 折成一个稳定的短散列，用作单实例锁名后缀。
+    /// 目标地址变了就是「另一个看板窗口」，互不冲突；同一地址则复用同一个窗口。</summary>
+    private static string StableHash(string s)
+    {
+        unchecked
+        {
+            uint h = 2166136261;
+            foreach (var c in s) h = (h ^ c) * 16777619;
+            return h.ToString("X8");
+        }
     }
 }

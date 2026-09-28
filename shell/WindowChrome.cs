@@ -64,6 +64,16 @@ internal sealed class WindowChrome
     /// <summary>最大化状态变化后通知宿主：壳好把状态回推给页面，同步 body.is-fullscreen。</summary>
     public event Action<bool>? MaximizedChanged;
 
+    /// <summary>窗口几何（位置或尺寸）变化后通知宿主：用于把布局持久化到窗口状态文件。
+    /// 拖动 / 拉边 / 最大化都会走到这里，宿主自己再做防抖。</summary>
+    public event Action? PlacementChanged;
+
+    /// <summary>当前是否为「铺满屏幕」的全屏态或最大化态 —— 宿主保存布局时要跳过，
+    /// 因为这时量到的尺寸是屏幕尺寸，存下来会让下次开窗直接铺满（丢失用户的窗口化大小）。</summary>
+    public bool IsFullscreenOrMaximized =>
+        _fullscreen || (_appWindow.Presenter is OverlappedPresenter p
+            && p.State == OverlappedPresenterState.Maximized);
+
     /// <summary>子类化回调必须由字段持有，否则会被 GC 回收（表现为点几下就崩）。</summary>
     private SubclassProcDelegate? _subclassProc;
 
@@ -88,6 +98,8 @@ internal sealed class WindowChrome
             if (!args.DidSizeChange && !args.DidPositionChange) return;
             EmitMaximized(_fullscreen || (_appWindow.Presenter is OverlappedPresenter p
                 && p.State == OverlappedPresenterState.Maximized));
+            // 几何变化顺带上报，供宿主持久化布局（宿主自己防抖，这里不筛频率）
+            if (args.DidSizeChange || args.DidPositionChange) PlacementChanged?.Invoke();
         };
     }
 
