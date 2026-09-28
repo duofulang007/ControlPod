@@ -97,10 +97,14 @@ src += `\nglobalThis.__T = { viewHome, viewApps, viewProjects, viewModules, view
   replaceBackendApps, updateBackendApp, deleteBackendApp, loadBackendState, removeStep,
   executionLogEntries, executionState, applyExecutionSteps, backendRuntimeState, restoreBackendExecution, applyBackendRun,
   REAL_PROJECT_IDS, BACKEND_PROJECT_IDS, BACKEND_TASK_IDS, BACKEND_NOTE_IDS, BACKEND_APP_IDS,
+  startRuntimePoll, stopRuntimePoll, syncProjectRuntime, RUNTIME_POLL_MS,
   purgeProjRefs, projPurgeCounts, projDeleteModalHTML };
 /* palItems 是 app.js 里的 let 变量、每次 buildPalette 都会整体重写，导出时会快照成空数组，
    所以要用 getter 取实时值（否则「命令面板排序」这类断言永远看到空列表）。 */
-Object.defineProperty(globalThis.__T, 'palItems', { get(){ return palItems; } });\n`;
+Object.defineProperty(globalThis.__T, 'palItems', { get(){ return palItems; } });
+/* runtimeTimer 同理是 let，会被轮询器启停改写；导出时快照成 null 就永远测不到。
+   __runtimeTimerArmed 返回「有没有装着轮询器」—— 0/1，不看具体 handle 值。 */
+Object.defineProperty(globalThis.__T, '__runtimeTimerArmed', { get(){ return runtimeTimer === null ? 0 : 1; } });\n`;
 
 try { vm.runInContext(src, ctx); }
 catch (e){ console.log('LOAD_FAIL: ' + e.message); process.exit(1); }
@@ -317,6 +321,16 @@ try {
   check([T.projectRunControlsHTML(real, true), T.projectRunControlsHTML(real, false)]
     .every(x=>x.includes('运行项目') && !x.includes('关闭项目') && !x.includes('重启项目')),
     '真实项目关闭后：两处都恢复为单一「运行项目」按钮');
+
+  /* 运行态对账：轮询器存在、低频、后台不空转、只变才重绘 */
+  check(typeof T.startRuntimePoll === 'function' && typeof T.stopRuntimePoll === 'function',
+    '提供运行态对账轮询器的启停入口（真实项目状态靠它对账，不只在初始化问一次）');
+  check(typeof T.RUNTIME_POLL_MS === 'number' && T.RUNTIME_POLL_MS >= 3000 && T.RUNTIME_POLL_MS <= 15000,
+    '运行态轮询是低频的（3–15 秒），不拿高频请求去打扰后端');
+  T.startRuntimePoll(); T.startRuntimePoll();
+  check(T.__runtimeTimerArmed === 1, '重复调用只装一个轮询器，不会叠加成多份');
+  T.stopRuntimePoll();
+  check(T.__runtimeTimerArmed === 0, '停掉后轮询器归零，不留悬空定时器');
 
   /* 复制：同级新增、步骤重新发 id、运行数据归零 */
   const before = T.DATA.projects.length;
@@ -1794,9 +1808,13 @@ try {
     && home.includes('<span class="heat-add">+2100</span>')
     && home.includes('<span class="heat-del">-240</span>'),
     '悬停气泡两行：第一行「日期 · 在线16分钟」，第二行「+2100 / -240」（+ 绿 / - 红）');
-  const heatFuture = 6 - heatDow;   /* 末列里今天之后的格子数（今天一定落在最后一列） */
-  check((home.match(/class="heat-cell future"/g) || []).length === heatFuture
-    && home.includes('<span class="heat-cell future" aria-hidden="true"></span>')
+  const heatFuture = 6 - heatDow;   /* 末列里今天之后的格子数（今天一定落在最后一列）；
+                                       今天=周日 ⇒ heatDow=6 ⇒ 0：今天就是末列最后一格，末列里没有未来格 */
+  const futureCells = home.match(/class="heat-cell future"/g) || [];
+  check(futureCells.length === heatFuture
+    && (heatFuture === 0
+      ? !home.includes('heat-cell future')      /* 周日：如实就是没有未来格，别硬找一个出来 */
+      : home.includes('<span class="heat-cell future" aria-hidden="true"></span>'))
     && (home.match(/class="heat-tip"/g) || []).length === 91 - heatFuture,
     '今天之后的格子只作浅灰占位、不可交互、不生成气泡 —— 悬停不可能出现未来日期');
   /* 月份刻度行：与格子共用同一套 13 列模板，所以必定逐格 13 个 span；
@@ -1847,6 +1865,28 @@ try {
   check((home.match(/class="dashboard-kpis"/g) || []).length === 1 && home.includes('dashboard-overview-foot'),
     '当前项目卡纵向流式：指标条独占底部一行，窄窗口下主操作与指标不再被裁剪');
   check(!home.includes('hero-metrics') && !home.includes('CPU '), 'Hero 系统指标行已删除（极简）');
+  /* 活跃度气泡要向上溢出卡盒，而 .home-grid .card{overflow:hidden} 会把它整个裁掉
+     （2026-09-28 实测：最上两行格子的气泡「什么都看不到」）。这条断言把「单独放行这张卡的纵向溢出」钉死：
+     必须用 visible clip（纵向 visible 让气泡出去，横向仍 clip 以免 hidden 被升级成 auto 冒出滚动条），
+     而不是去掉 .home-grid .card 的 overflow:hidden（那会让长文本卡溢出卡盒）。 */
+  const heatCss = fs.readFileSync(path.join(__dirname, 'styles.css'), 'utf8');
+  check(/\.home-grid\s+\.dashboard-heat\s*\{[^}]*overflow\s*:\s*visible\s+clip/.test(heatCss),
+    '活跃度卡单独放行纵向溢出（overflow:visible clip），悬停气泡向上浮出卡盒不被裁；横向仍 clip 不冒滚动条');
+  check(/\.home-grid\s+\.card\s*\{[^}]*overflow\s*:\s*hidden/.test(heatCss),
+    '其余卡仍保持 overflow:hidden（单屏 bento 兜底不许被顺手删掉）');
+  /* 气泡比格子宽，居中摆放会向左右越界被裁。末两列必须右对齐，阈值 = HEAT_CARD_CELLS-14+1。
+     这里把 CSS 里的数字与「13 周窗 = 91 格」这个事实对齐，防止哪天有人改了卡片窗周数却漏改这个选择器
+     （2026-09-28 实测：旧阈值在 91 格窗下永不命中 → 末列气泡只露出一半，用户截图反馈「内容看不到」）。 */
+  check(/\.heat-cell:nth-child\(7n\+1\)\s+\.heat-tip\{[^}]*left\s*:\s*0/.test(heatCss),
+    '气泡边界对齐①：每周首列左对齐，防向左溢出卡盒');
+  const HEAT_CARD_CELLS_IN_CSS = 13 * 7;   /* 与 app.js 的 HEAT_CARD_COLS 必须一致 */
+  const expectRightThreshold = HEAT_CARD_CELLS_IN_CSS - 14 + 1;
+  const rightAlign = heatCss.match(/\.heat-cell:nth-child\(n\+(\d+)\)\s+\.heat-tip\{[^}]*right\s*:\s*0/);
+  check(!!rightAlign && Number(rightAlign[1]) === expectRightThreshold,
+    `气泡边界对齐②：末两列右对齐阈值必须是 n+${expectRightThreshold}（= 卡片窗 ${HEAT_CARD_CELLS_IN_CSS} 格 - 14 + 1），`
+    + `与 app.js 的 HEAT_CARD_COLS 联动；写小了会漏掉末列、写大了永不命中，两种都会让末列气泡被横向裁掉`);
+  /* 反向钉死：过期的阈值不许以「选择器」形式回来（只允许出现在注释说明里） */
+  check(!/nth-child\(n\+169\)/.test(heatCss), '过期的右对齐阈值不许作为选择器复活');
   check(!home.includes('data-act="actFilter"'), '最近活动卡筛选 tabs 已精简');
   check(!home.includes('tile-use'), '仪表盘不展示无关的应用使用次数');
   check(home.includes('项目总览') && (home.match(/dashboard-project-row/g) || []).length >= 1,
@@ -2592,12 +2632,74 @@ try {
     && app31.includes("type:'shell-toast'")
     && (app31.match(/shellToast\(/g) || []).length >= 4,
     '壳通知桥：运行终态（完成/失败/关闭）会经 WebMessage 发系统 Toast，浏览器环境空操作');
+  /* 系统通知必须受设置页「桌面通知」开关门控。
+     2026-09-28 实测 bug：shellToast 只判 IN_SHELL、不看 S.notify，
+     开关关掉后运行终态照弹系统 Toast（用户反馈「关了依然弹通知」）。
+     门控放在 shellToast 内部一处即可覆盖全部调用点 —— 所以这里直接查函数体。 */
+  const shellToastBody = (app31.match(/function shellToast\(message, title\)\{([\s\S]*?)\n\}/) || [])[1] || '';
+  check(/S\s*&&\s*S\.notify|\bS\.notify\b/.test(shellToastBody),
+    '桌面通知开关真的门控系统 Toast：shellToast 必须读 S.notify，关掉后不发 WebMessage');
+  /* 反向防护：门控必须在 postMessage **之前** return，只判 IN_SHELL 等于没门控 */
+  check(/if\s*\(\s*!\(?S\s*&&\s*S\.notify\)?\s*\)\s*return/.test(shellToastBody),
+    '门控是 early-return 形式（在读 S.notify 后直接返回），不是事后判断，确保 WebMessage 真的不发出去');
   check(startup31.includes('ApexShell.exe') && startup31.includes('shell_exe.exists()'),
     '开机自启动注册命令改指 WinUI 壳 exe（壳未构建时回退 console_launcher）');
   check(startPs31.includes('Push-Location $backend') && startPs31.includes('finally') && startPs31.includes('Pop-Location'),
     'Apex Console 启动脚本不依赖调用者当前目录');
   check([startPs31, bootstrapPs31].every(text=>!/[^\x00-\x7F]/.test(text)),
     'Windows PowerShell 5 入口脚本全部保持纯 ASCII，避免无 BOM UTF-8 被错误解码');
+
+  /* 31b. 桥存活上报 + 运行态对账：卡在「运行中/关闭中」的根因修复（2026-09-28）
+     三处根因，缺一处卡片就会永远发光：
+       ① 前端只在初始化问一次运行态（无定时器）→ 补低频轮询；
+       ② result.json 从不写 status.state → runner 的 run/stop 都要写；
+       ③ /runtime 取 run 只按 finished_at, id 排序 → 同秒落库顺序不定 → 加 rowid。 */
+  const runnerLab31 = fs31.readFileSync(path.join(__dirname, 'backend/modules/runner-lab/runner.py'), 'utf8');
+  const localApi31 = fs31.readFileSync(path.join(__dirname, 'shell/LocalApi.cs'), 'utf8');
+  /* serve.py 在另一个仓库（run-analytics），本机是这个路径；找不到就跳过这组断言，
+     不因为一个跨仓库文件缺席把整套 smoke-test 拖崩。用 RUN_ANALYTICS 环境变量可覆盖。 */
+  const servePyPath31 = process.env.RUN_ANALYTICS
+    ? path.join(process.env.RUN_ANALYTICS, 'tools/serve.py')
+    : 'D:/Projects/run-analytics/tools/serve.py';
+  const servePy31 = fs31.existsSync(servePyPath31) ? fs31.readFileSync(servePyPath31, 'utf8') : null;
+  const serveCheck = (ok, label) => check(servePy31 === null || ok, label);
+
+  /* ② runner 写 state：run → running，stop → stopped（后端只认这两个字面值） */
+  check(runnerLab31.includes('"result": {"status": {"state": "stopped"}}'),
+    'runner 的 stop 动作写 result.status.state=stopped —— 关掉之后状态如实回落');
+  check(/"result": \{"status": \{"state": "running", "pid": result\.get\("pid"\)\}\}/.test(runnerLab31),
+    'runner 的 run 动作写 result.status.state=running 并记下桥的 pid（供强杀兜底交叉校验）');
+  /* 反向防护：state 必须落在 result.status 下（后端读 result.status.state），
+     写成扁平键 result["status.state"] 后端读不到，会静默退化成 unknown */
+  check(!/"status\.state"/.test(runnerLab31),
+    'state 写在嵌套的 result.status 下，不是扁平的 "status.state" 键（后者后端读不到）');
+
+  /* ③ /runtime 排序加 rowid 兜底（Python 与 C# 两边都要有） */
+  check(main31.includes('ORDER BY finished_at DESC, rowid DESC LIMIT 1'),
+    'Python /runtime 取最近一条 run 时用 rowid 兜底，同秒落库不再靠 uuid 字典序乱选');
+  check(localApi31.includes('ORDER BY finished_at DESC, rowid DESC LIMIT 1'),
+    'C# LocalApi /runtime 与 Python 同口径（同样 rowid 兜底）');
+  /* 反向防护：老口径（finished_at, id）不能残留，否则同秒竞态又回来了 */
+  check(!/ORDER BY finished_at DESC, id DESC/.test(main31)
+    && !/ORDER BY finished_at DESC, id DESC/.test(localApi31),
+    '旧排序口径（finished_at, id）已清干净，不留一条会让竞态复发的旧 SQL');
+
+  /* pid 交叉校验：桥被 taskkill /F 强杀时把 running 如实回落成 stopped */
+  check(main31.includes('def _pid_alive(') && /if state == "running":[\s\S]{0,300}_pid_alive\(/.test(main31),
+    'Python /runtime 对 running 做 pid 交叉校验：进程没了就回落成 stopped');
+  check(/private static bool IsProcessAlive\(int pid\)/.test(localApi31)
+    && /state == "running" && pid is > 0 && !IsProcessAlive/.test(localApi31),
+    'C# /runtime 同样做 pid 交叉校验（与 Python 逐条复刻）');
+
+  /* ① 桥写存活标记：serve.py 启动落 pid/port，收摊撤掉
+     （serve.py 在 run-analytics 仓库；那个仓库不在本机时这组自动跳过） */
+  serveCheck(!!servePy31 && servePy31.includes('def mark_alive(') && servePy31.includes('def mark_dead(')
+    && servePy31.includes('ALIVE_PID_FILE') && servePy31.includes('ALIVE_PORT_FILE'),
+    'run-analytics 桥启动时写下 pid/port 存活标记，并提供撤销入口');
+  serveCheck(!!servePy31 && /STATE_DIR = Path\(tempfile\.gettempdir\(\)\) \/ "run-analytics"/.test(servePy31),
+    '存活标记目录与总控台 runner-lab 的 STATE_DIR 同口径（同一个 %TEMP%\\run-analytics）');
+  serveCheck(!!servePy31 && servePy31.includes('atexit.register(mark_dead)'),
+    '桥正常退出（含 Ctrl+C）走 atexit 撤标记，不留「进程没了标记还在」的假存活');
 } catch (e) { console.log('FAIL 真实后端模块 → ' + e.message); fail++; }
 
 /* 32. 项目选择页卡片拖拽排序：二维命中 + 长按起拖 + 弹簧让位 + 后端持久化 */

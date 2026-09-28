@@ -148,6 +148,54 @@ def open_windows_application(path: str) -> None:
     os.startfile(path)  # type: ignore[attr-defined]
 
 
+def _pid_alive(pid: int) -> bool:
+    """这个 pid 的进程还在吗？
+
+    只在 `/runtime` 做「桥被强杀」兜底时用：桥被 `taskkill /F` 干掉时来不及把
+    状态改写成 stopped，result.json 会永远留着 running。拿记录下来的 pid 验一下
+    进程是否真的还活着，死了就如实回落。
+
+    ★ 判活必须走 `OpenProcess` + `GetExitCodeProcess`，**不要用 `os.kill(pid, 0)`**。
+      本机实测 `os.kill(pid, 0)` 有两个致命误报：
+        · 进程已退出、但父进程还持着它的句柄时，它照样返回成功 —— 于是「刚被强杀的
+          桥」在父进程存活期间会被一直判成活着，红点灭不掉；
+        · `pid=0` 也被它当成合法目标，返回成功。
+      `OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION)` 拿不到句柄 = 进程不存在；
+      拿到句柄再读退出码，只有 STILL_ACTIVE(259) 才算活着。四项用例（活 / 已死 /
+      不存在的 pid / pid=0）全部判对。非 Windows 平台退回 `os.kill` 语义。
+    """
+    if pid <= 0:
+        return False
+    if os.name != "nt":
+        try:
+            os.kill(pid, 0)
+        except (OSError, ValueError):
+            return False
+        return True
+
+    import ctypes
+    from ctypes import wintypes
+
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel32.OpenProcess.restype = wintypes.HANDLE
+    kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+    kernel32.GetExitCodeProcess.argtypes = [wintypes.HANDLE, ctypes.POINTER(wintypes.DWORD)]
+    kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+
+    STILL_ACTIVE = 259
+    PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+    handle = kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
+    if not handle:
+        return False  # 进程不存在（或没权限问它）——两种情况都当「不在」
+    try:
+        code = wintypes.DWORD()
+        if not kernel32.GetExitCodeProcess(handle, ctypes.byref(code)):
+            return False
+        return code.value == STILL_ACTIVE
+    finally:
+        kernel32.CloseHandle(handle)
+
+
 def create_app(
     *,
     db_path: Path | None = None,
@@ -1054,7 +1102,7 @@ def create_app(
         return await start_execution(project_id, "stop")
 
     @app.post("/api/projects/{project_id}/restart", status_code=202)
-    async def restart_project(project_id: str) -> dict:
+    async     def restart_project(project_id: str) -> dict:
         return await start_execution(project_id, "restart")
 
     @app.get("/api/projects/{project_id}/runtime")
@@ -1062,8 +1110,13 @@ def create_app(
         if db.fetch_one("SELECT id FROM projects WHERE id=?", (project_id,)) is None:
             raise HTTPException(status_code=404, detail="项目不存在")
         latest = db.fetch_one(
+            # ★ 取 run 要按 finished_at DESC 排，但同一秒落库时时间戳相同，
+            #   再按 id DESC 兜底 —— id 是 uuid 字符串，字典序不等于时间序，
+            #   所以这里额外用 rowid 兜底，保证「后写的 run」一定排在前面。
+            #   （老版本只按 finished_at DESC, id DESC，同秒时 run/stop 顺序不定，
+            #     表现是「点了关闭，状态却在 running/stopped 之间跳」。）
             "SELECT id FROM runs WHERE project_id=? AND status='succeeded' "
-            "ORDER BY finished_at DESC, id DESC LIMIT 1",
+            "ORDER BY finished_at DESC, rowid DESC LIMIT 1",
             (project_id,),
         )
         if latest is None:
@@ -1072,6 +1125,13 @@ def create_app(
         result = run.get("result") if isinstance(run.get("result"), dict) else {}
         status = result.get("status") if isinstance(result.get("status"), dict) else {}
         state = status.get("state") if status.get("state") in {"running", "stopped"} else "unknown"
+        # ★ pid 交叉校验：桥可能是被 taskkill /F 强杀的 —— 那种情况它来不及把
+        #   state 改成 stopped，result.json 里会永远留着 running。拿记录下来的
+        #   pid 验一下进程是否还活着，死了就如实回落成 stopped，别让卡片红点长亮。
+        if state == "running":
+            pid = status.get("pid")
+            if isinstance(pid, int) and pid > 0 and not _pid_alive(pid):
+                state = "stopped"
         return {"state": state, "runId": run.get("id"), "action": run.get("action")}
 
     @app.get("/api/runs/{run_id}")

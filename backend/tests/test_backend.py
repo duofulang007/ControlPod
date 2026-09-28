@@ -1,6 +1,10 @@
 from __future__ import annotations
 
 import json
+import os
+import re
+import sqlite3
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -1304,6 +1308,196 @@ def test_runtime_state_survives_console_restart(tmp_path: Path) -> None:
         assert runtime.status_code == 200
         assert runtime.json()["state"] == "running"
         assert runtime.json()["action"] == "run"
+
+
+def _wait_terminal(client: TestClient, run_id: str) -> dict:
+    """等一次执行落地，返回最终 payload。"""
+    deadline = time.monotonic() + 5
+    payload = client.get(f"/api/runs/{run_id}").json()
+    while time.monotonic() < deadline:
+        payload = client.get(f"/api/runs/{run_id}").json()
+        if payload["status"] not in {"queued", "running"}:
+            break
+        time.sleep(0.05)
+    return payload
+
+
+def test_runtime_reports_stopped_after_stop_action(tmp_path: Path) -> None:
+    """点「关闭项目」之后，/runtime 必须如实回落成 stopped。
+
+    2026-09-28 的 bug：卡片点了关闭仍永远显示「运行中/关闭中」。根因之一是
+    runner 的 result.json 从不写 status.state，后端只认 {running, stopped}，
+    其它一律退化成 unknown；再叠加取 run 时的排序竞态，状态就永远不动了。
+    """
+    client = build_client(tmp_path)
+    with client:
+        started = client.post("/api/projects/apex/run").json()
+        assert _wait_terminal(client, started["id"])["status"] == "succeeded"
+        assert client.get("/api/projects/apex/runtime").json()["state"] == "running"
+
+        stopped = client.post("/api/projects/apex/stop").json()
+        assert _wait_terminal(client, stopped["id"])["status"] == "succeeded"
+        runtime = client.get("/api/projects/apex/runtime").json()
+        assert runtime["state"] == "stopped", "关闭之后必须如实回落，不能卡在运行中"
+        assert runtime["action"] == "stop"
+
+
+def test_runtime_picks_latest_run_when_timestamps_tie(tmp_path: Path) -> None:
+    """同一秒落库的 run / stop：取最近一条必须按 rowid，不能按 uuid 字典序。
+
+    老口径 `ORDER BY finished_at DESC, id DESC` 里 id 是 uuid 字符串，
+    字典序不等于时间序 —— 同秒时可能选中更早的 run，表现为「点了关闭，
+    状态却在 running/stopped 之间跳」。
+
+    这里分两层验：
+      ① 行为层：run 完再 stop，把两条 finished_at 掐成一样，/runtime 必须读回 stop；
+      ② 口径层：直接拿真实 schema 造一对「uuid 字典序与发生顺序相反」的记录，
+         验 SQL 真的按 rowid 选（只按行为层测不出差别 —— 恰好 uuid 序碰上就假过）。
+    """
+    client = build_client(tmp_path)
+    with client:
+        started = client.post("/api/projects/apex/run").json()
+        assert _wait_terminal(client, started["id"])["status"] == "succeeded"
+        stopped = client.post("/api/projects/apex/stop").json()
+        assert _wait_terminal(client, stopped["id"])["status"] == "succeeded"
+
+        db = client.app.state.db  # type: ignore[attr-defined]
+        same = "2026-09-28T13:47:53.000000+00:00"
+        for run_id in (started["id"], stopped["id"]):
+            db.execute("UPDATE runs SET finished_at=? WHERE id=?", (same, run_id))
+
+        runtime = client.get("/api/projects/apex/runtime").json()
+        assert runtime["action"] == "stop", "同秒时也必须选中后发生的 stop，而不是 run"
+        assert runtime["state"] == "stopped"
+
+    # ② 口径层：**从产品源码里抽出那条 SQL**（不是自己另写一条 —— 自己写的
+    #    永远会通过，测不到产品代码），再用真实 schema 造一对「uuid 字典序与
+    #    发生顺序相反」的记录，看它真的选对。
+    main_src = (BACKEND_DIR / "app" / "main.py").read_text(encoding="utf-8")
+    picked = re.findall(
+        r"SELECT id FROM runs WHERE project_id=\? AND status='succeeded'\s*\"?\s*"
+        r"\"ORDER BY ([^\"']+)",
+        main_src,
+    )
+    assert picked, "main.py 里应当能找到取最近 run 的那条 SQL"
+    # ⚠️ 抽出来的是**整条 `ORDER BY … LIMIT 1`**（产品源码把 LIMIT 写在同一行），
+    #    必须把尾巴上的 `LIMIT n` 剥掉再拿去拼查询，否则拼出
+    #    `… rowid DESC LIMIT 1 LIMIT 1` → `near "LIMIT": syntax error`。
+    #    （2026-09-28 修：这个测试从写下来起就是坏的，只是之前一直没被跑到。）
+    order_by = re.sub(r"\s+LIMIT\s+\d+\s*$", "", picked[0], flags=re.IGNORECASE).strip()
+    assert "rowid" in order_by, f"取最近 run 必须按 rowid 兜底，实际是：{order_by}"
+    assert "LIMIT" not in order_by.upper(), f"order_by 不该再带 LIMIT，实际是：{order_by}"
+
+    db_path = tmp_path / "data" / "test.db"
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.execute("DELETE FROM runs WHERE id IN ('zzz-tie','aaa-tie')")
+        insert = (
+            "INSERT INTO runs(id,project_id,module_id,action,status,started_at,"
+            "finished_at,exit_code,error,run_dir) VALUES(?,?,?,?,?,?,?,?,?,?)"
+        )
+        tie = "2026-09-28T23:59:59.000000+00:00"
+        conn.execute(insert, ("zzz-tie", "apex", "fake-module", "run", "succeeded",
+                              tie, tie, 0, None, str(tmp_path / "tie-run")))
+        conn.execute(insert, ("aaa-tie", "apex", "fake-module", "stop", "succeeded",
+                              tie, tie, 0, None, str(tmp_path / "tie-stop")))
+        conn.commit()
+        # 用**产品源码里的 order by** 组装查询，验它真的选对
+        new_sql = ("SELECT id FROM runs WHERE project_id=? AND status='succeeded' "
+                   f"ORDER BY {order_by}")
+        assert conn.execute(new_sql, ("apex",)).fetchone()[0] == "aaa-tie", \
+            "产品 SQL 在字典序反向时必须选中后插入的 stop"
+        # 对照：老口径确实会错选，证明这个夹具真的能区分两种口径
+        old_sql = ("SELECT id FROM runs WHERE project_id=? AND status='succeeded' "
+                   "ORDER BY finished_at DESC, id DESC LIMIT 1")
+        assert conn.execute(old_sql, ("apex",)).fetchone()[0] == "zzz-tie", \
+            "（对照）旧口径在字典序反向时会错选 run —— 夹具有效"
+    finally:
+        conn.execute("DELETE FROM runs WHERE id IN ('zzz-tie','aaa-tie')")
+        conn.commit()
+        conn.close()
+
+
+def test_runtime_falls_back_to_stopped_when_pid_is_gone(tmp_path: Path) -> None:
+    """桥被 taskkill /F 强杀时来不及改写状态，靠 pid 交叉校验兜底回落。
+
+    构造一条 state=running 但 pid 指向不存在进程的 result.json：
+    /runtime 必须读成 stopped，不能让卡片红点长亮。
+    """
+    client = build_client(tmp_path)
+    with client:
+        started = client.post("/api/projects/apex/run").json()
+        assert _wait_terminal(client, started["id"])["status"] == "succeeded"
+
+        run_dir = Path(_wait_terminal(client, started["id"])["run_dir"])
+        assert (run_dir / "result.json").is_file(), "假模块应当已经写下 result.json"
+        (run_dir / "result.json").write_text(
+            json.dumps({"ok": True, "status": {"state": "running", "pid": 999999}}),
+            encoding="utf-8",
+        )
+        runtime = client.get("/api/projects/apex/runtime").json()
+        assert runtime["state"] == "stopped", "pid 已死时 running 必须回落成 stopped"
+
+        # 反例：pid 指向一个真实活着（就是本进程）的进程时，running 要保留
+        (run_dir / "result.json").write_text(
+            json.dumps({"ok": True, "status": {"state": "running", "pid": os.getpid()}}),
+            encoding="utf-8",
+        )
+        assert client.get("/api/projects/apex/runtime").json()["state"] == "running"
+
+
+def test_pid_alive_tells_dead_from_alive(tmp_path: Path) -> None:
+    """`_pid_alive` 必须靠 OpenProcess 判活，不能用 os.kill(pid, 0)。
+
+    2026-09-28 实测：`os.kill(pid, 0)` 在 Windows 上有两个误报 ——
+      · 进程已退出、父进程还持着句柄时它照样返回成功（「刚被强杀的桥」被判成活）；
+      · pid=0 也被它当成合法目标。
+    这两个误报会让红点永远灭不掉，所以这里逐个钉住。
+    """
+    import ctypes
+    from ctypes import wintypes
+
+    from app.main import _pid_alive
+
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel32.OpenProcess.restype = wintypes.HANDLE
+    kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+    kernel32.GetExitCodeProcess.argtypes = [wintypes.HANDLE, ctypes.POINTER(wintypes.DWORD)]
+    kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+
+    # 起一个真实长驻子进程，父进程（本测试）会一直持着它的句柄
+    proc = subprocess.Popen(
+        [sys.executable, "-c", "import time; time.sleep(30)"],
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+    )
+    try:
+        time.sleep(0.5)
+        assert _pid_alive(proc.pid) is True, "活着的进程必须判成活"
+
+        proc.kill()
+        proc.wait()
+        time.sleep(0.3)
+        # 关键用例：句柄还开着、进程已死 —— os.kill(pid,0) 在这里会误报 True
+        assert _pid_alive(proc.pid) is False, \
+            "已死的进程必须判成死（哪怕父进程还持着句柄）"
+
+        # 对照：确认 os.kill 确实会误报，证明这条断言不是白写的
+        try:
+            os.kill(proc.pid, 0)
+            os_kill_says_alive = True
+        except OSError:
+            os_kill_says_alive = False
+        assert os_kill_says_alive is True, \
+            "（对照）os.kill(pid,0) 在句柄未释放时会误报 —— 这正是必须换实现的原因"
+    finally:
+        if proc.poll() is None:
+            proc.kill()
+            proc.wait()
+
+    assert _pid_alive(999999) is False, "不存在的 pid 判成死"
+    assert _pid_alive(0) is False, "pid=0 判成死"
+    assert _pid_alive(-1) is False, "负数 pid 判成死"
+    assert _pid_alive(os.getpid()) is True, "本进程判成活"
 
 
 def test_duplicate_project_execution_is_rejected_while_timeout_is_active(tmp_path: Path) -> None:

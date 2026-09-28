@@ -69,8 +69,14 @@ def test_manifest_without_project_name_keeps_legacy_wording(tmp_path: Path) -> N
     assert _project_row(tmp_path, "plain")[0] == "APEX 启动"
 
 
-def test_runner_lab_module_opens_the_import_window() -> None:
-    """跑步模块的主按钮要打开导入窗口（拖压缩包 + 输密码），且不能写死 console 路径。"""
+def test_runner_lab_module_opens_the_dashboard_with_the_tool_rail() -> None:
+    """跑步模块的主按钮要起本地桥并打开看板（导入入口已收敛进看板里的悬浮工具轨）。
+
+    2026-09-26 变更（多弗朗）：原来是打开 `tools/import_gui.py`（拖压缩包 + 输密码的
+    Tkinter 窗口）。现在改成「起桥 + 开看板」，四个导入动作由看板右侧的悬浮工具轨触发。
+    Tkinter 窗口降级为可单独双击 `从邮箱导入.cmd` 打开的备用入口，所以 `--gui` 这个
+    空壳参数也一并去掉了（留着只会让人以为总控台还能开那个窗口）。
+    """
     module_dir = ROOT / "backend" / "modules" / "runner-lab"
     manifest = json.loads((module_dir / "module.json").read_text(encoding="utf-8"))
     runner = (module_dir / "runner.py").read_text(encoding="utf-8")
@@ -80,13 +86,31 @@ def test_runner_lab_module_opens_the_import_window() -> None:
     assert set(manifest["actions"]) == {"run", "stop", "restart"}
     for name, action in manifest["actions"].items():
         # 只有 {console_root} 能指到 console 的虚拟环境；写死绝对路径换台机器就废。
+        # 这个解释器也是跑桥要用的：serve.py 依赖 playwright，它只装在这个 venv 里。
         assert action["program"] == "{console_root}\\backend\\.venv\\Scripts\\python.exe", name
-        assert "--gui" in action["args"], name
-    # 无界面导入仍保留给自动化用：缺密码必须立刻失败，不能停在输入提示上。
-    assert "--no-prompt" in runner
-    assert "timeout=IMPORT_TIMEOUT_SECONDS" in runner
-    assert "EXIT_MESSAGES" in runner
-    assert "pythonw.exe" in runner
+        assert "--gui" not in action["args"], name
+
+    # 启动真相只有一个：调 run-analytics 里那个日常在用的 .cmd（解释器挑选在里面；
+    # 端口挑选与开浏览器 2026-09-27 起由桥自己负责）。runner 只负责让它脱手跑起来。
+    assert "LAUNCHER_SCRIPT" in runner
+    assert "打开看板.cmd" in runner
+    assert "call" in runner
+    # 起桥必须用 CREATE_NO_WINDOW（隐藏控制台），**不能**用 DETACHED_PROCESS ——
+    # 后者会让 cmd 拿不到可继承的控制台、Windows 于是给它新分配一个**可见**的控制台，
+    # 那就是总控台点「运行」时弹出来的黑窗（2026-09-27 多弗朗）。
+    # 实测复现：DETACHED_PROCESS|CREATE_NEW_PROCESS_GROUP（flags 520）→ 冒出一个
+    # `C:\WINDOWS\system32\cmd.exe` 可见窗口；CREATE_NO_WINDOW（flags 134218240）→ 干净。
+    # 注意：旧版本这里写反了（断言「不能用 CREATE_NO_WINDOW」），那条结论是错的 ——
+    # 真正不能给的是 `DETACHED_PROCESS | CREATE_NO_WINDOW` 这个**组合**
+    # （CreateProcess 会报 invalid argument），不是 CREATE_NO_WINDOW 本身。
+    # 断言挂在 runner 自己的自检条目上，这样「改了实现却忘了改自检」也会被兜住。
+    assert 'ok("起桥用 CREATE_NO_WINDOW（隐藏控制台，不弹黑窗）"' in runner
+    assert 'ok("起桥不再用 DETACHED_PROCESS（它会新分配可见控制台）"' in runner
+    # 探活只认 200/403：本机代理会在端口上应答 502，那种「有响应但不通」不算就绪。
+    assert "def port_serving(" in runner
+    # 桥起不来时的报错必须把「手动双击哪个文件」写清楚，别只说「起不来」。
+    assert "LAUNCHER_SCRIPT} 手动起" in runner
+    assert "selftest" in runner
 
 
 def test_action_placeholders_expand_to_an_existing_interpreter() -> None:

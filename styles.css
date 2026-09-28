@@ -193,6 +193,9 @@ textarea,
   --tile-min:290px;
   --board-gap:14px;
   --tile-pad:16px;
+  /* 卡片悬停上移量。它同时是 .pjt-board 必须为「滚动裁剪边界」预留的上边距 ——
+     两处必须相等，故抽成令牌，避免日后各写一个 2px 走散（见 .pjt-board 那条规则的注释） */
+  --pjt-hover-lift:2px;
   /* 卡片拖拽排序的视觉：抬起幅度与拖拽阴影。JS 通过 getComputedStyle 读这两个值，
      所以调手感只改这里，不用去动 app.js */
   --pjt-lift-scale:1.035;
@@ -681,6 +684,10 @@ button:focus-visible,input:focus-visible,.row:focus-visible,.tab:focus-visible{
 .dashboard-projects{grid-area:projects}
 .dashboard-activity{grid-area:activity}
 .home-grid .card{min-height:0;overflow:hidden}
+/* 活跃度卡的悬停气泡要向上溢出卡外才可见，所以这一张卡必须放行纵向溢出（横向仍裁）。
+   卡片自身背景 / 圆角 / 边框照旧只画在卡盒上：气泡是绝对定位子元素、z-index:3 在卡内容之上，
+   溢出的那一截会画在本卡之上、邻卡之下 —— 同层叠上下文里后出现的卡盖住先出现的，观感正确。 */
+.home-grid .dashboard-heat{overflow:visible clip}
 .home-grid .card-head{flex:0 0 auto}
 .dashboard-overview-main{flex:1;min-height:0;display:flex;flex-direction:column;justify-content:center;gap:calc(var(--dash-gap) / 1.6)}
 .dashboard-kicker{margin:0 calc(var(--dash-gap) / 3) 0 0;font-size:var(--dash-kicker);font-weight:600;letter-spacing:.08em;color:var(--ink-3)}
@@ -731,8 +738,15 @@ button:focus-visible,input:focus-visible,.row:focus-visible,.tab:focus-visible{
   transform:translate(var(--heat-tip-dx),var(--heat-tip-rise));
   transition:all .3s ease}
 .heat-cell:hover .heat-tip{opacity:1;transform:translate(var(--heat-tip-dx),0)}
+/* 气泡边界对齐：气泡比格子宽得多，居中摆放会向两侧越界。
+   ①第 1 列（7n+1）左对齐，防止向左溢出卡盒；
+   ②**末尾 2 列**右对齐，防止向右溢出卡盒 —— 阈值必须是 HEAT_CARD_CELLS-14+1 = 78，
+     即 91-格卡片窗里倒数第二列的首格。原先写的是 n+169（= 371 格全窗时代的「后段列」），
+     卡片窗缩到 13 周（91 格）后这个选择器**永远不命中**，于是末列气泡仍然居中、右半边被横向裁掉
+     （2026-09-28 实测：累计口径下悬浮末列，只看到「截至9月28日」半截气泡）。
+     ⚠️ 这个 78 与 app.js 的 HEAT_CARD_CELLS 联动：卡片窗格数一变，这里必须同步改。 */
 .heat-cell:nth-child(7n+1) .heat-tip{left:0;--heat-tip-dx:0}
-.heat-cell:nth-child(n+169) .heat-tip{left:auto;right:0;--heat-tip-dx:0}
+.heat-cell:nth-child(n+78) .heat-tip{left:auto;right:0;--heat-tip-dx:0}
 .heat-tip-l2{display:flex;align-items:center;gap:calc(var(--heat-tip-gap) * 2)}
 .heat-tip-sep{color:var(--heat-tip-ink);opacity:.45}
 .heat-add{color:var(--heat-tip-add);font-weight:600}
@@ -1074,7 +1088,14 @@ svg{display:block}
 .pjt-board{
   display:grid;grid-template-columns:repeat(auto-fill,minmax(min(var(--tile-min),100%),1fr));
   gap:var(--board-gap);align-content:start;flex:1;min-height:0;
-  min-width:0;overflow:hidden auto;padding-bottom:2px;
+  min-width:0;overflow:hidden auto;
+  /* 滚动容器的裁剪边界 = 它的 padding box，而它正好压在第一行卡片的静止顶边上。
+     卡片悬停上移 --pjt-hover-lift 后顶边越界 → 上边框连同两个上圆角被切掉
+     （表现为「边框包裹不全」；第二行及以后的卡片不移到边界外，所以看不出问题）。
+     故向上预留等量空间：margin 与 padding 数值相反、互相抵消，
+     卡的静止位置与容器高度都不动，只是把裁剪边界整体抬高一格。 */
+  margin-top:calc(-1 * var(--pjt-hover-lift));
+  padding:var(--pjt-hover-lift) 0 2px;
 }
 .pjt-card{
   position:relative;display:flex;flex-direction:column;min-width:0;
@@ -1088,7 +1109,7 @@ svg{display:block}
 [data-theme="dark"] .pjt-card{border-color:var(--line)}
 /* 悬停：抬起 2px 的同时投影换到 --sh-hov（更长但同样回落到 0），
    两者同时发生才有「卡片离地」的确定感；只加阴影不位移会显得发虚 */
-.pjt-card:hover{box-shadow:var(--sh-hov);border-color:var(--brand-line);background:var(--card-strong);transform:translateY(-2px)}
+.pjt-card:hover{box-shadow:var(--sh-hov);border-color:var(--brand-line);background:var(--card-strong);transform:translateY(calc(-1 * var(--pjt-hover-lift)))}
 /* 信息区：进入详情的唯一入口；flex:1 保证操作条贴着卡片底部（同行卡片等高时也不留缝） */
 .pjt-main{flex:1;display:flex;flex-direction:column;gap:9px;min-width:0;cursor:pointer;
   padding:var(--tile-pad) var(--tile-pad) 11px;border-radius:var(--r-tile) var(--r-tile) 0 0}
@@ -1151,7 +1172,7 @@ svg{display:block}
 /* 尾部占位卡：虚线 + 居中加号，和项目卡同栅格同高度 */
 .pjt-new{align-items:center;justify-content:center;gap:7px;min-height:150px;
   border-style:dashed;border-color:var(--line);background:transparent;box-shadow:none;color:var(--ink-3)}
-.pjt-new:hover{border-color:var(--brand-line);background:var(--card);box-shadow:var(--sh-hov);transform:translateY(-2px)}
+.pjt-new:hover{border-color:var(--brand-line);background:var(--card);box-shadow:var(--sh-hov);transform:translateY(calc(-1 * var(--pjt-hover-lift)))}
 .pjt-new-ico{width:34px;height:34px;border-radius:50%;display:grid;place-items:center;
   background:var(--tile);border:1px dashed var(--line);color:var(--ink-3)}
 .pjt-new-ico>svg{width:16px;height:16px}

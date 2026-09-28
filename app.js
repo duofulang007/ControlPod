@@ -38,9 +38,13 @@ function shellRequest(path, options){
 const IN_SHELL = typeof window !== 'undefined' && !!(window.chrome && window.chrome.webview);
 
 /* 壳系统通知：走 WebMessage 让 C# 弹托盘 Toast（Win10/11 原生样式，可进通知中心）。
-   浏览器 / vm 环境无 webview，空操作。用于运行终态这类「人不在壳窗口前也该知道」的事件。 */
+   浏览器 / vm 环境无 webview，空操作。用于运行终态这类「人不在壳窗口前也该知道」的事件。
+   ⚠️ 必须受设置页「桌面通知」开关（S.notify）门控 —— 这里是全站唯一的系统通知出口，
+   所以门控放在函数内部一处即可覆盖所有调用点（运行完成 / 运行失败）。
+   2026-09-28 修：此前只判 IN_SHELL、不看 S.notify，导致开关关掉后照弹（多弗朗实测反馈）。 */
 function shellToast(message, title){
   if (!IN_SHELL) return;
+  if (!(S && S.notify)) return;   /* 桌面通知已关闭：不推系统通知（页面内 toast 不受影响，另有出口） */
   try {
     window.chrome.webview.postMessage({ type:'shell-toast', title: title || 'APEX 总控台', message: message || '' });
   } catch (_) {}
@@ -346,7 +350,7 @@ const S = {
   density:1,            // 外观·信息密度档位 0/1/2（紧凑/标准/宽松）
   accent:'#E8402A',     // 外观·强调色（写 --brand 令牌），取值受 ACCENTS 白名单约束
   glass:true,           // 外观·玻璃质感；关闭时给 <html> 挂 no-blur，卡片改纯色底
-  notify:true,          // 通用·桌面通知（当前无推送实现，仅记录开关意愿）
+  notify:true,          // 通用·桌面通知：门控壳的系统通知（shellToast）。关掉后运行终态只在页面内提示，不推系统 Toast
   save:true,            // 通用·自动保存
   telemetry:false,      // 通用·使用数据统计（原型不采集，仅记录开关意愿）
   appQuery:'',          // 应用页模糊搜索词
@@ -4938,6 +4942,26 @@ async function syncProjectRuntime(){
     }
   }));
   if (changed && (S.page==='workflows' || S.page==='projects')) render(true);
+  return changed;
+}
+/* 真实项目（桥）的存活是**异步落地**的事实：用户可能直接关掉看板、从任务管理器
+   杀掉桥，甚至只是合上笔记本再回来。所以「运行态」不能只在页面初始化问一次 ——
+   那会让卡片永远停在「运行中/关闭中」。这里每 5 秒静默对一次账，只在状态真的
+   变了才重绘（render 是全量重建 DOM，无脑重绘会让 hover 过渡和运行动画不停重播）。 */
+let runtimeTimer = null;
+const RUNTIME_POLL_MS = 5000;
+function startRuntimePoll(){
+  if (typeof document === 'undefined' || runtimeTimer !== null) return;
+  /* 页面在后台时不必按点对账：回来那一刻 visibilitychange 会补一发。 */
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) void syncProjectRuntime(); });
+  runtimeTimer = setInterval(() => {
+    if (typeof document !== 'undefined' && document.hidden) return;
+    if (!S.backendReady) return;
+    void syncProjectRuntime();
+  }, RUNTIME_POLL_MS);
+}
+function stopRuntimePoll(){
+  clearInterval(runtimeTimer); runtimeTimer = null;
 }
 /* opts.stay=true：就地启动（停在当前页，用于项目选择页的「启动」），否则跳到项目详情页看运行控制台 */
 function startRun(id, opts){
@@ -5686,6 +5710,7 @@ function scrollPal(){
     render();
     if (S.backendError) toast(`后端数据加载失败：${S.backendError}`);
     void syncProjectRuntime();
+    startRuntimePoll();
   };
   if (typeof fetch === 'function') void loadBackendState().then(async () => {
     await Promise.all([loadStartupSetting(), loadConsoleWindowState()]);
