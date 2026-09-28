@@ -1,9 +1,9 @@
 # AGENTS.md · 控制台项目接手说明书
 
 > 给任何要读 / 改这个项目的 agent：**先读这一份，再动代码**。术语、硬约束、架构、验证方式与全部已踩过的坑都在这里。
-> 最后更新：2026-09-26 · 测试基线：**前端 `node smoke-test.js` ALL_PASS（766 项） + 后端 `pytest backend/tests -q` 102 通过 + 壳自测 `ApexShell.exe --selftest`（242 项）**
+> 最后更新：2026-09-27 · 测试基线：**前端 `node smoke-test.js` ALL_PASS（766 项） + 后端 `pytest backend/tests -q` 102 通过 + 壳自测 `ApexShell.exe --selftest`（242 项）**
 >
-> **当前形态（先看这段）**：**WinUI 3 壳（`shell/`）+ Web 三件套 + Python 后端**的单仓库结构。**日常入口是壳**（`shell\bin\...\win-x64\ApexShell.exe`，路径深——用桌面快捷方式，或跑 `ApexShell.exe --shortcuts` 重建）。**二期移植已完成**：51 条 API 路由都在壳内就地回答，壳可独立运行、不再探测或拉起 Python；Python 保留只为浏览器模式（`backend/start.ps1` → `127.0.0.1:8765`）与 pytest 对照基线。**两套栈共用同一个 SQLite 库**（`backend/data/apex-console.db`，`user_version` 协议）。
+> **当前形态（先看这段）**：**WinUI 3 壳（`shell/`）+ Web 三件套 + Python 后端**的单仓库结构。**日常入口是 Release 版壳**（`shell\bin\Release\publish\ApexShell.exe`，路径深——用桌面快捷方式，或跑该 exe 的 `--shortcuts` 重建；Release 开了 `PublishReadyToRun`、关了符号，冷启动比 Debug 快）；Debug 版（`shell\bin\x64\Debug\...\win-x64\`）只用于调试与自测。**二期移植已完成**：51 条 API 路由都在壳内就地回答，壳可独立运行、不再探测或拉起 Python；Python 保留只为浏览器模式（`backend/start.ps1` → `127.0.0.1:8765`）与 pytest 对照基线。**两套栈共用同一个 SQLite 库**（`backend/data/apex-console.db`，`user_version` 协议）。
 
 ---
 
@@ -56,7 +56,8 @@ powershell -ExecutionPolicy Bypass -File backend/start.ps1   # → http://127.0.
 
 - 壳用 `SetVirtualHostNameToFolderMapping` 把 `https://apex.local/` 映射到**仓库根**，所以**改完 Web 三件套 Ctrl+S、壳里 F5 立即生效**（不用重新构建）。
 - 壳层日志：`%LOCALAPPDATA%\ApexShell\web-shell.log`（导航 / 托盘 / 本地路由 / 图标拦截全链路留痕）。**每行前缀 `+Nms` = 距本进程启动的毫秒数**——启动耗时直接读它：`tray: RegisterClassW`（窗口构造开始）→ `localapi: ready` → `webview: ready` → `nav-done` → `splash: dismiss`。
-- 构建壳：`cd shell && C:\Users\23221\.dotnet\dotnet.exe build ApexShell.csproj -c Debug -p:Platform=x64 -p:RuntimeIdentifier=win-x64`。**构建前必须先结束运行中的壳**（否则 exe 被锁，报 MSB3027）。
+- 构建壳（Debug，调试 / 自测用）：`cd shell && C:\Users\23221\.dotnet\dotnet.exe build ApexShell.csproj -c Debug -p:Platform=x64 -p:RuntimeIdentifier=win-x64`。**构建前必须先结束运行中的壳**（否则 exe 被锁，报 MSB3027）。
+- 发布壳（Release，**日常入口用它**）：`cd shell && C:\Users\23221\.dotnet\dotnet.exe publish ApexShell.csproj -c Release -p:Platform=x64 -p:RuntimeIdentifier=win-x64 -o bin/Release/publish`。Release 预编译（`PublishReadyToRun`）+ 关符号；**产物落 `bin/Release/publish`，不碰 Debug 目录**，所以重发不必先结束正在跑的 Debug 壳（只有重发同一配置、或要覆盖 Debug 时才得让壳退出）。
 - 测试原理（前端）：用 `vm` + 极简 DOM 桩加载 `app.js`，末尾注入 `globalThis.__T = { 要测的函数… }` 作为导出清单，再逐块断言（含**源码级接线断言**与 **CSS 规则断言**）。**新增可测函数必须同步加进导出清单**，否则测试取不到。视觉细节仍需人眼看预览。
 
 ---
@@ -250,6 +251,77 @@ powershell -ExecutionPolicy Bypass -File backend/start.ps1   # → http://127.0.
     ```
     Python 的 `subprocess.run(capture_output=True)` 走 `communicate()`，本身就是并发读，所以同一命令 0.74s 返回 203 条——两套栈在这一处**不是命令参数差异**（`-Command` / `-EncodedCommand` / 是否重定向 stdin 实测都不影响）。
     **排查入口**：`ApexShell.exe --scan` 逐层打印扫描结果（开始菜单根 → 快捷方式 → 目标解析 → 商店清单 → App Paths → 最终候选），并把库里每个带真实入口的应用逐个复验、直接点名谁会被判「入口已失效」。**注意自测覆盖不到这里**：`--selftest` 的扫描阶段一律 `useShellLists:false`（关掉商店清单），所以要另跑 `--scan`。
+34. **`overflow:hidden` 会连「向上浮出的悬停气泡」一起裁掉，活跃度卡必须单独放行纵向溢出**（2026-09-28 修）：`.home-grid .card{overflow:hidden}` 是给单屏 bento 网格兜底的（防内容撑破卡盒），但活跃度热力图的气泡是 `.heat-tip{position:absolute;bottom:calc(100% + 6px)}`——**向上溢出格子、也溢出卡盒**。最上两行格子的气泡整个跑到卡外，被卡盒裁成「看不见任何东西」（用户原话「活跃度右边一排弹出来的内容都看不到了」）。修法是给那一张卡加覆盖规则 `.home-grid .dashboard-heat{overflow:visible clip}`：**只放行纵向**（`visible`），横向仍保持 `clip`（同 `.app` 用 `clip` 的道理——`clip` 不产生滚动容器，不像 `visible` 会连带把另一轴的 `hidden` 升级成 `auto` 冒出滚动条）。**观感保证**：气泡 `z-index:3` 画在卡内容之上、且绝对定位元素不参与父级绘制顺序，所以溢出的那一截落在本卡之上、邻卡之下（同层叠上下文里后出现的卡盖住先出现的），不会盖到「当前项目」卡上。**别改成给 `.home-grid .card` 整体去掉 `overflow:hidden`**——那会让长说明/长项目名的卡溢出卡盒。
+    **验证手段（本仓库可直接复用）**：无头浏览器截图 + 把 `:hover` 钉住。要点有三个：①`app.js` 的 `const S` 不挂 `window`，探针脚本必须**内联 app.js 源码**（用 IIFE 包住，否则和 `index.html` 自带内联脚本的 `const $` 撞成 `Identifier '$' has already been declared`），再用 `return {S, render}` 抛出来；②`String.replace(re, inject)` 的替换串里 **`$$` 是「字面 `$`」占位符**，会把源码里的 `const $$ = ...` 静默压成 `const $ = ...` —— 一律写 `replace(re, () => inject)`；③注入的假数据会被 `boot()` 探测后端失败后的那次 `render` 覆盖，所以要**循环重试**（把 `backendReady=true` 摁住 + 每 80ms 重渲，直到 `.heat-cell` 出现），单次注入看不到效果。钉 `:hover` 用加一个 `.__pin` 类 + 一段 `.heat-cell.__pin .heat-tip{opacity:1!important;transform:none!important}` 的样式，比 CDP `Emulation.setEmulatedMedia` 省事。
+    **⚠️ 上面这条只解决「纵向」**。横向是**另一个独立故障**，见第 35 条 —— 两个一起修完才有完整的「气泡看得见」。
+35. **气泡的「末列右对齐」阈值是陈旧常量：`n+169` 在 13 周卡片窗下永不命中**（2026-09-28 修，与第 34 条是同一现场的两个独立原因）：`.heat-tip` 比格子宽得多（实测 179px vs 格子约 40px），居中摆放必然向两侧越界。原设计给了两条边界规则：`.heat-cell:nth-child(7n+1) .heat-tip{left:0}`（每周首列左对齐，防左溢出）和 `.heat-cell:nth-child(n+169) .heat-tip{right:0}`（防右溢出）。但 **`n+169` 是 53 周全窗（371 格）时代写的「后段列」阈值**；卡片可视窗后来缩到 `HEAT_CARD_COLS = 13` 周 = **91 格**，`n+169` **永远不命中** → 末列气泡仍按 `left:50%;--heat-tip-dx:-50%` 居中 → 右半边被 `overflow:...clip` 裁掉。用户截图看到的正是「累计口径 + 悬浮末列 = 只露出『截至9月28日』半条气泡」。正确阈值是 **`HEAT_CARD_CELLS - 14 + 1 = 78`**（末两列的首格）。**实测几何取证**（无头浏览器量 `getBoundingClientRect`）：
+    | | 气泡右缘 | 卡片右缘 | 向右溢出 |
+    |---|---|---|---|
+    | 修复前 `n+169` | 831 | 712 | **+119px 出界** |
+    | 修复后 `n+78` | 693 | 712 | **-19px 在界内** |
+    **这两个数字必须联动**：改 `HEAT_CARD_COLS` 就得同步改 CSS 阈值。已在 `smoke-test.js` 加断言把「CSS 阈值 = 13*7-14+1」钉死，并禁止过期阈值以选择器形式复活。
+    **排查手法**：别靠肉眼看截图猜，直接在探针里 `getBoundingClientRect()` 量「气泡右缘 - 卡片右缘」的正负号 —— 正数即出界，数值就是被裁掉的像素数，一眼定位是横向还是纵向问题。
+36. **设置页开关必须门控它的真实出口，否则只是个「记录意愿」的摆设**（2026-09-28 修，用户反馈「桌面通知关了依然弹通知」）：系统通知的链路是 **`shellToast()` → WebMessage(`shell-toast`) → `MainWindow.OnWebMessageReceived` → `TrayHost.ShowToast` → 托盘气球**。但 `shellToast()` 原先只判 `if (!IN_SHELL) return;`，**完全不读 `S.notify`** —— 于是「桌面通知」这个开关关掉后，运行终态（完成 / 失败 / 关闭）照弹系统 Toast。原注释还写着「当前无推送实现，仅记录开关意愿」，与实现早就脱节（壳的推送在 `TrayHost` 落地后，注释没跟着更新），**这类「注释说的和代码做的不一致」是配置类 bug 的高发区**。
+    **修法**：`if (!(S && S.notify)) return;` 放在 `shellToast()` 内部。**门控要点在「唯一的出口」上做，不是在每个调用点做** —— `shellToast` 是全站唯一的系统通知出口（`grep ShowToast` 确认 C# 侧只有 `MainWindow.xaml.cs` 一处、且只由 `shell-toast` 触发），所以函数内一处 early-return 就覆盖了全部调用点（终端态三处）。**别把门控下沉到 C# 侧**：C# 的 `ShowToast` 保持「桥」的单一职责，业务策略（该不该通知）属于前端状态 `S`。
+    **两个易漏的边界**：①`S.notify` 可能是 `undefined`（老 localStorage 里没这个键），要写 `!(S && S.notify)` 而不是 `!S.notify`；②门控必须是 **early-return**，若写成「读 `S.notify` 后再决定发不发」容易漏改分支，断言里专门钉了这点。
+    **验证套路（比正则断言强）**：**抽取真实函数源码到 vm 里真跑**，而不是重写一份等价逻辑（重写就测不到盘上那份实现）。做法：从 `app.js` 按大括号配对截出 `shellToast` 函数体 + 它的 `IN_SHELL` 判定式，注入伪造的 `window.chrome.webview.postMessage` 收集调用，跑 5 组用例（开关开 / 关 / `undefined` / 再开 / 浏览器环境）。**反向验证**：把门控行删掉重跑，应精确地让「开关关」和「`undefined`」两组从 `0 次` 变 `1 次` —— 复现用户报告的现象，才证明探针真的在测这件事。
+37. **壳支持 `--url` 打开外部看板（跑步看板从「浏览器小窗」升级为「无边框壳窗口」）**（2026-09-28 多弗朗要求「改成运行项目，直接桌面，而不是这种小窗口」）：链路是 `runner.py` → `open_dashboard()` → `ApexShell.exe --url <地址>` → 壳内 `WebView2.Navigate(url)`。
+    **四个设计点**：
+    - **单实例锁按角色 + 按 URL 分**：总控台用 `Local\ApexShell_SingleInstance`，看板用 `Local\ApexShell_SingleInstance_Dashboard_<FNV1a(url)>`。同地址重复启动 = 唤起已有窗口（`FindWindowW(null, "APEX 看板")` → `SW_RESTORE` + `SetForegroundWindow`），不堆第二个窗口；不同地址 = 各自独立窗口。
+    - **窗口状态按角色分文件**：`backend/data/shell-window-console.json` / `shell-window-dashboard.json`。
+    - **`--url` 与 `--url=` 两种写法都要认**（`argparse` 风格 vs `=` 风格），否则「参数传了但没生效、开出来还是总控台」。
+    - **外部 URL 分支要在虚拟主机映射之前 `return`**：`InitWebViewAsync` 走 `apex.local` 映射是总控台专用路径，外部 URL 不能也去映射。
+38. **窗口位置尺寸持久化：`DisplayArea.FindAll()` 在窗口构造早期抛 `E_NOINTERFACE`，会把「还原布局」整个吞进 catch**（2026-09-28 修，`WindowStateStore` 落地时踩）：`TryRestorePlacement` 里的越界校验 `PlacementIsReachable` 原本用 WinRT 的 `DisplayArea.FindAll()`，在 `MainWindow` 构造期（`ApplyStoredOrDefaultPlacement` 那一步）**稳定抛 `不支持此接口`**（0x80004002），异常被 catch 成「还原布局失败，退回默认」→ 表现是**位置怎么都记不住**（日志里能读到状态、但永远跟着一行 `1440x900 centered`）。
+    **修法**：改用**纯 Win32** 的 `MonitorFromRect(MONITOR_DEFAULTTONULL)` + `GetMonitorInfo().rcWork`。Win32 调用不依赖 WinRT 投影的生命周期，任何时候都能调，语义也正好是「这块矩形落在哪块显示器的工作区里」。
+    **判据口径**：`GetWindowRect` 含每边约 7–8px 的不可见调整边框，`DwmGetWindowAttribute(DWMWA_EXTENDED_FRAME_BOUNDS=9)` 才是肉眼可见矩形。**存档写的是 DWM 可见矩形**，所以「存档 1100×720 → 重开 GetWindowRect 1143×735」这类差值**是正常的**，别当成没记住而反复改代码。用 DWM 口径比对，误差应 ≤1px。
+    **验证套路**：写一份自定义状态 → 启动壳 → 从日志读 `window: 还原上次布局 …` → 再量窗口矩形。**三段都要有**，只看日志会漏掉「读了但没应用」。
+39. **新起的桥也要走「开看板」决策点，不然第一次运行和第二次的观感不一致**（2026-09-28 修）：`launch_bridge` 原先是**复用已有桥**才调 `open_dashboard()`，**新起桥**那条路只让 `serve.py --open-browser` 自己开（系统浏览器）。于是同一个「运行项目」按钮，**第一次**开出浏览器小窗、**关闭后再点**才开壳 —— 用户看到的就是「时好时坏」。
+    **修法**：两个分支都收敛到 `open_dashboard()`；同时把 `serve.py` 的 `open_browser()` 也改成优先起壳（`_apex_shell_exe()` 环境变量 `APEX_SHELL_EXE` → 写死的仓库 Debug 路径），**留 `os.startfile` 兜底**。这样 runner 与「双击打开看板.cmd」两条入口都得到同样的壳窗口。
+    **为什么可以两边都开而不怕重复**：壳的单实例锁按 URL 分 —— 即使 `serve.py` 和 `runner.py` 都发起了 `--url`，第二个进程只会唤起第一个窗口然后自己退出。**「幂等的打开动作」比「小心翼翼地只开一次」更抗漏**。
+    **`serve.py` 里找壳为什么不走相对路径**：serve.py 属于 **run-analytics** 仓库、壳属于 **apex-console** 仓库，两个仓库没有固定相对关系（可能被挪位置），所以只能靠环境变量或写死的已知仓库路径；**只认 Debug 产物**（日常构建的就是 Debug，猜 Release 会出现「明明构建过了却找不到」）。
+
+40. **卡片卡在「运行中 / 关闭中」是三个独立原因叠加，修一个不够**（2026-09-28 修，用户截图反馈「无法监测到页面有没有关闭…卡在这里不动」）。运行态这条链是 `runner.py 写 result.json → /runtime 读 result.status.state → 前端 S.projectRuntime → 卡片红点`，三处各有一个洞：
+    - **① 前端只在页面初始化问过一次**：`syncProjectRuntime()` 全文只有 `finish()` 里那一次 `void`，**没有任何定时器**。用户关掉看板 / 从任务管理器杀桥之后，前端永远不知道，字段恒为 `running` → `projIsStarted` 恒真 → 红点永久亮。**修法**：加 `startRuntimePoll()`（`RUNTIME_POLL_MS = 5000`），`document.hidden` 时跳过、`visibilitychange` 回来自补一发、`!S.backendReady` 时不发。**必须「只在状态真变时 render(true)」** —— `render` 是全量重建 DOM，无脑重绘会让 hover 过渡与运行动画从头重播，观感是卡片反复弹跳（`appliedKey` 指纹那套同理）。
+    - **② `result.json` 从不写 `status.state`**：`runner.py` 的 `run` 分支只写 `status: "dashboard-opened"`，`stop` 分支写 `"stopped"`/`"noop"`，**全文没有 `state` 字段**；而 `/runtime` 只认 `result.status.state ∈ {running, stopped}`，其它一律退化成 `unknown`。**修法**：两个分支都补 `"result": {"status": {"state": ...}}`（`run` 额外写 `pid`）。**注意必须是嵌套的 `result.status.state`，不是扁平键 `"status.state"`** —— 后端按 `result.get("status").get("state")` 读，扁平键会静默读不到（有反向断言钉住）。
+    - **③ `/runtime` 取「最近一条 run」的排序有竞态**：`ORDER BY finished_at DESC, id DESC` 里 `id` 是 **uuid 字符串**，字典序≠时间序。`run` 和 `stop` 都是 `succeeded`，**同一秒落库**（`finished_at` 精确到微秒但两次调用常在同一微秒区间）时顺序不定 → 可能选中更早的 `run`。**修法**：`ORDER BY finished_at DESC, rowid DESC`（`runs.id` 是 `TEXT PRIMARY KEY`，SQLite 仍保留单调递增的隐藏 `rowid` = 插入顺序）。**Python 与 C# 两处都要改**（`main.py` 与 `LocalApi.cs`），有断言禁止旧口径残留。
+    - **强杀兜底（第二条腿）**：桥被 `taskkill /F` 时走不到 `finally`，`result.json` 会**永远**留着 `running`。所以 `/runtime` 在 `state == "running"` 时拿 `result.status.pid` 验进程存活，死了就回落 `stopped`。
+    - ⚠️ **`_pid_alive` 不能用 `os.kill(pid, 0)`**（本机实测两个误报：① 进程已退出但父进程还持着句柄时**照样返回成功** —— 「刚被强杀的桥」在父进程存活期间会被永远判成活；② `pid=0` 也被当成合法目标）。必须走 `OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION)` + `GetExitCodeProcess`，只有 `STILL_ACTIVE(259)` 才算活；C# 侧对应 `Process.GetProcessById` + `HasExited`。四项用例（活 / 已死且句柄未释放 / 不存在的 pid / `pid=0`）全部判对，pytest 里有专项测试 + 反向对照断言。
+    - **桥侧的存活标记**：`serve.py` 启动时在 `%TEMP%\run-analytics\` 落 `serve.pid` / `serve.port`（与 runner-lab 的 `STATE_DIR` 同口径），`atexit` + `SIGINT/SIGTERM` + `finally` 三条收摊路径都撤标记。**正常退出能撤、强杀撤不掉 —— 所以才必须有 pid 交叉校验那第二条腿**，两条腿缺一条都会让红点灭不掉。
+41. **XML 注释里不能出现连续两个短横线 —— 而 XamlCompiler 只回一个退出码，不给任何错误文本**（2026-09-28 踩）：给 MainWindow.xaml 加窗口条时，注释里写了「url 参数模式」的短横线写法（`--url`）和 `--bg`，结果 `dotnet build` 只报
+    `error MSB3073: 命令"…XamlCompiler.exe …"已退出，代码为 1`，**没有任何行号、文件名或提示**，`-v:diag` 也捞不到编译器自己的输出（它把错误吞了）。排查手法：**把 XAML 里的注释内容当作第一嫌疑**（语法层面唯一可能"看不见"的错误），或二分注释段落。
+    ⇒ 写 XAML 注释时一律用「url 参数模式」「bg 色」这类不带短横线的说法；**改完 XAML 一定要真构建一次**，别靠"看着没问题"。
+42. **给「非为本壳编写」的外部页面套壳时，窗口控制条要壳自己让出一行，别盖在页面顶栏上**（2026-09-28，多弗朗：「加个关闭按钮和一个拖动的区域不然我都拖不了」）：
+    跑步看板（run-analytics）不是为壳写的，页面里**没有任何 `[data-drag]` 声明**，所以总控台那套「页面声明拖动区 → chrome-command: drag」的机制在看板里根本不存在 —— 窗口拖不动也关不掉。
+    **为什么不能像总控台那样把拖动层盖在顶栏上**：实测看板顶栏（`.bar`，约 53px）两端被占满 —— logo 在 x30–64，状态 chip「1 天前导入」右缘 = 窗口宽减 30px，中间没有能塞下关闭按钮的空位，盖上去必然压住信息。
+    **做法**：RootGrid 改成两行，第 0 行是 32px 的 `DashChrome`（默认 `Collapsed`，**只有 url 参数模式才亮出来**），WebView2 放第 1 行 → 页面整体下移 32px，谁也不挡谁；这个解法对**任意**外部页面都成立，不依赖页面有几个元素。
+    **三条必须守住的细节**（都已在 `SelfTest.CheckDashboardChrome` 里钉住）：
+    - 拖动层的 `Background="Transparent"` **不能删** —— WinUI 里 `null` 画刷的元素**不可命中**，清掉之后窗口静默拖不动（不报错，只是没反应）。
+    - 关闭按钮是拖动层的**兄弟且排在后面**（z 更高），否则点按钮只会拖动窗口。
+    - 关闭必须先置 `_exitFromTray = true` 再 `Close()` —— `AppWindow.Closing` 里有一道「点 X 只隐藏到托盘」的拦截，不放行的话点 × 表现为「窗口没关」。
+    **底色**：看板窗口的壳底色写死看板的 `--bg`（#EAF0F2），且**不写 last-theme.txt** —— 跟着总控台主题走的话，用户在总控台切深色，看板顶部那条 8px 系统保留区会露一条深色带；写入记忆文件则会反过来冲掉总控台的主题偏好。为此 caption 色改成以 `_shellBaseColor` 字段为准（三档颜色推不出看板这一档）。
+43. **WebView2 窗口截图：GDI 抓不到网页层，但抓得到 XAML 层 —— 要整窗预览就把两层分开取再合成**（2026-09-28）：`BitBlt` 从屏幕 DC 采壳窗口，得到的是「XAML 层正常 + WebView2 区域纯黑」（WebView2 走 GPU 合成，不落在 GDI 可读的位图里）；`PrintWindow(PW_RENDERFULLCONTENT)` 返回 1 也一样黑。
+    **★ 但别把这条当铁律（2026-09-28 修正）**：同一天另一轮实测里，`GetDC(0)` + `BitBlt` **抓到了真实的网页像素** —— 页面底色、乃至页面自己画的滚动条，逐列颜色全对得上。差别多半在于 DWM 有没有把这块内容放进**硬件 overlay 平面**（overlay 不落进 GDI 可读的位图，没有 overlay 时就能拿到）。⇒ **先截一次看结果，是黑图再退回「两层分开取」**，别因为这条就放弃直接截图。
+    **可用的替代**：
+    - 只想验**壳自己的 XAML**（窗口条、按钮、遮罩）→ 屏幕 DC `BitBlt` 能拿到，够用。
+    - 想看**整窗观感** → 分开取再拼：XAML 层用屏幕 `BitBlt`（裁顶部那条），网页层用无头 Edge 对同一个 URL 截图，两图按已知偏移叠起来。**两部分都是真像素**，不是画的示意图。
+    **另一个坑**：拿 `python -m http.server` 静态服务页面时，`NavigationCompleted`（日志里的 `nav-done`）**可能永远不来** —— 页面有子资源挂着，于是遮罩一直不揭幕（20s 后走超时分支），截到的永远是遮罩。**要复现真实观感必须用真实桥（serve.py，8917）**，那条链路 `nav-done` 正常。
+    **壳自己提供的取证通道**：窗口条的位置/尺寸会打进日志（`chrome: 看板窗口条 屏幕 x=… y=… w=… h=…；拖动层 w=… h=…；全屏按钮 屏幕 x=… y=… w=… h=…；关闭按钮 屏幕 x=… y=… w=… h=…`，见 `LogDashboardChromeGeometry`）。有坐标就能用 `SetCursorPos` + `mouse_event` 做**真实鼠标**端到端验证（拖动测位移、点击测退出），不依赖截图 —— 这两条已实测通过（拖动期望 +140,+90 实测一致；点窗口条全屏按钮 1355×593@392,383 → 1920×1080@0,0 → 再点还原分毫不差；点关闭进程即退、可见窗口归零）。
+    **★ 移动鼠标要用 `mouse_event(MOUSEEVENTF_MOVE|MOUSEEVENTF_ABSOLUTE)`，别用 `SetCursorPos`**（2026-09-28 实测，此前这条写反了）：`SetCursorPos` 只改光标位置、**不往窗口消息队列投真正的鼠标输入**，WinUI 3 的指针输入收不到 → 悬停视觉状态不更新。定量对拍（量按钮矩形平均亮度）：`SetCursorPos` 时全屏按钮 −0.00、关闭按钮 −0.00（两颗都不变）；换成 `mouse_event` 后全屏 −22.43、关闭 −22.55，且**只变鼠标所在的那一颗**。**别因为「悬停没反应」就去改 XAML 的 `PointerEntered` —— 先换输入注入方式。** 绝对坐标要归一化到 0..65535：`x*65535/(SM_CXVIRTUALSCREEN-1)`。
+
+44. **无边框窗口里「全屏」就是 `ToggleMaximize`，而全屏态下窗口条必须留着**（2026-09-28，多弗朗：「再加一个全屏按钮」）：WinAppSDK 1.6 的 `OverlappedPresenter` 没有 `SetFullscreen`，`WindowChrome.ToggleMaximize()` 干的其实是**铺满整块屏幕**（`MoveAndResize` 到监视器整块矩形 + 临时 `IsAlwaysOnTop`，不然任务栏会压在窗口上），并把窗口化矩形存进 `_restoreRect` 供退出还原。所以「窗口条全屏按钮 / 双击拖动区 / 总控台顶栏 fsBtn」三条路**必须都调到这一个方法**，谁自己再实现一遍就会三份状态各说各话。
+    - **按钮图标的状态源只能是 `_chrome.IsFullscreenOrMaximized`，不能自己记一个 bool**：窗口还能通过双击、拖到屏幕顶端贴边、以及启动时还原存档这三条**壳外路径**改状态。存档这条实测过：`FlushPlacement` 在全屏/最大化时只写 `Maximized=true`，于是把看板留在全屏后关窗，下次开窗 `TryMaximize()` 直接满屏（不是 bug，是「记住上次状态」的设计）。
+    - **全屏时不要藏掉那条 32px 窗口条**：无边框窗口没有系统按钮，藏了之后退出全屏唯一指望是 Esc —— 而 Esc 落在 WebView2 里会被页面吃掉，壳的 WndProc 收不到（`WM_KEYDOWN` 只发给持有焦点的那个子窗口，不是顶层窗口），等于把用户锁死在全屏里。留条 = 永远有路可退；代价是内容少 32px，可接受。
+    - 构造函数尾部要**补调一次** `SyncDashFullscreenIcon()`：`ApplyStoredOrDefaultPlacement()` 可能在 `_chrome` 建出来**之前**就把窗口置成最大化，那时 `MaximizedChanged` 的差分还没挂上，图标会停在「全屏」骗人。
+
+45. **`Background="Transparent"` 才可命中，画刷给 `null` 完全不可命中；按钮组自己不能有背景**（2026-09-28 复核）：同一条窗口条上拖动层、全屏按钮、关闭按钮都靠这条成立（自检已钉住）。而按钮的外层 `StackPanel` **不能设 `Background`** —— 一设就等于在拖动层之上盖了块不可穿透的板，组内空隙与组左侧那片空白全变成「点上去没反应、也拖不动」的死区。另外**同一行里关闭要排在全屏之后**（z 更高、最右一颗是关闭），符合 Windows 惯例。
+
+46. **看板页面自带的浏览器滚动条：只有窗口小于约 1367×627 才出现，而且是深色的**（2026-09-28 多弗朗截图：「这个滑动条删掉。不要显示」）：
+    - **触发条件**：run-analytics 页面比视口高时才纵向溢出。实测——窗口 1367×627 时 `scrollHeight == innerHeight`（正好不滚，**没有条**）；窗口缩到 1030×615（客户端 1014×567）时 `scrollHeight=713 > 567`，溢出 146px，右缘才出现那条 15px。**所以「有没有它」取决于窗口大小，不是恒定现象**；复现必须先设小窗，否则会得出「我这儿根本没有」的错误结论。
+    - **为什么是深色**：`styles.css` 没有声明 `color-scheme`，Chromium 就按系统深色偏好画条 → 轨道 `rgb(44,44,44)`、滑块 `rgb(159,159,159)`，压在 `--bg:#eaf0f2` 的浅色页上格外突兀。多弗朗那张截图的像素逐色与此吻合，是定位它的铁证。
+    - **怎么修**：壳侧注入 `AddScriptToExecuteOnDocumentCreatedAsync(NoScrollbarScript)`，**必须在 `Navigate` 之前**注册（这个 API 只对之后创建的文档生效）。CSS 要写两套：`html,body` **和** `body *` —— 少写后者的话页内那些 `overflow-y:auto` 的面板（`.history-list` / `.fitness-run-list`）照旧露条。`::-webkit-scrollbar{display:none}` 与 `scrollbar-width:none` 双保险（前者一被声明，Chromium 就从 Fluent 滚动条切回可自定义那条）。**只藏视觉、不停用滚动** —— 滚轮 / 键盘 / 拖动照旧，用户要的是「看不到」不是「不能滚」。
+    - **怎么证明**（不靠截图）：nav-done 打一行 `viewport {...bar,hid}`，`bar = innerWidth - clientWidth` 就是滚动条宽度，`hid` 是注入样式有没有落地。实测 `bar` 15 → 0、`hid` 0 → 1；再对窗口发真实滚轮（`mouse_event(MOUSEEVENTF_WHEEL)`），同区域像素差 14.54 ⇒ 滚动仍可用。
+
+
 
 
 ---
@@ -343,5 +415,6 @@ powershell -ExecutionPolicy Bypass -File backend/start.ps1   # → http://127.0.
 5. **`taskkill /F` 强杀壳会留孤儿 `msedgewebview2.exe`**，之后可能导航不完成（卡在启动遮罩、日志 `splash: 导航超时`）。构建前尽量让壳从托盘正常退出。
 6. **WinAppSDK 1.6 的 `AppWindowChangedEventArgs` 没有 `DidPresenterStateChange`**，最大化翻转要在 `WindowChrome` 里自己差分（`EmitMaximized`）。
 7. **页面发壳消息一律走 `shellChromeCommand()` 且传对象，绝不自己 `postMessage(JSON.stringify(...))`**：壳侧用 `e.WebMessageAsJson` 解析，自己 stringify 会把整条消息降级成一个 JSON **字符串**，`root.TryGetProperty("type")` 取不到，命令被**静默丢弃**（日志一条不留）。2026-09-26 的 `applyTheme` 就栽在这——代码看着完全正确、测试也过（旧断言只正则匹配源码字面量），但壳里主题切换永远不生效、`last-theme.txt` 从不生成。**排查这类「前端发了壳没收到」先看壳日志有没有对应行**（写了 `未知的 chrome-command` 是分发问题，一条都没有则是根本没解析出来）。
+8. **WebView2 启动时的后台网络活动会把「首次导航」顶成 ~2.0s（2026-09-27 查）**：Chromium 起浏览器进程时会并行做组件更新（`update.googleapis.com`）、variations seed、域名可靠性上报。本机这些域名不可达 —— `curl` 实测 `update.googleapis.com` **8s 超时**、`www.google.com` 连接被重置 —— 请求拖到超时就落在**首次导航**上：稳定 ~2.0s，而**同进程内第二次导航只要 20~90ms**（16:20 那批实测 46ms）。这一对比就是「慢在启动网络活动、不在页面本身」的铁证（页面只有 448KB，且 `index.html` 零外部 CDN）。已在 `MainWindow.CreateWebViewEnvironmentAsync()` 的 `CoreWebView2EnvironmentOptions.AdditionalBrowserArguments` 里关掉三项：`--disable-background-networking` / `--disable-component-update` / `--disable-domain-reliability`。**别删**。这条**工具会话验不了**（见本节末尾「已知未验证」），效果只能由人双击后读 `web-shell.log` 验收。
 
-**已知未验证（工具会话验不了）**：从工具会话启动的壳，WebView2 能 ready 但**导航不完成**（`splash: 导航超时`）。所以「空白区拖动手感、托盘 / 全屏按钮、顶栏观感」要由人从开始菜单的 lnk 打开验收。
+**已知未验证（工具会话验不了）**：从工具会话启动的壳，WebView2 能 ready 但**导航不完成**（`splash: 导航超时`）—— 实测连 `msedgewebview2.exe` 子进程都不会起来（按命令行过滤 `ApexShell` 得 0 个），所以这是**环境限制、不是代码问题**。因此「空白区拖动手感、托盘 / 全屏按钮、顶栏观感」以及**启动耗时里的「首次导航」一段（`nav-start` → `nav-done`）**都要由人双击拉起后验收，agent 只读它留下的 `web-shell.log`。
