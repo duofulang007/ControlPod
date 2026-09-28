@@ -11,7 +11,9 @@
 - `projectId`、`name`、`version`、`projectRoot`
 - `actions.run`，其中包含 `program`、`cwd` 与字符串数组 `args`
 
-可用占位符为 `{module_dir}`、`{project_root}`、`{run_dir}`、`{result_path}`、`{log_path}`。未知占位符会被拒绝，不会交给 shell 解释。
+可用占位符为 `{module_dir}`、`{project_root}`、`{console_root}`、`{run_dir}`、`{result_path}`、`{log_path}`。未知占位符会被拒绝，不会交给 shell 解释。跨项目的模块若要引用 console 自己的虚拟环境，写 `{console_root}`，不要写绝对路径。
+
+建议同时声明 `projectName` 与 `projectDescription`：项目名与描述取自 manifest，缺省会继承内置模块的文案。
 
 ## 动作含义
 
