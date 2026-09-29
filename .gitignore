@@ -28,7 +28,7 @@ backend/docs/*.visual-check.*
 # it manages its own history and health data; this repo tracks nothing under it.
 run-analytics/
 
-# WinUI shell (apex-console/shell): C# build artifacts
+# WinUI shell (ControlPod/shell): C# build artifacts
 shell/bin/
 shell/obj/
 shell/*.user

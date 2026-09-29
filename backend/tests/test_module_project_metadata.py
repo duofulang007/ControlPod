@@ -107,7 +107,7 @@ def test_manifest_without_project_name_uses_neutral_fallback(tmp_path: Path) -> 
 
 def test_external_repository_manifest_registers_from_projects_root(tmp_path: Path) -> None:
     projects_dir = tmp_path / "Projects"
-    console_root = projects_dir / "apex-console"
+    console_root = projects_dir / "ControlPod"
     modules_dir = console_root / "backend" / "modules"
     external_project = projects_dir / "example-project"
     manifest_path = _write_external_manifest(external_project, "example-project")

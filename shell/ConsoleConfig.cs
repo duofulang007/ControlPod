@@ -11,7 +11,7 @@ namespace ApexShell;
 /// </summary>
 public static class ConsoleConfig
 {
-    public static string ProjectDir { get; } = @"D:\Projects\apex-console";
+    public static string ProjectDir { get; } = @"D:\Projects\ControlPod";
 
     public static string BackendDir { get; } = Path.Combine(ProjectDir, "backend");
 

@@ -31,8 +31,8 @@ ControlPod（简称 CPod）是面向 Windows 的本地个人总控台：把项�
 ### 方式一：桌面外壳（日常入口）
 
 ```powershell
-git clone https://github.com/duofulang007/apex-console.git apex-console
-cd apex-console
+git clone https://github.com/duofulang007/ControlPod.git ControlPod
+cd ControlPod
 
 # 1. 后端虚拟环境：浏览器模式与后端测试使用（外壳自身不依赖 Python）
 powershell -ExecutionPolicy Bypass -File backend\bootstrap.ps1
@@ -78,7 +78,7 @@ powershell -ExecutionPolicy Bypass -File backend\bootstrap.ps1 -Python "C:\Pytho
 ## 项目结构
 
 ```text
-apex-console/
+ControlPod/
 ├─ index.html                 前端入口
 ├─ app.js                     前端逻辑与页面渲染
 ├─ styles.css                 全站样式与设计令牌

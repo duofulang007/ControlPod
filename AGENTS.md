@@ -288,7 +288,7 @@ powershell -ExecutionPolicy Bypass -File backend/start.ps1   # → http://127.0.
 
 - **改完必跑**：`node smoke-test.js`（末行 `ALL_PASS`，790 项）；改壳代码还要跑 `ApexShell.exe --selftest`（283 项，逐条落盘便于定位死点）；改后端还要跑 `pytest backend/tests -q`（当前 91 项通过）。**结构变了补断言，删功能补负向断言**。
   - **删根目录文件后务必跑前端冒烟测试**：里面有一条「根目录白名单」断言（`expectedFiles`），删了文件不同步改断言就会红——2026-09-25 删 `00-启动 APEX 总控台.lnk` 时就漏跑过一次。
-- **本目录有 git**（`D:\Projects\apex-console`）：动手前先看 `git status`，别破坏性覆盖；提交粒度按主题，别把多个主题混在一个提交里。
+- **本目录有 git**（`D:\Projects\ControlPod`）：动手前先看 `git status`，别破坏性覆盖；提交粒度按主题，别把多个主题混在一个提交里。
 - **根目录只放源码**（Web 三件套 + `smoke-test.js` + `AGENTS.md` + `README.md`），其余一律进 `shell/` 或 `backend/`。源码**纯 LF**：批量改写后复核 `b.count(b'\r\n') === 0`（见 §10 第 11 条）。
 - 一次只做一个主题的改动，不顺手重构无关代码；需求不明确先问。
 - **交付习惯**：改完要给出「已验证可用」的结论（构建 / 测试 / 自测日志 / 无头验证都跑过），不要把「试一下」的循环丢给人；只有必须人眼确认的视觉细节才请人验收。

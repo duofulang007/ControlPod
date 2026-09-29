@@ -12,7 +12,7 @@ using Microsoft.Web.WebView2.Core;
 namespace ApexShell;
 
 /// <summary>
-/// 一期壳：窗口 + WebView2，用虚拟主机映射加载 apex-console 的 Web 三件套，
+/// 一期壳：窗口 + WebView2，用虚拟主机映射加载 ControlPod 的 Web 三件套，
 /// Web 层零改动。WebMessage 通信链路在下一步接入。
 ///
 /// 启动路径上同时有两条昂贵的初始化：①LocalApi（开库 / 迁移 / 模块登记 / 中断回收），
@@ -24,8 +24,8 @@ public sealed partial class MainWindow : Window
     /// <summary>虚拟主机名（不含 scheme）。页面内相对路径都会解析到这个域下。</summary>
     private const string VirtualHost = "apex.local";
 
-    /// <summary>Web 三件套所在目录（apex-console 仓库根）。</summary>
-    private const string WebRoot = @"D:\Projects\apex-console";
+    /// <summary>Web 三件套所在目录（ControlPod 仓库根）。</summary>
+    private const string WebRoot = @"D:\Projects\ControlPod";
 
     /// <summary>遮罩兜底时限：导航迟迟不完成时不能把用户永远按在遮罩上。</summary>
     private static readonly TimeSpan SplashTimeout = TimeSpan.FromSeconds(20);
