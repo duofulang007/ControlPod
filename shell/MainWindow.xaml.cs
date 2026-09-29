@@ -25,7 +25,6 @@ public sealed partial class MainWindow : Window
     private const string VirtualHost = "apex.local";
 
     /// <summary>Web 三件套所在目录（ControlPod 仓库根）。</summary>
-    private const string WebRoot = @"D:\Projects\ControlPod";
 
     /// <summary>遮罩兜底时限：导航迟迟不完成时不能把用户永远按在遮罩上。</summary>
     private static readonly TimeSpan SplashTimeout = TimeSpan.FromSeconds(20);
@@ -648,7 +647,7 @@ public sealed partial class MainWindow : Window
             SetSplashHint("正在载入界面…");
 
             Web.CoreWebView2.SetVirtualHostNameToFolderMapping(
-                VirtualHost, WebRoot, CoreWebView2HostResourceAccessKind.Allow);
+                VirtualHost, ConsoleConfig.WebRoot, CoreWebView2HostResourceAccessKind.Allow);
 
             void Log(string msg) => ShellLog.Log(msg);
 
@@ -976,16 +975,11 @@ public sealed partial class MainWindow : Window
         }
     }
 
-    /* ---------- WebMessage → 本机后端 代理（一期桥） ----------
+    /* ---------- WebMessage → C# 本地 API ----------
        协议：JS 发 {type:"api-call", id, path, method, body}；
-             壳回 {type:"api-reply", id, ok, status, text} / {…, ok:false, error}。
-       后端已全部搬到壳内 LocalApi；下面只剩「万一漏移植」的 Python 应急兜底。 */
+             壳回 {type:"api-reply", id, ok, status, text} / {…, ok:false, error}。 */
 
-    private const string BackendBase = "http://127.0.0.1:8765/api";
-    private static readonly System.Net.Http.HttpClient Http = new();
-
-    /// <summary>二期本地路由分发器：已移植块在壳内直接作答，其余走上面的 Python 代理。
-    /// 在线程池上构造（见构造函数的启动加速 ①），每个使用点先 await 它。</summary>
+    /// <summary>C# 唯一本地路由分发器。在线程池上构造，每个使用点先 await 它。</summary>
     private readonly Task<LocalApi> _localApiTask;
 
     /// <summary>WebView2 环境创建任务（构造期即启动，见启动加速 ②）。</summary>
@@ -996,95 +990,38 @@ public sealed partial class MainWindow : Window
         long id = -1;
         try
         {
-            using var doc = System.Text.Json.JsonDocument.Parse(e.WebMessageAsJson);
-            var root = doc.RootElement;
-            if (root.TryGetProperty("type", out var t))
+            var request = WebMessageProtocol.Parse(e.WebMessageAsJson);
+            id = request.Id;
+            if (request.Type == "shell-toast")
             {
-                var type = t.GetString();
-                if (type == "shell-toast")
-                {
-                    // JS 侧运行终态的系统通知：fire-and-forget，不回帖
-                    var title = root.TryGetProperty("title", out var tt) ? tt.GetString() : null;
-                    var message = root.TryGetProperty("message", out var mm2) ? mm2.GetString() : null;
-                    _tray?.ShowToast(title ?? "ControlPod", message ?? "");
-                    return;
-                }
-                if (type == "chrome-command")
-                {
-                    // 顶栏的窗口控制按钮：缩小到托盘 / 全屏。
-                    // 走 WebMessage 不走 API 路由 —— 自测会把路由清单和 backend/app/main.py 双向比对，
-                    // 多一条就得连 Python 后端一起改，没必要。
-                    var command = root.TryGetProperty("command", out var cmd) ? cmd.GetString() : null;
-                    if (command == "hide")
-                    {
-                        _appWindow?.Hide();
-                        ShellLog.Log("chrome: 缩小到托盘（顶栏按钮）");
-                    }
-                    else if (command == "drag")
-                    {
-                        _chrome.BeginDrag();
-                    }
-                    else if (command == "toggle-maximize")
-                    {
-                        _chrome.ToggleMaximize();
-                    }
-                    else if (command == "theme")
-                    {
-                        // 页面 applyTheme 唯一收口推送：壳底色跟随，深色下顶部保留区不露白带
-                        var value = root.TryGetProperty("value", out var vv) ? vv.GetString() : null;
-                        SetShellTheme(value == "dark" ? ShellTone.Dark : ShellTone.Light, persist: true);
-                    }
-                    else
-                    {
-                        ShellLog.Log("chrome: 未知的 chrome-command " + command);
-                    }
-                    return;
-                }
-                if (type != "api-call") return;
-            }
-            id = root.GetProperty("id").GetInt64();
-            var path = root.GetProperty("path").GetString() ?? "/";
-            var method = root.TryGetProperty("method", out var m) && m.GetString() is { Length: > 0 } mm ? mm : "GET";
-            var body = root.TryGetProperty("body", out var b) && b.ValueKind == System.Text.Json.JsonValueKind.String
-                ? b.GetString() : null;
-
-            // 二期块7：所有路由都已移植（LocalApi.CoveredRoutes，自测 routes 阶段双向对照）。
-            // 下面的 Python 代理只剩「万一漏移植」的应急兜底，正常永远不会走到。
-            var api = await _localApiTask;
-            var local = await api.HandleAsync(method, path, body);
-            if (local != null)
-            {
-                ShellLog.Log($"local-api {method} {path} -> {local.Status}");
-                sender.PostWebMessageAsJson(System.Text.Json.JsonSerializer.Serialize(new
-                {
-                    type = "api-reply", id, ok = true, status = local.Status, text = local.Text
-                }));
+                _tray?.ShowToast(request.Title ?? "ControlPod", request.Message ?? "");
                 return;
             }
-
-            ShellLog.Log($"未移植路由（漏移植？）{method} {path}，尝试应急代理 8765");
-            using var req = new System.Net.Http.HttpRequestMessage(new HttpMethod(method), BackendBase + path);
-            if (body != null)
-                req.Content = new System.Net.Http.StringContent(body, System.Text.Encoding.UTF8, "application/json");
-            var resp = await Http.SendAsync(req);
-            var text = await resp.Content.ReadAsStringAsync();
-
-            var reply = System.Text.Json.JsonSerializer.Serialize(new
+            if (request.Type == "chrome-command")
             {
-                type = "api-reply", id, ok = true,
-                status = (int)resp.StatusCode, text
-            });
-            sender.PostWebMessageAsJson(reply);
+                if (request.Command == "hide")
+                {
+                    _appWindow?.Hide();
+                    ShellLog.Log("chrome: 缩小到托盘（顶栏按钮）");
+                }
+                else if (request.Command == "drag") _chrome.BeginDrag();
+                else if (request.Command == "toggle-maximize") _chrome.ToggleMaximize();
+                else if (request.Command == "theme")
+                    SetShellTheme(request.Value == "dark" ? ShellTone.Dark : ShellTone.Light, persist: true);
+                else ShellLog.Log("chrome: 未知的 chrome-command " + request.Command);
+                return;
+            }
+            if (request.Type != "api-call") return;
+
+            var api = await _localApiTask;
+            var local = await api.HandleAsync(request.Method, request.Path, request.Body);
+            ShellLog.Log($"local-api {request.Method} {request.Path} -> {local.Status}");
+            sender.PostWebMessageAsJson(WebMessageProtocol.Success(id, local));
         }
         catch (Exception ex)
         {
             // 失败也必须回帖，否则 JS 侧的 Promise 会永远挂着
-            var reply = System.Text.Json.JsonSerializer.Serialize(new
-            {
-                type = "api-reply", id, ok = false, status = 0,
-                error = "壳代理失败：" + ex.Message
-            });
-            sender.PostWebMessageAsJson(reply);
+            sender.PostWebMessageAsJson(WebMessageProtocol.Failure(id, ex));
         }
     }
 }

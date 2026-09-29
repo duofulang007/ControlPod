@@ -18,7 +18,7 @@ namespace ApexShell;
 public sealed class ActivityService
 {
     private readonly Db _db;
-    /// <summary>activity_config.json 所在目录（Python 是 db.path.parent，即 backend/data）。</summary>
+    /// <summary>activity_config.json 所在目录（默认 %LOCALAPPDATA%\ControlPod）。</summary>
     private readonly string _dataDir;
     /// <summary>自测注入：直接给定代码目录集合，跳过配置文件读取。</summary>
     private readonly IReadOnlyList<string>? _codeDirsOverride;

@@ -6,10 +6,9 @@ using Microsoft.Data.Sqlite;
 namespace ApexShell;
 
 /// <summary>
-/// 二期 C# 版 backend/app/db.py：同一份 SQLite 库的直读直写层。
-/// 迁移 1–10 的 SQL 与 Python 版逐条对齐（对照清单 = backend/tests 里全部 db 相关用例），
-/// user_version 协议一致，因此两套栈可以先后在同一库上各自 init 而互不破坏。
-/// 注意：PRAGMA foreign_keys 是连接级设置，每次 Open 都要重设（与 Python 版相同）。
+/// ControlPod 的 SQLite 直读直写层。
+/// 迁移 1–10 保留旧版本升级兼容，并由 SelfTest 的逐版本用例保护。
+/// 注意：PRAGMA foreign_keys 是连接级设置，每次 Open 都要重设。
 /// </summary>
 public sealed class Db
 {
@@ -109,7 +108,7 @@ public sealed class Db
         return cmd.ExecuteReader();
     }
 
-    /// <summary>整库迁移：user_version 协议与 Python 版一致，全部包在一个 IMMEDIATE 事务里。</summary>
+    /// <summary>整库迁移：使用 user_version，全部包在一个 IMMEDIATE 事务里。</summary>
     public void Init()
     {
         using var conn = Open();
@@ -138,7 +137,7 @@ public sealed class Db
         }
     }
 
-    /// <summary>分发到与 db.py MIGRATIONS 同序号的迁移函数。</summary>
+    /// <summary>按版本顺序分发迁移函数。</summary>
     private static void Migrate(SqliteConnection conn, int version)
     {
         switch (version)

@@ -6,7 +6,7 @@ using Microsoft.Win32;
 namespace ApexShell;
 
 /// <summary>
-/// 二期 C# 版 backend/app/startup_manager.py，逐条对齐其行为（对照 90 项后端测试里的 startup 组）。
+/// ControlPod 的 Windows 开机启动管理器。
 /// 两个注册表位置缺一不可：
 /// - Run：真正被执行的命令，值存在且等于我们的命令才算注册上；
 /// - Explorer\StartupApproved\Run：任务管理器「启动应用」的开关状态，
@@ -29,16 +29,17 @@ public sealed class StartupManager
 
     public StartupManager(string? valueName = null, string? command = null)
     {
-        _valueName = valueName ?? "APEX Console";
+        _valueName = valueName ?? "ControlPod";
         _commandOverride = command;
     }
 
-    /// <summary>开机要执行的命令：直接拉 WinUI 壳（与 Python 版 _launcher_command 同一逻辑，
-    /// 命令必须一字不差，否则两边算出的 registered 会互相打架）。壳没构建时回退 console_launcher。</summary>
+    /// <summary>开机只启动 C# 桌面壳；不再回退已经退役的 Python 浏览器启动器。</summary>
     public string Command => _commandOverride ?? LauncherCommand();
 
     public static string LauncherCommand()
     {
+        var installedShellExe = Path.Combine(@"D:\Apps\ControlPod", "ApexShell.exe");
+        if (File.Exists(installedShellExe)) return QuoteCommandLine(installedShellExe);
         var releaseShellExe = System.IO.Path.Combine(
             ConsoleConfig.ProjectDir, "shell", "bin", "Release", "publish", "ApexShell.exe");
         if (File.Exists(releaseShellExe)) return QuoteCommandLine(releaseShellExe);
@@ -46,9 +47,11 @@ public sealed class StartupManager
             ConsoleConfig.ProjectDir, "shell", "bin", "x64", "Debug",
             "net10.0-windows10.0.19041.0", "win-x64", "ApexShell.exe");
         if (File.Exists(debugShellExe)) return QuoteCommandLine(debugShellExe);
-        var pythonw = System.IO.Path.Combine(ConsoleConfig.BackendDir, ".venv", "Scripts", "pythonw.exe");
-        var launcher = System.IO.Path.Combine(ConsoleConfig.BackendDir, "console_launcher.py");
-        return $"{QuoteCommandLine(pythonw)} {QuoteCommandLine(launcher)}";
+        var current = Environment.ProcessPath;
+        if (!string.IsNullOrWhiteSpace(current) &&
+            string.Equals(System.IO.Path.GetFileName(current), "ApexShell.exe", StringComparison.OrdinalIgnoreCase))
+            return QuoteCommandLine(current);
+        throw new StartupRegistrationError("找不到可用于开机启动的 ControlPod 桌面程序");
     }
 
     /// <summary>subprocess.list2cmdline 的最小实现：路径含空格就整体加双引号（本项目路径不含引号字符）。</summary>
@@ -110,7 +113,7 @@ public sealed class StartupManager
             else
             {
                 try { key.DeleteValue(_valueName, throwOnMissingValue: false); }
-                catch (System.ArgumentException) { /* 本来就没有，同 Python 版吞掉 */ }
+                catch (System.ArgumentException) { /* 本来就没有 */ }
             }
         }
         catch (StartupRegistrationError) { throw; }
@@ -163,14 +166,14 @@ public sealed class StartupManager
     }
 }
 
-/// <summary>与 Python 版 status() 返回的 JSON 字段一一对应（键名必须保持 Python 的小写蛇形）。</summary>
+/// <summary>启动项状态通过固定的小写蛇形字段返回给 Web 界面。</summary>
 public sealed record StartupStatus(
     [property: JsonPropertyName("enabled")] bool Enabled,
     [property: JsonPropertyName("registered")] bool Registered,
     [property: JsonPropertyName("approved")] bool Approved,
     [property: JsonPropertyName("command")] string Command);
 
-/// <summary>与 Python 版 StartupRegistrationError 同名对应：路由层映射为 503。</summary>
+/// <summary>启动项读写失败：路由层映射为 503。</summary>
 public sealed class StartupRegistrationError : Exception
 {
     public StartupRegistrationError(string message) : base(message) { }

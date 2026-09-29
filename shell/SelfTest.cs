@@ -11,7 +11,7 @@ namespace ApexShell;
 /// 二期 C# 后端服务的无头自测（ApexShell.exe --selftest [日志路径]）。
 /// 不创建任何窗口 / WebView2 —— 工具会话出身会被本机安全软件掐 WebView2，
 /// 但纯计算 + 注册表 + SQLite 不会被拦，所以这里能全自动验证。
-/// 覆盖：Db 迁移 1–10（临时库全跑 + 与 Python 真库 schema 对照）+ 读写往返 +
+/// 覆盖：Db 迁移 1–10（临时库全跑 + 与生产库 schema 对照）+ 读写往返 +
 /// StartupManager 注册表读写往返（用独立测试值名，绝不碰真实启动项）。
 /// </summary>
 public static class SelfTest
@@ -29,7 +29,7 @@ public static class SelfTest
     {
         _stages = stages?.ToHashSet(StringComparer.Ordinal) ?? new HashSet<string>(StringComparer.Ordinal);
         _logPath = logPath;
-        if (Stage("base")) { CheckUtcNow(); CheckDbMigrationsOnTemp(); CheckDbSchemaMatchesPythonRealDb(); CheckDbCrudRoundtrip(); CheckDeadDeclarations(); }
+        if (Stage("base")) { CheckUtcNow(); CheckDbMigrationsOnTemp(); CheckLegacyDbMigrations(); CheckDbSchemaMatchesProductionDb(); CheckDbCrudRoundtrip(); CheckDeadDeclarations(); }
         if (Stage("startup")) { CheckStartupManagerRoundtrip(); CheckStartupManagerReadonlyRealRegistry(); }
         if (Stage("scan")) { CheckScannerIdParity(); CheckScannerFiltering(); CheckStartAppGate(); }
         if (Stage("realscan")) CheckRealScan();
@@ -43,7 +43,7 @@ public static class SelfTest
         if (Stage("modules")) CheckModuleDomainRoutes();
         if (Stage("bootstrap")) CheckBootstrapPayload();
         if (Stage("dashchrome")) CheckDashboardChrome();
-        if (Stage("routes")) CheckRouteCoverage();
+        if (Stage("routes")) { CheckRouteCoverage(); CheckWebMessageProtocol(); }
 
         var verdict = Failed.Count == 0 ? "PASS" : "FAIL";
         Lines.Add($"=== SELFTEST {verdict}: {_passed} passed, {Failed.Count} failed ===");
@@ -140,13 +140,96 @@ public static class SelfTest
         }
     }
 
-    /// <summary>对照真实生产库（Python 正在用也无所谓：只读模式 + WAL）。</summary>
-    private static void CheckDbSchemaMatchesPythonRealDb()
+    /// <summary>覆盖旧 Python 测试中所有会影响用户数据安全的升级入口。</summary>
+    private static void CheckLegacyDbMigrations()
+    {
+        try
+        {
+            var unversioned = Path.Combine(TempDir(), "legacy-unversioned.db");
+            RawScript(unversioned, @"
+                CREATE TABLE projects (id TEXT PRIMARY KEY,name TEXT NOT NULL UNIQUE,description TEXT NOT NULL DEFAULT '',status TEXT NOT NULL DEFAULT '正常',created_at TEXT NOT NULL,updated_at TEXT NOT NULL);
+                CREATE TABLE modules (id TEXT PRIMARY KEY,name TEXT NOT NULL,version TEXT NOT NULL,manifest_path TEXT NOT NULL,enabled INTEGER NOT NULL DEFAULT 1,updated_at TEXT NOT NULL);
+                CREATE TABLE runs (id TEXT PRIMARY KEY,project_id TEXT NOT NULL,module_id TEXT NOT NULL,status TEXT NOT NULL,started_at TEXT NOT NULL,finished_at TEXT,exit_code INTEGER,error TEXT,run_dir TEXT NOT NULL);
+                INSERT INTO projects VALUES ('apex','APEX Automation','保留项目','正常','2026-09-16','2026-09-16');
+                INSERT INTO modules VALUES ('apex-launcher','APEX 启动','1.0.0','module.json',1,'2026-09-16');
+                INSERT INTO runs VALUES ('run-1','apex','apex-launcher','succeeded','2026-09-16','2026-09-16',0,NULL,'runs/run-1');");
+            var legacyDb = new Db(unversioned);
+            legacyDb.Init();
+            Check("无版本号旧库升级不丢项目", legacyDb.FetchOne("SELECT description FROM projects WHERE id='apex'")?["description"] as string == "保留项目");
+            Check("无版本号旧库补齐 runs.action", legacyDb.FetchOne("SELECT action FROM runs WHERE id='run-1'")?["action"] as string == "run");
+            var module = legacyDb.FetchOne("SELECT type,description,entry,args FROM modules WHERE id='apex-launcher'");
+            Check("无版本号旧库补齐模块字段", module is not null &&
+                module["type"] as string == "script" && module["description"] as string == "" &&
+                module["entry"] as string == "" && module["args"] as string == "");
+
+            var version1 = Path.Combine(TempDir(), "legacy-v1.db");
+            RawScript(version1, @"
+                CREATE TABLE tasks (id TEXT PRIMARY KEY,project_id TEXT NOT NULL,title TEXT NOT NULL,due_date TEXT,priority TEXT NOT NULL DEFAULT '中',completed INTEGER NOT NULL DEFAULT 0,created_at TEXT NOT NULL,updated_at TEXT NOT NULL);
+                INSERT INTO tasks VALUES ('task-1','apex','保留旧任务','今天','中',0,'2026-09-16','2026-09-16');
+                PRAGMA user_version=1;");
+            var v1 = new Db(version1); v1.Init();
+            Check("v1 升级补齐 task.kind 且保留任务", v1.FetchOne("SELECT kind FROM tasks WHERE id='task-1'")?["kind"] as string == "todo");
+
+            foreach (var (version, table, requiredColumn) in new[]
+                     {
+                         (2, "notes", "links_json"),
+                         (3, "project_contexts", "rules_json"),
+                         (4, "applications", "favorite"),
+                         (5, "project_files", "path"),
+                         (6, "project_executions", "status"),
+                     })
+            {
+                var path = Path.Combine(TempDir(), $"legacy-v{version}.db");
+                RawScript(path, $"PRAGMA user_version={version};");
+                new Db(path).Init();
+                Check($"v{version} 升级创建 {table}", ColumnSet(path, table).Contains(requiredColumn));
+            }
+
+            var version7 = Path.Combine(TempDir(), "legacy-v7.db");
+            RawScript(version7, @"
+                CREATE TABLE applications (id TEXT PRIMARY KEY,name TEXT NOT NULL UNIQUE,category TEXT NOT NULL,icon TEXT NOT NULL DEFAULT 'idea',favorite INTEGER NOT NULL DEFAULT 0,size_label TEXT NOT NULL DEFAULT '—',use_count INTEGER NOT NULL DEFAULT 0,last_opened_at TEXT,running INTEGER NOT NULL DEFAULT 0,created_at TEXT NOT NULL,updated_at TEXT NOT NULL);
+                INSERT INTO applications VALUES ('legacy','旧应用','效率','idea',0,'—',0,NULL,0,'2026-09-20','2026-09-20');
+                PRAGMA user_version=7;");
+            var v7 = new Db(version7); v7.Init();
+            var app = v7.FetchOne("SELECT name,launch_path,source_key FROM applications WHERE id='legacy'");
+            Check("v7 升级补启动入口且保留应用", app is not null && app["name"] as string == "旧应用" && app["launch_path"] as string == "" && app["source_key"] as string == "");
+
+            var version9 = Path.Combine(TempDir(), "legacy-v9.db");
+            RawScript(version9, @"
+                CREATE TABLE projects (id TEXT PRIMARY KEY,name TEXT NOT NULL UNIQUE,description TEXT NOT NULL DEFAULT '',status TEXT NOT NULL DEFAULT '正常',created_at TEXT NOT NULL,updated_at TEXT NOT NULL);
+                INSERT INTO projects VALUES ('b','第二个','','正常','2026-01-02','2026-01-02');
+                INSERT INTO projects VALUES ('a','第一个','','正常','2026-01-01','2026-01-01');
+                INSERT INTO projects VALUES ('c','第三个','','正常','2026-01-03','2026-01-03');
+                PRAGMA user_version=9;");
+            var v9 = new Db(version9); v9.Init();
+            var ordered = v9.FetchAll("SELECT id,sort_order FROM projects ORDER BY sort_order,created_at,id");
+            Check("v9 升级按原时间稳定回填项目顺序", ordered.Count == 3 &&
+                ordered[0]["id"] as string == "a" && (long)ordered[0]["sort_order"]! == 0 &&
+                ordered[1]["id"] as string == "b" && (long)ordered[1]["sort_order"]! == 1 &&
+                ordered[2]["id"] as string == "c" && (long)ordered[2]["sort_order"]! == 2);
+        }
+        catch (Exception ex)
+        {
+            Check("旧库逐版本迁移套件无异常", false, ex.GetType().Name + ": " + ex.Message);
+        }
+    }
+
+    private static void RawScript(string path, string sql)
+    {
+        using var conn = new Microsoft.Data.Sqlite.SqliteConnection($"Data Source={path}");
+        conn.Open();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = sql;
+        cmd.ExecuteNonQuery();
+    }
+
+    /// <summary>对照真实生产库（只读模式 + WAL，不修改用户数据）。</summary>
+    private static void CheckDbSchemaMatchesProductionDb()
     {
         var realPath = ConsoleConfig.DbPath;
         if (!File.Exists(realPath))
         {
-            Check("与 Python 真库 schema 对照", false, $"真库不存在：{realPath}");
+            Check("与生产库 schema 对照", false, $"生产库不存在：{realPath}");
             return;
         }
         try
@@ -155,8 +238,8 @@ public static class SelfTest
             var tempPath = Path.Combine(TempDir(), "same.db");
             new Db(tempPath).Init();
             var fresh = TableSet(tempPath);
-            Check("C# 全新迁移与 Python 真库的表清单一致", real.SetEquals(fresh),
-                $"真库独有=[{string.Join(',', real.Except(fresh))}] 新库独有=[{string.Join(',', fresh.Except(real))}]");
+            Check("C# 全新迁移与生产库的表清单一致", real.SetEquals(fresh),
+                $"生产库独有=[{string.Join(',', real.Except(fresh))}] 新库独有=[{string.Join(',', fresh.Except(real))}]");
 
             // 关键列抽查：迁移 8/10 的 ALTER 列必须与真库对齐
             foreach (var (table, column) in new[]
@@ -166,12 +249,12 @@ public static class SelfTest
                      })
             {
                 var realCols = ColumnSet(realPath, table);
-                Check($"{table}.{column} 在真库存在", realCols.Contains(column));
+                Check($"{table}.{column} 在生产库存在", realCols.Contains(column));
             }
         }
         catch (Exception ex)
         {
-            Check("与 Python 真库 schema 对照无异常", false, ex.GetType().Name + ": " + ex.Message);
+            Check("与生产库 schema 对照无异常", false, ex.GetType().Name + ": " + ex.Message);
         }
     }
 
@@ -320,18 +403,20 @@ public static class SelfTest
         try
         {
             var real = new StartupManager().Status();
-            var releaseShellExe = Path.Combine(ConsoleConfig.ProjectDir, "shell", "bin", "Release", "publish",
+            var releaseShellExe = Path.Combine(@"D:\Apps\ControlPod", "ApexShell.exe");
+            var legacyReleaseShellExe = Path.Combine(ConsoleConfig.ProjectDir, "shell", "bin", "Release", "publish",
                 "ApexShell.exe");
             var debugShellExe = Path.Combine(ConsoleConfig.ProjectDir, "shell", "bin", "x64", "Debug",
                 "net10.0-windows10.0.19041.0", "win-x64", "ApexShell.exe");
-            var shellExe = File.Exists(releaseShellExe) ? releaseShellExe : debugShellExe;
+            var shellExe = File.Exists(releaseShellExe) ? releaseShellExe
+                : File.Exists(legacyReleaseShellExe) ? legacyReleaseShellExe : debugShellExe;
             var expected = File.Exists(shellExe)
                 ? shellExe.Contains(' ') ? "\"" + shellExe + "\"" : shellExe
                 : null;
             if (expected != null)
                 Check("现役启动命令指向壳 exe", real.Command == expected, real.Command);
             else
-                Check("现役启动命令（壳未构建则回退 console_launcher）", real.Command.Contains("console_launcher"), real.Command);
+                Check("没有可执行壳时启动项明确失败", false, real.Command);
         }
         catch (Exception ex)
         {
@@ -2001,43 +2086,57 @@ public static class SelfTest
         }
     }
 
-    /// <summary>Python 下线证据：main.py 定义的路由与 LocalApi.CoveredRoutes 双向完全一致。</summary>
+    /// <summary>C# 唯一后端的路由清单必须固定、无重复，未知路由明确返回 404。</summary>
     private static void CheckRouteCoverage()
     {
         try
         {
-            var mainPy = Path.Combine(ConsoleConfig.BackendDir, "app", "main.py");
-            if (!File.Exists(mainPy))
-            {
-                Check("能找到 main.py 做路由对照", false, mainPy);
-                return;
-            }
-            var source = File.ReadAllText(mainPy);
-            var defined = new HashSet<(string, string)>();
-            foreach (System.Text.RegularExpressions.Match match in
-                     System.Text.RegularExpressions.Regex.Matches(source,
-                         "@app\\.(get|post|put|patch|delete)\\(\"(/api/[^\"]*)\""))
-            {
-                var method = match.Groups[1].Value.ToUpperInvariant();
-                var path = match.Groups[2].Value["/api".Length..];
-                defined.Add((method, path));
-            }
-            Check("从 main.py 解析出路由清单", defined.Count >= 45, $"{defined.Count} 条");
+            var declared = LocalApi.CoveredRoutes.Select(item => (item.Method, item.Pattern)).ToList();
+            var unique = declared.ToHashSet();
+            Check("C# 正式路由保持 51 条", declared.Count == 51, $"{declared.Count} 条");
+            Check("C# 正式路由无重复", unique.Count == declared.Count,
+                $"declared={declared.Count} unique={unique.Count}");
 
-            var covered = LocalApi.CoveredRoutes.Select(item => (item.Method, item.Pattern))
-                .ToHashSet();
-            var missing = defined.Except(covered).OrderBy(item => item.Item1 + " " + item.Item2).ToList();
-            var extra = covered.Except(defined).OrderBy(item => item.Item1 + " " + item.Item2).ToList();
-            Check("main.py 的每条路由都已在壳内移植（无遗漏）", missing.Count == 0,
-                string.Join(" | ", missing.Select(m => m.Item1 + " " + m.Item2)));
-            Check("壳内没有 main.py 不存在的多余路由", extra.Count == 0,
-                string.Join(" | ", extra.Select(m => m.Item1 + " " + m.Item2)));
-            Check("路由总数一致（Python 可以下线）", defined.Count == covered.Count,
-                $"python={defined.Count} shell={covered.Count}");
+            var api = new LocalApi(initOnStart: false);
+            var unknown = api.HandleAsync("GET", "/__unknown__", null).Result;
+            Check("未知路由明确返回 404（不再代理 8765）",
+                unknown.Status == 404 && unknown.Text.Contains("未知接口", StringComparison.Ordinal),
+                unknown.Text);
         }
         catch (Exception ex)
         {
-            Check("路由对照套件无异常", false, ex.GetType().Name + ": " + ex.Message);
+            Check("路由契约套件无异常", false, ex.GetType().Name + ": " + ex.Message);
+        }
+    }
+
+    private static void CheckWebMessageProtocol()
+    {
+        try
+        {
+            var request = WebMessageProtocol.Parse(
+                """{"type":"api-call","id":7,"path":"/health","method":"get","body":null}""");
+            Check("WebMessage api-call 强类型解析",
+                request.Type == "api-call" && request.Id == 7 && request.Path == "/health"
+                && request.Method == "GET" && request.Body is null);
+
+            var rejectedPath = false;
+            try { WebMessageProtocol.Parse("""{"type":"api-call","id":1,"path":"health"}"""); }
+            catch (JsonException) { rejectedPath = true; }
+            Check("WebMessage 拒绝非绝对 API 路径", rejectedPath);
+
+            var rejectedMethod = false;
+            try { WebMessageProtocol.Parse("""{"type":"api-call","id":1,"path":"/health","method":"TRACE"}"""); }
+            catch (JsonException) { rejectedMethod = true; }
+            Check("WebMessage 拒绝未支持的 HTTP 方法", rejectedMethod);
+
+            var success = WebMessageProtocol.Success(7, new LocalApi.Reply(200, "{}"));
+            Check("WebMessage 成功回帖包含关联 id 与状态",
+                success.Contains("\"id\":7", StringComparison.Ordinal)
+                && success.Contains("\"status\":200", StringComparison.Ordinal));
+        }
+        catch (Exception ex)
+        {
+            Check("WebMessage 协议套件无异常", false, ex.GetType().Name + ": " + ex.Message);
         }
     }
 

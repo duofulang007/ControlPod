@@ -5,79 +5,13 @@ using System.Threading.Tasks;
 namespace ApexShell;
 
 /// <summary>
-/// 二期本地 API 分发器：WebMessage 桥里「已移植到 C# 的路由」直接本地作答，
-/// 未移植的路由返回 null 交回 MainWindow 继续代理 Python 8765。
+/// ControlPod 唯一的本地 API 分发器：WebMessage 请求全部由 C# 就地作答。
 /// 路径口径与 app.js 一致：JS 发来的 path 不带 /api 前缀（如 /settings/startup）。
-/// 每移植一块就在这里加路由；全部对齐后 Python 整体下线（见 AGENTS.md 二期顺序）。
+/// 未知路由必须明确返回 404，禁止静默回退到另一套后端。
 /// </summary>
-public sealed class LocalApi
+public sealed partial class LocalApi
 {
     public sealed record Reply(int Status, string Text);
-
-    /// <summary>
-    /// 已移植到壳里的全部路由（Python 路径口径，含 {param}）。
-    /// 这是「Python 可以下线」的声明式证据：自测 `routes` 阶段会把 main.py 里
-    /// 实际定义的路由与这份清单做**双向**比对，任何一边多出来都会失败。
-    /// 新增路由时必须同步补这里，否则自测会拦下。
-    /// </summary>
-    public static readonly (string Method, string Pattern)[] CoveredRoutes =
-    {
-        ("GET", "/health"),
-        ("GET", "/settings/startup"),
-        ("PUT", "/settings/startup"),
-        ("GET", "/window"),
-        ("PUT", "/window/topmost"),
-        ("GET", "/activity/daily"),
-        ("POST", "/activity/heartbeat"),
-        ("GET", "/bootstrap"),
-        // applications（图标路由由 MainWindow 的 WebResourceRequested 在网络栈上拦截，不经 WebMessage 桥）
-        ("GET", "/applications"),
-        ("GET", "/applications/scan"),
-        ("GET", "/applications/scan/{scan_id}/icon"),
-        ("POST", "/applications/from-scan"),
-        ("PATCH", "/applications/{app_id}"),
-        ("POST", "/applications/{app_id}/launch"),
-        ("DELETE", "/applications/{app_id}"),
-        // 执行（块3）
-        ("POST", "/projects/{project_id}/executions"),
-        ("GET", "/executions/{execution_id}"),
-        ("POST", "/projects/{project_id}/run"),
-        ("POST", "/projects/{project_id}/stop"),
-        ("POST", "/projects/{project_id}/restart"),
-        ("GET", "/projects/{project_id}/runtime"),
-        ("GET", "/runs/{run_id}"),
-        // 项目 / 任务 / 记录 / 文件 / 基本资料（块5）
-        ("GET", "/projects"),
-        ("POST", "/projects"),
-        ("PUT", "/projects/order"),
-        ("PATCH", "/projects/{project_id}"),
-        ("GET", "/projects/{project_id}/delete-preview"),
-        ("DELETE", "/projects/{project_id}"),
-        ("GET", "/projects/{project_id}/files"),
-        ("POST", "/projects/{project_id}/files"),
-        ("GET", "/project-files/{file_id}/delete-preview"),
-        ("DELETE", "/project-files/{file_id}"),
-        ("POST", "/project-files/{file_id}/open"),
-        ("GET", "/projects/{project_id}/tasks"),
-        ("POST", "/projects/{project_id}/tasks"),
-        ("PATCH", "/tasks/{task_id}"),
-        ("DELETE", "/tasks/{task_id}"),
-        ("GET", "/projects/{project_id}/notes"),
-        ("POST", "/projects/{project_id}/notes"),
-        ("PATCH", "/notes/{note_id}"),
-        ("DELETE", "/notes/{note_id}"),
-        ("PUT", "/projects/{project_id}/basic-info"),
-        // 模块管理 + 项目绑定（块6）
-        ("GET", "/modules"),
-        ("POST", "/modules"),
-        ("PATCH", "/modules/{module_id}"),
-        ("GET", "/modules/{module_id}/delete-preview"),
-        ("DELETE", "/modules/{module_id}"),
-        ("PUT", "/projects/{project_id}/modules/{module_id}"),
-        ("DELETE", "/projects/{project_id}/modules/{module_id}"),
-        ("PUT", "/projects/{project_id}/applications/{application_id}"),
-        ("DELETE", "/projects/{project_id}/applications/{application_id}"),
-    };
 
     /// <summary>请求体参数校验失败（pydantic ValidationError 的等价物）→ 422。</summary>
     public sealed class RequestInvalidError : Exception
@@ -140,7 +74,7 @@ public sealed class LocalApi
             throw new ConsoleWindowError("没有可控制的 ControlPod 窗口，请先打开 ControlPod");
     }
 
-    public async Task<Reply?> HandleAsync(string method, string path, string? body)
+    public async Task<Reply> HandleAsync(string method, string path, string? body)
     {
         // 剥掉可能带的 /api 前缀与查询串，统一成 "/settings/startup" 形态；query 单独留给需要它的路由
         var route = path;
@@ -171,11 +105,13 @@ public sealed class LocalApi
                 || route.StartsWith("/project-files", StringComparison.Ordinal)
                 || route.StartsWith("/modules", StringComparison.Ordinal))
             {
-                return await Task.Run(() => route.StartsWith("/applications", StringComparison.Ordinal)
+                var domainReply = await Task.Run(() => route.StartsWith("/applications", StringComparison.Ordinal)
                     ? DispatchApplications(method, route, body)
                     : DispatchProjectDomain(method, route, body)).ConfigureAwait(false);
+                return domainReply ?? Error(404, $"未知接口：{method} {route}");
             }
-            return await DispatchAsync(method, route, query, body).ConfigureAwait(false);
+            var reply = await DispatchAsync(method, route, query, body).ConfigureAwait(false);
+            return reply ?? Error(404, $"未知接口：{method} {route}");
         }
         catch (ApplicationScanError ex)
         {
@@ -248,7 +184,7 @@ public sealed class LocalApi
         }
     }
 
-    /// <summary>main.py 的执行类路由组（块3）。未匹配的路径返回 null 走 Python 代理。</summary>
+    /// <summary>执行类路由组；未匹配时交回总分发器生成明确的 404。</summary>
     private Reply? DispatchExecutions(string method, string route, string? body)
     {
         var segments = route.Split('/', StringSplitOptions.RemoveEmptyEntries);
@@ -367,7 +303,7 @@ public sealed class LocalApi
         catch (InvalidOperationException) { return false; } // 进程已退出
     }
 
-    /// <summary>main.py /api/applications* 路由组。未匹配的 applications 子路径返回 null 走 Python 代理。</summary>
+    /// <summary>applications 路由组；未匹配时交回总分发器生成明确的 404。</summary>
     private Reply? DispatchApplications(string method, string route, string? body)
     {
         if (method == "GET" && route == "/applications")
@@ -427,7 +363,7 @@ public sealed class LocalApi
             if (method == "DELETE" && segments.Length == 2)
                 return new Reply(200, Json(_catalog.Delete(appId)));
         }
-        return null; // 未移植 → 走 Python 代理
+        return null; // 未命中该子域，继续交给下一个 C# 分发器
     }
 
     private static JsonDocument? ParseJson(string? body)
@@ -473,7 +409,7 @@ public sealed class LocalApi
                 return Task.FromResult<Reply?>(new Reply(200, Json(_activity.Heartbeat())));
 
             default:
-                return Task.FromResult<Reply?>(null); // 未移植 → 走 Python 代理
+                return Task.FromResult<Reply?>(null); // 未命中执行域，继续项目域分发
         }
     }
 
@@ -544,7 +480,7 @@ public sealed class LocalApi
         ?? DispatchModules(method, route, body)
         ?? DispatchProjects(method, route, body);
 
-    /// <summary>main.py 的模块管理 + 项目绑定路由组（块6）。未匹配返回 null 走 Python 代理。</summary>
+    /// <summary>模块管理与项目绑定路由组。</summary>
     private Reply? DispatchModules(string method, string route, string? body)
     {
         var segments = route.Split('/', StringSplitOptions.RemoveEmptyEntries);
@@ -609,7 +545,7 @@ public sealed class LocalApi
         return null;
     }
 
-    /// <summary>main.py 的项目/任务/记录/文件/基本资料路由组（块5）。未匹配返回 null 走 Python 代理。</summary>
+    /// <summary>项目、任务、记录、文件与基本资料路由组。</summary>
     private Reply? DispatchProjects(string method, string route, string? body)
     {
         var segments = route.Split('/', StringSplitOptions.RemoveEmptyEntries);

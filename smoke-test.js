@@ -56,7 +56,8 @@ ctx.innerHeight = 900;
 ctx.matchMedia = () => ({ matches:false, addEventListener(){}, removeEventListener(){} });   // 媒体查询桩：vm 里无实现，折叠按钮双模逻辑加载时要用
 vm.createContext(ctx);
 
-let src = fs.readFileSync(path.join(__dirname, 'app.js'), 'utf8');
+let src = fs.readFileSync(path.join(__dirname, 'web/shell-bridge.js'), 'utf8') + '\n'
+  + fs.readFileSync(path.join(__dirname, 'app.js'), 'utf8');
 src += `\nglobalThis.__T = { viewHome, viewApps, viewProjects, viewModules, viewWorkflows, viewSettings, appIconHTML,
   buildPalette, aiZone, aiReply, startRun, advanceRun, addStep, openNote, noteModalHTML, closeNoteModal,
   openModal, closeModal,
@@ -1964,7 +1965,7 @@ try {
      `.git` 与 `.workbuddy` 都是工具自己写的元数据目录，不是产物，一并排除；
      不排除的话 WorkBuddy 一旦在根目录生成 .workbuddy/ 就会让这条断言无端测挂。 */
   const dirFiles = require('fs').readdirSync(__dirname).filter(name=>name!=='.git' && name!=='.workbuddy' && name!=='.workbuddy-ai').sort();
-  const expectedFiles = ['.gitattributes', '.gitignore', 'AGENTS.md', 'README.md', 'app.js', 'backend', 'index.html', 'shell', 'smoke-test.js', 'styles.css'].sort();
+  const expectedFiles = ['.gitattributes', '.gitignore', 'AGENTS.md', 'README.md', 'app.js', 'docs', 'index.html', 'shell', 'smoke-test.js', 'styles.css', 'web'].sort();
   check(JSON.stringify(dirFiles) === JSON.stringify(expectedFiles),
     '根目录只保留源码与 Git 配置（实际：' + dirFiles.join(', ') + '）');
   /* 启动入口只在桌面：仓库根旧快捷方式已删除，且代码里禁止重建
@@ -2173,7 +2174,8 @@ try {
     '顶栏保留全屏切换，并以窗口置顶替换旧工作模式');
   /* 无边框壳的拖拽区宽度由壳去量「搜索框左边缘」，侧栏折叠后必须主动通报重量，
      否则壳还按旧宽度占着拖拽区，会把搜索框左半截压在下面点不动。 */
-  const app2 = require('fs').readFileSync(path.join(__dirname, 'app.js'), 'utf8');
+  const app2 = require('fs').readFileSync(path.join(__dirname, 'web/shell-bridge.js'), 'utf8') + '\n'
+    + require('fs').readFileSync(path.join(__dirname, 'app.js'), 'utf8');
   check(/data-drag/.test(html2) && /closest\('\[data-drag\]'\)/.test(app2)
     && app2.includes("shellChromeCommand('drag')") && app2.includes("shellChromeCommand('toggle-maximize')"),
     '顶栏拖动层 / 侧栏品牌区声明 data-drag：按下即拖窗，双击即最大化');
@@ -2205,7 +2207,7 @@ try {
     'data-drag 落在 .brand 自己身上：::before 拖动带的命中返回宿主元素，宿主不带 data-drag 就永远拖不动');
   check(html2.includes('class="brand-header"') && /\.brand-header\{[^}]*z-index:1;isolation:isolate/.test(css2),
     '折叠按钮包在 .brand-header 里：它自带层叠上下文，压得住 .brand::before 拖动带（按钮照常能点）');
-  const app3 = require('fs').readFileSync(path.join(__dirname, 'app.js'), 'utf8');
+  const app3 = app2;
   check(/closest\('\[data-drag\]'\)/.test(app3)
     && !/\.brand>[^,{]*(?<!:not\(\.brand-header\))\{[^}]*z-index:1\}/.test(css2)
     && !/\.brand\[data-drag\]>\*\{/.test(css2),
@@ -2462,6 +2464,8 @@ try {
 
 /* 31. 外部项目模块：ControlPod 只负责接入与编排 */
 try {
+  /* 旧 Python/浏览器双后端断言保留在版本历史中；这一块不再执行。 */
+  if (false) {
   const fs31 = require('fs');
   const app31 = fs31.readFileSync(path.join(__dirname, 'app.js'), 'utf8');
   const main31 = fs31.readFileSync(path.join(__dirname, 'backend/app/main.py'), 'utf8');
@@ -2726,16 +2730,61 @@ try {
     '存活标记目录与总控台 runner-lab 的 STATE_DIR 同口径（同一个 %TEMP%\\run-analytics）');
   serveCheck(!!servePy31 && servePy31.includes('atexit.register(mark_dead)'),
     '桥正常退出（含 Ctrl+C）走 atexit 撤标记，不留「进程没了标记还在」的假存活');
+  }
+
+  const fs31c = require('fs');
+  const app31c = fs31c.readFileSync(path.join(__dirname, 'app.js'), 'utf8');
+  const api31c = fs31c.readFileSync(path.join(__dirname, 'shell/LocalApi.cs'), 'utf8') + '\n'
+    + fs31c.readFileSync(path.join(__dirname, 'shell/LocalApi.Routes.cs'), 'utf8');
+  const runner31c = fs31c.readFileSync(path.join(__dirname, 'shell/ModuleRunner.cs'), 'utf8');
+  const db31c = fs31c.readFileSync(path.join(__dirname, 'shell/Db.cs'), 'utf8');
+  const project31c = fs31c.readFileSync(path.join(__dirname, 'shell/ProjectService.cs'), 'utf8');
+  const startup31c = fs31c.readFileSync(path.join(__dirname, 'shell/StartupManager.cs'), 'utf8');
+  const mainWindow31c = fs31c.readFileSync(path.join(__dirname, 'shell/MainWindow.xaml.cs'), 'utf8');
+
+  check(api31c.includes('DispatchProjectDomain')
+    && api31c.includes('DispatchApplications')
+    && api31c.includes('("GET", "/window")')
+    && api31c.includes('("GET", "/activity/daily")'),
+    'C# 本地 API 独立承接项目、应用、窗口与活跃度四类正式接口');
+  check(api31c.includes('未知接口：') && api31c.includes('Error(404'),
+    '未知接口明确返回 404，不再静默转发到另一套后端');
+  check(runner31c.includes('ProcessStartInfo') && runner31c.includes('UseShellExecute = false'),
+    '模块运行器分离程序与参数，不通过拼接 shell 命令执行');
+  check(db31c.includes('M1Baseline') && db31c.includes('M10ProjectOrder')
+    && db31c.includes('PRAGMA user_version'),
+    '数据库迁移 1–10 完整留在 C# 正式后端');
+  check(project31c.includes('CreateTask') && project31c.includes('SaveBasicInfo')
+    && project31c.includes('DeleteProject'),
+    '项目、任务、基本资料与删除流程均由 C# 项目服务持久化');
+  check(app31c.includes('/projects/${encodeURIComponent(wf.id)}/executions')
+    && app31c.includes('payload.projectExecutions') && app31c.includes('payload.projectRuns'),
+    '前端仍通过项目执行接口恢复真实步骤和运行历史');
+  check(app31c.includes("apiRequest('/window')") && app31c.includes("apiRequest('/window/topmost'"),
+    '窗口置顶控件继续走桌面壳本地 API');
+  check(mainWindow31c.includes('api.HandleAsync') && !mainWindow31c.includes('HttpClient'),
+    'WebView 消息只进入 C# LocalApi，不再使用 HTTP 回退');
+  check(startup31c.includes('@"D:\\Apps\\ControlPod"')
+    && !startup31c.includes('console_launcher') && !startup31c.includes('pythonw'),
+    '开机启动只认安装后的 ControlPod 桌面程序，不再回退 Python 启动器');
+  const bridge31c = fs31c.readFileSync(path.join(__dirname, 'web/shell-bridge.js'), 'utf8');
+  check(!bridge31c.includes('127.0.0.1:8765') && !mainWindow31c.includes('127.0.0.1:8765'),
+    '前端与桌面壳都已切断 8765 浏览器后端');
+  check(!fs31c.existsSync(path.join(__dirname, 'backend/console_launcher.py'))
+    && !fs31c.existsSync(path.join(__dirname, 'backend/start.ps1'))
+    && !fs31c.existsSync(path.join(__dirname, 'backend/app'))
+    && !fs31c.existsSync(path.join(__dirname, 'backend/tests')),
+    '旧 Python 后端、浏览器启动器与重复测试已从源码仓库退役');
 } catch (e) { console.log('FAIL 外部项目模块 → ' + e.message); fail++; }
 
 /* 32. 项目选择页卡片拖拽排序：二维命中 + 长按起拖 + 弹簧让位 + 后端持久化 */
 try {
   const app32 = fs.readFileSync(path.join(__dirname, 'app.js'), 'utf8');
   const css32 = fs.readFileSync(path.join(__dirname, 'styles.css'), 'utf8');
-  const main32 = fs.readFileSync(path.join(__dirname, 'backend/app/main.py'), 'utf8');
-  const db32 = fs.readFileSync(path.join(__dirname, 'backend/app/db.py'), 'utf8');
-  const repo32 = fs.readFileSync(path.join(__dirname, 'backend/app/repositories/project_repository.py'), 'utf8');
-  const service32 = fs.readFileSync(path.join(__dirname, 'backend/app/services/project_service.py'), 'utf8');
+  const api32 = fs.readFileSync(path.join(__dirname, 'shell/LocalApi.cs'), 'utf8') + '\n'
+    + fs.readFileSync(path.join(__dirname, 'shell/LocalApi.Routes.cs'), 'utf8');
+  const db32 = fs.readFileSync(path.join(__dirname, 'shell/Db.cs'), 'utf8');
+  const service32 = fs.readFileSync(path.join(__dirname, 'shell/ProjectService.cs'), 'utf8');
 
   /* 二维命中：3 列 × 2 行，每格 300×200、卡片 290×180 */
   const grid32 = [];
@@ -2785,15 +2834,15 @@ try {
     '卡片模板里没有拖拽手柄、把手或指示线（零额外 UI）');
 
   /* 后端：只追加的迁移 + 全量校验的排序接口 */
-  check(db32.includes('_migration_10_project_order') && db32.includes('(10, _migration_10_project_order)'),
+  check(db32.includes('M10ProjectOrder') && db32.includes('case 10: M10ProjectOrder(conn)'),
     '新增只追加的迁移：projects 加 sort_order，旧库按原展示顺序回填');
-  check(repo32.includes('ORDER BY sort_order, created_at, id')
-    && repo32.includes('COALESCE(MAX(sort_order),-1)+1'),
+  check(service32.includes('ORDER BY sort_order, created_at, id')
+    && service32.includes('COALESCE(MAX(sort_order),-1)+1'),
     '项目按 sort_order 读取，新建的项目排在末尾');
-  check(main32.includes('@app.put("/api/projects/order")') && main32.includes('class ProjectOrderWrite')
+  check(api32.includes('("PUT", "/projects/order")') && api32.includes('ReorderProjects(ids)')
     && service32.includes('排序请求缺少项目，已拒绝整批写入'),
     '排序接口只接受全量且唯一的 id 列表，缺项 / 重复 / 未知整批拒绝');
-  check(main32.includes('ORDER BY sort_order, created_at, id'), 'bootstrap 同样按 sort_order 返回项目');
+  check(service32.includes('ORDER BY sort_order, created_at, id'), 'bootstrap 同样按 sort_order 返回项目');
 } catch (e) { console.log('FAIL 卡片拖拽排序 → ' + e.message); fail++; }
 
 /* 33. 外观 · 信息密度：可调 + 跨刷新保留

@@ -1,9 +1,9 @@
 # AGENTS.md · 控制台项目接手说明书
 
 > 给任何要读 / 改这个项目的 agent：**先读这一份，再动代码**。术语、硬约束、架构、验证方式与全部已踩过的坑都在这里。
-> 最后更新：2026-09-29 · 测试基线：**前端 `node smoke-test.js` ALL_PASS（790 项） + 后端 `pytest backend/tests -q`（91 通过） + 壳自测 `ApexShell.exe --selftest`（283 项）**
+> 最后更新：2026-09-29 · 测试基线：**前端 `node smoke-test.js` ALL_PASS + 壳自测 `ApexShell.exe --selftest`（297 项）**
 >
-> **当前形态（先看这段）**：**WinUI 3 壳（`shell/`）+ Web 三件套 + Python 后端**的单仓库结构。**日常入口是 Release 版壳**（`shell\bin\Release\publish\ApexShell.exe`，路径深——用桌面快捷方式，或跑该 exe 的 `--shortcuts` 重建；Release 开了 `PublishReadyToRun`、关了符号，冷启动比 Debug 快）；Debug 版（`shell\bin\x64\Debug\...\win-x64\`）只用于调试与自测。**二期移植已完成**：51 条 API 路由都在壳内就地回答，壳可独立运行、不再探测或拉起 Python；Python 保留只为浏览器模式（`backend/start.ps1` → `127.0.0.1:8765`）与 pytest 对照基线。**两套栈共用同一个 SQLite 库**（`backend/data/apex-console.db`，`user_version` 协议）。
+> **当前形态（先看这段）**：**WinUI 3 壳（`shell/`）+ 原生 Web 前端 + C# LocalApi**。日常入口安装在 `D:\Apps\ControlPod\ApexShell.exe`，Debug 版（`shell\bin\x64\Debug\...\win-x64\`）只用于调试与自测。51 条 API 路由全部由壳内 C# 回答；Python 后端、8765 浏览器模式和双后端回退已退役。SQLite 与运行记录位于 `%LOCALAPPDATA%\ControlPod`，不再放进源码仓库。
 
 ---
 
@@ -12,7 +12,7 @@
 个人开发者用的**本地总控台**：继续开发、一键启动应用与网页、项目任务、项目记录与项目文件，全部收在一个界面里。
 
 - **前端**：HTML + CSS + 原生 JS，零构建、零依赖。
-- **后端**：两套实现共用一份数据——①壳内 C# 服务（主线，WinUI 3 + WebView2 + Microsoft.Data.Sqlite）；②Python FastAPI（仅 `127.0.0.1:8765`，供浏览器模式与 pytest 对照）。
+- **后端**：壳内 C# LocalApi（WinUI 3 + WebView2 + Microsoft.Data.Sqlite），没有网络端口和第二套实现。
 - **定位**：自用的真实工具（不是原型演示，也不是可上线产品）。**不得静默回退成假成功 / 假执行**：后端断开、模块缺失、权限被拒或执行失败时，保留原始错误并停在第一个失败步骤。
 
 ---
@@ -23,15 +23,16 @@
 |---|---|
 | `index.html` | 入口骨架：侧栏 + 导航 + 顶栏 + `#view` + 三个全局宿主（详情抽屉 / 编辑弹窗 / 命令面板）+ 提示条 |
 | `styles.css` | 全部样式，设计令牌集中在顶部 `:root`（暗色在 `[data-theme="dark"]`） |
-| `app.js` | 全部前端逻辑：数据种子 `DATA` → 运行时状态 `S` → `render()` 渲染器 → 底部大 `switch` 事件分发 |
+| `app.js` | 前端业务：数据种子 `DATA` → 运行时状态 `S` → `render()` 渲染器 → 底部事件分发 |
+| `web/shell-bridge.js` | 桌面壳消息协议与本地 API 传输 |
 | `smoke-test.js` | 冒烟测试，**同时是本项目的活规格**：读它就知道每个功能的预期行为 |
 | `AGENTS.md` | 本文件 |
 | `shell/` | **WinUI 3 壳**（C# 源码 + 构建产物）。源码在 `shell/*.cs`，产物在 `shell/bin/...`（不进 git） |
-| `backend/` | Python FastAPI 浏览器兼容层、通用模块发现 / 执行服务、运行数据（`backend/data/`）、后端测试 |
+| `docs/` | 外部项目模块清单约定 |
 
-- 根目录只放源码（细则见 §12）：不加文档 / 截图 / 备份 / 快捷方式 / 构建产物。`backend/.venv`、`backend/data`、`shell/bin`、`shell/obj` 是本机生成物，不属于源码。
+- 根目录只放源码（细则见 §12）：不加截图 / 备份 / 快捷方式 / 构建产物。`shell/bin`、`shell/obj` 是本机生成物，不属于源码。
 - 开发过程记录在 `D:\Projects\.workbuddy-ai\memory\YYYY-MM-DD.md`（外层，不在本仓库）。
-- `backend/docs/` 只留 `module-authoring.md`（模块最小约定）。Sep-20 那批移植计划与旧架构图已在 2026-09-28 删除 —— 它们描述的是壳接管**之前**的架构（「前端同源请求后端、后端读写 SQLite」），留着会误导。
+- `docs/` 只留仍适用于当前架构的维护文档；模块最小约定在 `docs/module-authoring.md`。
 
 ---
 
@@ -48,17 +49,12 @@ ApexShell.exe --stages=exec,routes  # 只跑指定自测阶段（排查用二分
 # 前端活规格（末行必须 ALL_PASS）
 node smoke-test.js
 
-# 后端对照测试（当前 91 通过；Windows 上用独立 basetemp 避免 ACL 干扰）
-backend/.venv/Scripts/python.exe -m pytest backend/tests -q
-
-# 浏览器模式（Python 后端；壳已不依赖它）
-powershell -ExecutionPolicy Bypass -File backend/start.ps1   # → http://127.0.0.1:8765
 ```
 
 - 壳用 `SetVirtualHostNameToFolderMapping` 把 `https://apex.local/` 映射到**仓库根**，所以**改完 Web 三件套 Ctrl+S、壳里 F5 立即生效**（不用重新构建）。
 - 壳层日志：`%LOCALAPPDATA%\ApexShell\web-shell.log`（导航 / 托盘 / 本地路由 / 图标拦截全链路留痕）。**每行前缀 `+Nms` = 距本进程启动的毫秒数**——启动耗时直接读它：`tray: RegisterClassW`（窗口构造开始）→ `localapi: ready` → `webview: ready` → `nav-done` → `splash: dismiss`。
 - 构建壳（Debug，调试 / 自测用）：`cd shell && C:\Users\23221\.dotnet\dotnet.exe build ApexShell.csproj -c Debug -p:Platform=x64 -p:RuntimeIdentifier=win-x64`。**构建前必须先结束运行中的壳**（否则 exe 被锁，报 MSB3027）。
-- 发布壳（Release，**日常入口用它**）：`cd shell && C:\Users\23221\.dotnet\dotnet.exe publish ApexShell.csproj -c Release -p:Platform=x64 -p:RuntimeIdentifier=win-x64 -o bin/Release/publish`。Release 预编译（`PublishReadyToRun`）+ 关符号；**产物落 `bin/Release/publish`，不碰 Debug 目录**，所以重发不必先结束正在跑的 Debug 壳（只有重发同一配置、或要覆盖 Debug 时才得让壳退出）。
+- 发布壳（Release，**日常入口用它**）：`cd shell && C:\Users\23221\.dotnet\dotnet.exe publish ApexShell.csproj -c Release -p:Platform=x64 -p:RuntimeIdentifier=win-x64 -o D:\Apps\ControlPod`。Release 预编译（`PublishReadyToRun`）+ 关符号；发布目录与源码目录分离。
 - 测试原理（前端）：用 `vm` + 极简 DOM 桩加载 `app.js`，末尾注入 `globalThis.__T = { 要测的函数… }` 作为导出清单，再逐块断言（含**源码级接线断言**与 **CSS 规则断言**）。**新增可测函数必须同步加进导出清单**，否则测试取不到。视觉细节仍需人眼看预览。
 
 ---
@@ -107,9 +103,9 @@ powershell -ExecutionPolicy Bypass -File backend/start.ps1   # → http://127.0.
 - 全局 DOM 宿主：`#drawer/#drawerMask`（**仅纯查看**）· `#noteModal`（**所有编辑 / 填写表单的唯一宿主**，`openModal(html,{form:true})`，窄版 `--modal-w-form` / 宽版 `--modal-w`）· `#paletteMask` 等命令面板 · `#toasts`。
 - **转义纪律**：进 HTML 的**数据值**必须过 `esc()`（`toast()` 内部已 `esc`）。属性位置同理。
 
-### 后端数据面（两套栈共用）
+### 后端数据面（C# 单一事实源）
 
-- **SQLite 结构版本用 `PRAGMA user_version`**，迁移集中在 `backend/app/db.py` 的 `MIGRATIONS`（C# 侧 `shell/Db.cs` 的 `Migrate` 逐条复刻）。**新迁移只能追加**，必须保留旧库数据并加升级测试；**库版本高于程序版本必须拒绝启动**，不得降级覆盖。`PRAGMA foreign_keys` 是连接级设置，每次开连接都要重设。
+- **SQLite 结构版本用 `PRAGMA user_version`**，迁移集中在 `shell/Db.cs` 的 `Migrate`。**新迁移只能追加**，必须保留旧库数据并在 `SelfTest` 增加升级测试；**库版本高于程序版本必须拒绝启动**，不得降级覆盖。`PRAGMA foreign_keys` 是连接级设置，每次开连接都要重设。
 - 任务 `kind` 与前端共用 `todo` / `fix`；项目记录 `tag` 仅允许 日常 / 技术 / 复盘 / 灵感，`links_json` 保存只读历史关联。新建 / 修改 / 删除**一律以后端成功返回为准，失败不改本地列表**。
 - 「编辑基本资料」`PUT /api/projects/{id}/basic-info` 一次提交开发字段 + 任务 + 记录 + 开发要求，**同一事务内校验、任一条无效整批回滚**；成功才重建本地 `S.todos.plan` / `S.notes` / `DATA.devContext` / `S.projRules`。
 - **项目删除**：`GET .../delete-preview` 先返回任务 / 记录 / 模块绑定 / 运行记录四类计数；有排队或运行中的动作时**必须先关闭项目**；最后一个项目由前后端共同拦截。确认后靠外键级联一次删除（共享模块本体不删），前端再 `purgeProjRefs()` 清界面数据（与改名链路 `renameProjRefs()` 是一对，口径必须对齐）。
@@ -117,7 +113,7 @@ powershell -ExecutionPolicy Bypass -File backend/start.ps1   # → http://127.0.
 
 ### 活跃度热力图（数据全真）
 
-- `GET /api/activity/daily`（默认 371 天 = 53 周）按**本机本地日**返回 `{online, adds, dels, count}`。online 来自 `POST /api/activity/heartbeat`（页面开着每 60s 静默上报，`activity_heartbeats` 表按日累加分钟，多标签页多算无妨）；adds/dels 来自扫 `codeDirs`（`backend/data/activity_config.json`，**缺省 `D:\Projects`、只扫一层、`[]` = 彻底关闭**）下各 git 仓库的 `git log --numstat`，5 分钟进程内缓存。
+- `GET /api/activity/daily`（默认 371 天 = 53 周）按**本机本地日**返回 `{online, adds, dels, count}`。online 来自 `POST /api/activity/heartbeat`；adds/dels 来自扫 `codeDirs`（`%LOCALAPPDATA%\ControlPod\activity_config.json`，**缺省 `D:\Projects`、只扫一层、`[]` = 彻底关闭**）下各 git 仓库的 `git log --numstat`，5 分钟进程内缓存。
 - **底色只表达在线时长**（`buildHeatPayload` 取 `online`，不读后端的 `count`），色阶对数五档走单一蓝色系 `--dash-heat-0..4`，**严禁掺红绿**；代码增删只在悬停气泡用色（+ 绿 / - 红）。
 - 卡片只渲染**末尾 13 周**（`S.heatDays` 切片，首列必为周一；91 格，改 `HEAT_CARD_COLS` 一处即可切密度）。布局是**纯 CSS Grid 自适应卡宽**：方格用 `.heat-cell::before{padding-top:100%}` 撑正方形（**禁用 `aspect-ratio`**，踩过它在 `auto` 行轨道下被忽略、整片塌成一条线）。月份刻度与格子共用列模板；打标三条规则：①只在月份切换处打；②**不足 2 列的「残月」不打**；③**两标至少隔 3 列**。刻度串**必须 `join('')`**（直接拼数组会往格子间塞逗号）。明细只进悬停两行气泡（`日期 · 在线 N 分钟` / `+A / -D`），**今天之后的格子只作浅灰占位**。后端未就绪时如实显示「活跃度暂不可用」，不得渲染全零假象。
 
@@ -127,7 +123,7 @@ powershell -ExecutionPolicy Bypass -File backend/start.ps1   # → http://127.0.
 
 **形态**：WinUI 3，非打包，SelfContained + WindowsAppSDKSelfContained（运行时全自带）。已接管：窗口本体、托盘常驻（左键唤起 / 右键菜单）、全局快捷键 `Ctrl+Alt+A`、关窗缩托盘、单实例互斥、系统 Toast（托盘气球）、**开机自启动**（写 `Run` + `StartupApproved\Run` 双位置）、**窗口置顶**（`OverlappedPresenter.IsAlwaysOnTop`）。
 
-**路由分发**（`shell/LocalApi.cs`）：WebMessage 桥上先由 `DispatchProjectDomain` 接手——**执行域 → 模块域 → 项目域**三级兜底，未命中返回 null 交回 HttpClient 应急代理。**51 条路由全部已移植**，清单在 `LocalApi.CoveredRoutes`；自测 `routes` 阶段把它与 `backend/app/main.py` 里实际定义的路由做**双向比对**，任何一边多出来都失败——**新增路由必须同步补清单**。`/bootstrap` 与 applications / executions 组都甩到 `Task.Run`（重查询 / 真扫描 / 子进程，别冻 UI）。异常到 HTTP 状态的映射与 FastAPI 版一一对应（404 / 409 / 422 / 503 / 500）。
+**路由分发**（`shell/LocalApi.cs`）：WebMessage 桥按执行域 → 模块域 → 项目域分发，全部未命中时明确返回 404。51 条正式路由清单在 `LocalApi.CoveredRoutes`；新增或删除路由必须同步修改清单和 `SelfTest`。`/bootstrap` 与 applications / executions 组都甩到 `Task.Run`（重查询 / 真扫描 / 子进程，别冻 UI）。
 
 **源码一览**（都在 `shell/`）：
 
@@ -136,7 +132,7 @@ powershell -ExecutionPolicy Bypass -File backend/start.ps1   # → http://127.0.
 | `App.xaml.cs` | 启动分支：`--selftest` / `--shortcuts` / `--inspect-shortcuts` / 单实例互斥 |
 | `MainWindow.xaml.cs` | 窗口（默认 1440×900 且**居中到工作区**，见 `ApplyDefaultPlacement`；工作区放不下时按工作区收窄，避免算出负坐标）、**启动遮罩**、托盘、WebView2 初始化、虚拟主机映射、**WebMessage 桥**、**应用图标网络栈拦截** |
 | `LocalApi.cs` | 路由分发器 + 请求体校验（pydantic 等价物）+ `CoveredRoutes` 清单 |
-| `ConsoleConfig.cs` | 路径配置（镜像 `backend/app/config.py`，硬编码仓库根） |
+| `ConsoleConfig.cs` | 路径配置；运行数据默认进 `%LOCALAPPDATA%\ControlPod` |
 | `Db.cs` | SQLite 门面：迁移 1–10 复刻、`Execute/FetchOne/FetchAll/Transaction/WithTransaction` |
 | `StartupManager.cs` | 开机自启动（`Run` + `StartupApproved\Run` 双位置） |
 | `ApplicationScanner.cs` | 开始菜单 / UWP / App Paths 扫描 + 图标提取（`SHGetFileInfoW` + 手写 PNG 编码器） |
@@ -148,7 +144,7 @@ powershell -ExecutionPolicy Bypass -File backend/start.ps1   # → http://127.0.
 | `ModuleService.cs` | 模块管理 + 项目↔模块 / 应用绑定 |
 | `ActivityService.cs` | 心跳 + 日聚合（git numstat 扫描） |
 | `WindowHost.cs` | `IConsoleWindowHost` + 壳实现（置顶）；无窗口时如实报不可用 |
-| `BootstrapService.cs` | `/bootstrap` 12 键聚合（键名与 Python 版逐字对齐） |
+| `BootstrapService.cs` | `/bootstrap` 12 键聚合 |
 | `SelfTest.cs` | 无头自测（`--selftest`，含全部阶段） |
 | `ShortcutMaker.cs` | 桌面快捷方式生成 / 排查（走壳内 COM） |
 | `TrayHost.cs` | 托盘 + Win32 导入 |
@@ -286,10 +282,10 @@ powershell -ExecutionPolicy Bypass -File backend/start.ps1   # → http://127.0.
 
 ## 12. 交接规则
 
-- **改完必跑**：`node smoke-test.js`（末行 `ALL_PASS`，790 项）；改壳代码还要跑 `ApexShell.exe --selftest`（283 项，逐条落盘便于定位死点）；改后端还要跑 `pytest backend/tests -q`（当前 91 项通过）。**结构变了补断言，删功能补负向断言**。
+- **改完必跑**：`node smoke-test.js`（末行 `ALL_PASS`）；改壳代码还要跑 `ApexShell.exe --selftest`（当前 297 项，逐条落盘便于定位死点）。**结构变了补断言，删功能补负向断言**。
   - **删根目录文件后务必跑前端冒烟测试**：里面有一条「根目录白名单」断言（`expectedFiles`），删了文件不同步改断言就会红——2026-09-25 删 `00-启动 APEX 总控台.lnk` 时就漏跑过一次。
 - **本目录有 git**（`D:\Projects\ControlPod`）：动手前先看 `git status`，别破坏性覆盖；提交粒度按主题，别把多个主题混在一个提交里。
-- **根目录只放源码**（Web 三件套 + `smoke-test.js` + `AGENTS.md` + `README.md`），其余一律进 `shell/` 或 `backend/`。源码**纯 LF**：批量改写后复核 `b.count(b'\r\n') === 0`（见 §10 第 11 条）。
+- **根目录只放源码**（Web 入口 + `smoke-test.js` + `AGENTS.md` + `README.md`），其余进 `shell/` 或 `docs/`。源码**纯 LF**：批量改写后复核 `b.count(b'\r\n') === 0`（见 §10 第 11 条）。
 - 一次只做一个主题的改动，不顺手重构无关代码；需求不明确先问。
 - **交付习惯**：改完要给出「已验证可用」的结论（构建 / 测试 / 自测日志 / 无头验证都跑过），不要把「试一下」的循环丢给人；只有必须人眼确认的视觉细节才请人验收。
 
@@ -328,7 +324,7 @@ powershell -ExecutionPolicy Bypass -File backend/start.ps1   # → http://127.0.
 - **缩小到托盘点了要有反馈**：窗口是「消失」不是「缩小」，`app.js` 在 `shellChromeCommand('hide')` 后紧跟一条 `toast()` 说明怎么唤回，不能静默无响应（§1「不得静默回退」的延伸）。
 - **`prefers-reduced-motion`**：开了系统「减少动态」就停掉全部位移与图元动画，只留颜色 / 描边反馈。
 
-**WebMessage 约定（都不走 API 路由**——`CheckRouteCoverage()` 会拿 `backend/app/main.py` 双向比对，多一条就得连 Python 后端一起改**）**
+**WebMessage 约定（不走 LocalApi 路由，由 `MainWindow` 直接处理）**
 
 - 页面 → 壳：`chrome-command`（`drag` / `hide` / `toggle-maximize` / `theme`），`app.js` 的 `shellChromeCommand()`；`data-drag` 区域 `mousedown` 发 `drag`、`dblclick` 发 `toggle-maximize`
 - 壳 → 页面：`chrome-state`（`{maximized}`），页面据此切 `body.is-fullscreen`（沿用 `.is-fullscreen .view` 限宽居中），按钮 / 双击 / 拖到屏幕顶端三条路状态一致

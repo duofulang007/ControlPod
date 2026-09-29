@@ -17,49 +17,31 @@ ControlPod（简称 CPod）是面向 Windows 的本地个人总控台：把项�
 - 项目上下文：在项目内维护待办、项目记录、文件关联和 Obsidian 主页连接。
 - 界面偏好：主题、强调色、信息密度、玻璃质感等外观选项保存在浏览器本机，刷新后保持。
 - 桌面外壳：托盘常驻（左键唤起 / 右键菜单）、全局热键 `Ctrl+Alt+A`、关窗缩托盘、单实例互斥、开机自启动、窗口置顶、全屏、无边框卡片外观。
-- 两种打开方式：**外壳**（日常入口，可独立运行）与**浏览器模式**（`127.0.0.1:8765`，保留用于对照测试）。两套栈共用同一个 SQLite 库。
+- 单一桌面入口：WinUI 3 外壳承载 Web 界面与 C# 本地 API，不再启动浏览器后端或本地端口服务。
 
 ## 运行环境
 
 - Windows 10 / 11
-- Python 3.12 —— 浏览器模式与后端测试需要；`D:\Projects` 下的独立模块使用各自仓库声明的运行环境；外壳本身不需要
+- `D:\Projects` 下的独立模块使用各自仓库声明的运行环境；ControlPod 本身不依赖 Python
 - .NET 10 SDK —— 仅构建外壳时需要（用 `dotnet --list-sdks` 确认有输出；只装运行时的话这里会是空的）。外壳的运行时自带，最终用户不必安装
 - Node.js —— 仅用于前端冒烟测试
 
 ## 快速开始
 
-### 方式一：桌面外壳（日常入口）
+### 桌面外壳（日常入口）
 
 ```powershell
 git clone https://github.com/duofulang007/ControlPod.git ControlPod
 cd ControlPod
 
-# 1. 后端虚拟环境：浏览器模式与后端测试使用（外壳自身不依赖 Python）
-powershell -ExecutionPolicy Bypass -File backend\bootstrap.ps1
-
-# 2. 构建外壳（需 .NET 10 SDK：dotnet --list-sdks 必须有输出）
+# 1. 构建外壳（需 .NET 10 SDK：dotnet --list-sdks 必须有输出）
 dotnet build shell\ApexShell.csproj -c Debug -p:Platform=x64 -p:RuntimeIdentifier=win-x64
 
-# 3. 运行；也可用 --shortcuts 在桌面建快捷方式
+# 2. 运行；也可用 --shortcuts 在桌面建快捷方式
 shell\bin\x64\Debug\net10.0-windows10.0.19041.0\win-x64\ApexShell.exe
 ```
 
-外壳把 `https://apex.local/` 映射到仓库根，所以改完 Web 三件套**不必重新构建**，在壳里按 F5 即可生效。
-
-### 方式二：浏览器模式
-
-```powershell
-powershell -ExecutionPolicy Bypass -File backend\bootstrap.ps1
-powershell -ExecutionPolicy Bypass -File backend\start.ps1
-```
-
-随后访问 [http://127.0.0.1:8765](http://127.0.0.1:8765)。
-
-`bootstrap.ps1` 默认自动找本机 Python 3.12；找不到或想指定时显式传入：
-
-```powershell
-powershell -ExecutionPolicy Bypass -File backend\bootstrap.ps1 -Python "C:\Python312\python.exe"
-```
+仓库内的 Debug/Release 构建把 `https://apex.local/` 映射到源码根，所以改完 Web 文件后在壳里按 F5 即可生效；`D:\Apps\ControlPod` 的正式发布版使用随包携带的 `wwwroot`，更新它需要重新发布。
 
 ## 使用方式
 
@@ -87,15 +69,10 @@ ControlPod/
 │  ├─ ApexShell.csproj
 │  ├─ MainWindow.xaml.cs      窗口 / 托盘 / WebView2 / WebMessage 桥
 │  ├─ LocalApi.cs             壳内路由分发器
-│  ├─ Db.cs                   SQLite 门面（与 Python 版逐条对齐）
+│  ├─ Db.cs                   SQLite 门面与迁移
 │  └─ SelfTest.cs             无头自测（--selftest）
-├─ backend/
-│  ├─ app/                    FastAPI、数据访问与执行服务
-│  ├─ modules/                可选的内置模块清单；独立项目在各自仓库维护
-│  ├─ tests/                  后端测试
-│  ├─ bootstrap.ps1           环境初始化
-│  ├─ start.ps1               浏览器模式服务启动
-│  └─ console_launcher.py     旧桌面入口（仅外壳未构建时回退用）
+├─ docs/
+│  └─ module-authoring.md     外部项目模块清单约定
 └─ AGENTS.md                  项目约束与维护说明（改代码前先读）
 ```
 
@@ -107,9 +84,9 @@ ControlPod/
 
 - 模块项目 clone 到 `D:\Projects\<名称>`（与本仓库同级），在项目仓库根创建 `.apex/module.json`，并用 `"projectRoot": "."` 指向本仓库。
 - 迁移状态：`run-analytics`、`dou-link` 与 `apex-launcher` 都在自己的 `.apex/` 内维护清单和 runner，并使用各自仓库的依赖与虚拟环境。
-- 本地项目按自己的 `README.md` 初始化环境；ControlPod 的 `backend/.venv` 不再作为独立项目的运行环境。
+- 本地项目按自己的 `README.md` 初始化环境；依赖与运行时不能放进 ControlPod 仓库。
 - 提交口诀：改了模块项目 → 在对应仓库 commit/push；改了 ControlPod → 在本仓库 commit/push。若两边都改，分别提交。
-- 自检跟着仓库走：模块项目跑它自己的 `tools/check.js`，总控台跑 `smoke-test.js` 与 pytest。
+- 自检跟着仓库走：模块项目跑它自己的检查，ControlPod 跑 `smoke-test.js` 与壳自检。
 
 ## 验证
 
@@ -117,24 +94,20 @@ ControlPod/
 # 前端（末行必须出现 ALL_PASS）
 node smoke-test.js
 
-# 后端
-backend\.venv\Scripts\python.exe -m pytest backend\tests -q
-
 # 外壳（无头自测：不建窗口、不碰 WebView2）
 shell\bin\x64\Debug\net10.0-windows10.0.19041.0\win-x64\ApexShell.exe --selftest
 ```
 
 ## 本地数据与隐私
 
-- 运行数据保存在 `backend/data/`，包括本地 SQLite 数据库、运行记录与日志。外壳与浏览器模式共用这一个库。
-- 这些本机数据、虚拟环境与测试缓存已被 `.gitignore` 排除，不会提交到仓库。
+- 运行数据保存在 `%LOCALAPPDATA%\ControlPod\`，包括 `controlpod.db`、运行记录与窗口状态；源码仓库不再混放运行数据。
+- 可用 `CONTROLPOD_DATA_DIR`、`CONTROLPOD_DB_PATH`、`CONTROLPOD_MODULES_DIR` 和 `CONTROLPOD_PROJECTS_DIR` 覆盖默认路径；旧 `APEX_CONSOLE_*` 环境变量暂时兼容。
 - 跑步健康数据（`data.js`）在独立的 run-analytics 仓库里同样被它自己的 `.gitignore` 排除；
   换机器后 clone 两个仓库、双击 `run-analytics\导入数据.cmd` 导入一次即可重建。
 - 应用扫描仅读取 Windows 已公开注册的启动入口；控制台不会上传扫描结果或项目数据。
 - 活跃度统计完全在本机完成：在线分钟数记进本地 SQLite（`activity_heartbeats` 表），代码新增 / 删减
-  通过只读 `git log --numstat` 扫描代码目录得出。要统计的目录写在 `backend/data/activity_config.json`
-  的 `codeDirs`（缺省 `D:\Projects`，只扫一层子目录里的 git 仓库，非 git 目录忽略）；该配置文件位于
-  已忽略的 `backend/data/` 内，不会进仓库。Obsidian 连接配置与界面偏好存在浏览器本机；其余数据都只落在本机磁盘。
+  通过只读 `git log --numstat` 扫描代码目录得出。要统计的目录写在 `%LOCALAPPDATA%\ControlPod\activity_config.json`
+  的 `codeDirs`（缺省 `D:\Projects`，只扫一层子目录里的 git 仓库，非 git 目录忽略）。Obsidian 连接配置与界面偏好存在 WebView2 本机配置中；其余数据只落在本机磁盘。
 
 ## 现阶段范围
 
