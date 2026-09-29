@@ -48,12 +48,18 @@ class WindowsStartupManager:
         方案，保证开机自启动不倒退。要静默起服务请手动跑
         ``console_launcher.py --no-open``，别写回启动项。
         """
-        shell_exe = (
+        release_shell_exe = (
+            config.PROJECT_DIR / "shell" / "bin" / "Release" / "publish"
+            / "ApexShell.exe"
+        )
+        if release_shell_exe.exists():
+            return subprocess.list2cmdline([str(release_shell_exe)])
+        debug_shell_exe = (
             config.PROJECT_DIR / "shell" / "bin" / "x64" / "Debug"
             / "net8.0-windows10.0.19041.0" / "win-x64" / "ApexShell.exe"
         )
-        if shell_exe.exists():
-            return subprocess.list2cmdline([str(shell_exe)])
+        if debug_shell_exe.exists():
+            return subprocess.list2cmdline([str(debug_shell_exe)])
         pythonw = config.BACKEND_DIR / ".venv" / "Scripts" / "pythonw.exe"
         launcher = config.BACKEND_DIR / "console_launcher.py"
         return subprocess.list2cmdline([str(pythonw), str(launcher)])

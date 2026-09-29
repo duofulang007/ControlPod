@@ -320,8 +320,11 @@ public static class SelfTest
         try
         {
             var real = new StartupManager().Status();
-            var shellExe = Path.Combine(ConsoleConfig.ProjectDir, "shell", "bin", "x64", "Debug",
+            var releaseShellExe = Path.Combine(ConsoleConfig.ProjectDir, "shell", "bin", "Release", "publish",
+                "ApexShell.exe");
+            var debugShellExe = Path.Combine(ConsoleConfig.ProjectDir, "shell", "bin", "x64", "Debug",
                 "net8.0-windows10.0.19041.0", "win-x64", "ApexShell.exe");
+            var shellExe = File.Exists(releaseShellExe) ? releaseShellExe : debugShellExe;
             var expected = File.Exists(shellExe)
                 ? shellExe.Contains(' ') ? "\"" + shellExe + "\"" : shellExe
                 : null;
