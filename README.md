@@ -23,7 +23,7 @@ ControlPod（简称 CPod）是面向 Windows 的本地个人总控台：把项�
 
 - Windows 10 / 11
 - Python 3.12 —— 浏览器模式与后端测试需要；`D:\Projects` 下的独立模块使用各自仓库声明的运行环境；外壳本身不需要
-- .NET 8 SDK —— 仅构建外壳时需要（用 `dotnet --list-sdks` 确认有输出；只装运行时的话这里会是空的）。外壳的运行时自带，最终用户不必安装
+- .NET 10 SDK —— 仅构建外壳时需要（用 `dotnet --list-sdks` 确认有输出；只装运行时的话这里会是空的）。外壳的运行时自带，最终用户不必安装
 - Node.js —— 仅用于前端冒烟测试
 
 ## 快速开始
@@ -37,11 +37,11 @@ cd ControlPod
 # 1. 后端虚拟环境：浏览器模式与后端测试使用（外壳自身不依赖 Python）
 powershell -ExecutionPolicy Bypass -File backend\bootstrap.ps1
 
-# 2. 构建外壳（需 .NET 8 SDK：dotnet --list-sdks 必须有输出）
+# 2. 构建外壳（需 .NET 10 SDK：dotnet --list-sdks 必须有输出）
 dotnet build shell\ApexShell.csproj -c Debug -p:Platform=x64 -p:RuntimeIdentifier=win-x64
 
 # 3. 运行；也可用 --shortcuts 在桌面建快捷方式
-shell\bin\x64\Debug\net8.0-windows10.0.19041.0\win-x64\ApexShell.exe
+shell\bin\x64\Debug\net10.0-windows10.0.19041.0\win-x64\ApexShell.exe
 ```
 
 外壳把 `https://apex.local/` 映射到仓库根，所以改完 Web 三件套**不必重新构建**，在壳里按 F5 即可生效。
@@ -121,7 +121,7 @@ node smoke-test.js
 backend\.venv\Scripts\python.exe -m pytest backend\tests -q
 
 # 外壳（无头自测：不建窗口、不碰 WebView2）
-shell\bin\x64\Debug\net8.0-windows10.0.19041.0\win-x64\ApexShell.exe --selftest
+shell\bin\x64\Debug\net10.0-windows10.0.19041.0\win-x64\ApexShell.exe --selftest
 ```
 
 ## 本地数据与隐私

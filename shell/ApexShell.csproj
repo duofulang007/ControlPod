@@ -2,7 +2,7 @@
 
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
-    <TargetFramework>net8.0-windows10.0.19041.0</TargetFramework>
+    <TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>
     <TargetPlatformMinVersion>10.0.19041.0</TargetPlatformMinVersion>
     <SupportedOSPlatformVersion>10.0.19041.0</SupportedOSPlatformVersion>
     <RootNamespace>ApexShell</RootNamespace>
@@ -35,10 +35,10 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="Microsoft.WindowsAppSDK" Version="1.6.*" />
-    <PackageReference Include="Microsoft.Windows.SDK.BuildTools" Version="10.0.26100.*" />
+    <PackageReference Include="Microsoft.WindowsAppSDK" Version="2.5.1" />
+    <PackageReference Include="Microsoft.Windows.SDK.BuildTools" Version="10.0.28000.2705" />
     <!-- 二期：C# 直读写现有 SQLite 库（镜像 backend/app/db.py） -->
-    <PackageReference Include="Microsoft.Data.Sqlite" Version="8.0.*" />
+    <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.12" />
   </ItemGroup>
 
 </Project>

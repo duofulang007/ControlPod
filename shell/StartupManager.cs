@@ -44,7 +44,7 @@ public sealed class StartupManager
         if (File.Exists(releaseShellExe)) return QuoteCommandLine(releaseShellExe);
         var debugShellExe = System.IO.Path.Combine(
             ConsoleConfig.ProjectDir, "shell", "bin", "x64", "Debug",
-            "net8.0-windows10.0.19041.0", "win-x64", "ApexShell.exe");
+            "net10.0-windows10.0.19041.0", "win-x64", "ApexShell.exe");
         if (File.Exists(debugShellExe)) return QuoteCommandLine(debugShellExe);
         var pythonw = System.IO.Path.Combine(ConsoleConfig.BackendDir, ".venv", "Scripts", "pythonw.exe");
         var launcher = System.IO.Path.Combine(ConsoleConfig.BackendDir, "console_launcher.py");

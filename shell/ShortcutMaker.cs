@@ -7,7 +7,7 @@ namespace ApexShell;
 /// <summary>
 /// 一键生成「ControlPod」桌面快捷方式。
 /// 为什么要壳自己来做：exe 的真实路径又深又长
-/// （shell\bin\x64\Debug\net8.0-windows10.0.19041.0\win-x64），不该让人记。
+/// （shell\bin\x64\Debug\net10.0-windows10.0.19041.0\win-x64），不该让人记。
 /// <para>
 /// 为什么不在工具会话里用 PowerShell 建：本机安全策略把 `New-Object -ComObject WScript.Shell`
 /// 直接拦掉（"COM object instantiation can run arbitrary code"）。而壳进程内的 COM 是通的

@@ -56,7 +56,7 @@ class WindowsStartupManager:
             return subprocess.list2cmdline([str(release_shell_exe)])
         debug_shell_exe = (
             config.PROJECT_DIR / "shell" / "bin" / "x64" / "Debug"
-            / "net8.0-windows10.0.19041.0" / "win-x64" / "ApexShell.exe"
+            / "net10.0-windows10.0.19041.0" / "win-x64" / "ApexShell.exe"
         )
         if debug_shell_exe.exists():
             return subprocess.list2cmdline([str(debug_shell_exe)])
