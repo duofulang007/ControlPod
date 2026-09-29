@@ -83,9 +83,9 @@ ControlPod/
 平台（本仓库）与模块项目（如 run-analytics）分仓库管理：
 
 - 模块项目 clone 到 `D:\Projects\<名称>`（与本仓库同级），在项目仓库根创建 `.apex/module.json`，并用 `"projectRoot": "."` 指向本仓库。
-- 迁移状态：`run-analytics`、`dou-link` 与 `apex-launcher` 都在自己的 `.apex/` 内维护清单和 runner，并使用各自仓库的依赖与虚拟环境。
+- `run-analytics`、`dou-link` 与 `apex-launcher` 在各自仓库维护 `.apex/` 清单和适配器，并使用各自的运行环境。
 - 本地项目按自己的 `README.md` 初始化环境；依赖与运行时不能放进 ControlPod 仓库。
-- 提交口诀：改了模块项目 → 在对应仓库 commit/push；改了 ControlPod → 在本仓库 commit/push。若两边都改，分别提交。
+- 跨仓库修改应在每个所属仓库分别提交。
 - 自检跟着仓库走：模块项目跑它自己的检查，ControlPod 跑 `smoke-test.js` 与壳自检。
 
 ## 验证
@@ -101,7 +101,7 @@ shell\bin\x64\Debug\net10.0-windows10.0.19041.0\win-x64\ApexShell.exe --selftest
 ## 本地数据与隐私
 
 - 运行数据保存在 `%LOCALAPPDATA%\ControlPod\`，包括 `controlpod.db`、运行记录与窗口状态；源码仓库不再混放运行数据。
-- 可用 `CONTROLPOD_DATA_DIR`、`CONTROLPOD_DB_PATH`、`CONTROLPOD_MODULES_DIR` 和 `CONTROLPOD_PROJECTS_DIR` 覆盖默认路径；旧 `APEX_CONSOLE_*` 环境变量暂时兼容。
+- 可用 `CONTROLPOD_DATA_DIR`、`CONTROLPOD_DB_PATH`、`CONTROLPOD_MODULES_DIR` 和 `CONTROLPOD_PROJECTS_DIR` 覆盖默认路径。
 - 跑步健康数据（`data.js`）在独立的 run-analytics 仓库里同样被它自己的 `.gitignore` 排除；
   换机器后 clone 两个仓库、双击 `run-analytics\导入数据.cmd` 导入一次即可重建。
 - 应用扫描仅读取 Windows 已公开注册的启动入口；控制台不会上传扫描结果或项目数据。

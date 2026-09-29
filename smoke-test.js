@@ -1958,9 +1958,9 @@ try {
     '无生产宿主的抽屉与本地落库兜底已清除（保存一律以后端成功为准）');
   /* 交接说明书：给外部 agent 的入口，不能被静默删掉 */
   const agentsMd = require('fs').readFileSync(path.join(__dirname, 'AGENTS.md'), 'utf8');
-  check(agentsMd.includes('术语') && agentsMd.includes('硬约束') && agentsMd.includes('ALL_PASS')
-    && agentsMd.includes('已删除的模块'),
-    '交接说明书 AGENTS.md 就位（术语 / 硬约束 / 验证方式 / 已删模块清单齐全）');
+  check(agentsMd.includes('LocalApi') && agentsMd.includes('模块') && agentsMd.includes('ALL_PASS')
+    && agentsMd.includes('PRAGMA user_version'),
+    '维护说明 AGENTS.md 覆盖当前架构、外部模块、数据库迁移与验证方式');
   /* 根目录瘦身护栏：只保留源码、Git 元数据和工具元数据。
      `.git` 与 `.workbuddy` 都是工具自己写的元数据目录，不是产物，一并排除；
      不排除的话 WorkBuddy 一旦在根目录生成 .workbuddy/ 就会让这条断言无端测挂。 */
