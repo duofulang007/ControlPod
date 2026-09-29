@@ -590,7 +590,8 @@ public static class SelfTest
     /// <summary>registry 解析：合法 manifest 字段逐一对齐 Python 版，非法的四类全被拒。</summary>
     private static void CheckModuleRegistry()
     {
-        var root = Path.Combine(TempDir(), "modules");
+        var workspace = TempDir();
+        var root = Path.Combine(workspace, "controlpod", "backend", "modules");
         var modDir = Path.Combine(root, "good-mod");
         WriteText(Path.Combine(modDir, "run.bat"), "@echo ok\r\n");
         var manifest = WriteText(Path.Combine(modDir, "module.json"),
@@ -621,6 +622,35 @@ public static class SelfTest
         Check("singleInstance 默认 true", def.SingleInstance);
         Check("requiresAdmin 默认 false", !def.RequiresAdmin);
         Check("ConsoleRoot 是 modules 上两级", registry.ConsoleRoot == Path.GetFullPath(Path.Combine(root, "..", "..")));
+
+        var externalProject = Path.Combine(workspace, "external-project");
+        Directory.CreateDirectory(Path.Combine(externalProject, ".git"));
+        var externalManifest = WriteText(Path.Combine(externalProject, ".apex", "module.json"),
+            """
+            {
+              "id": "external-project",
+              "schemaVersion": 1,
+              "projectId": "external-project",
+              "projectName": "外部项目",
+              "projectDescription": "来自独立仓库",
+              "name": "外部项目入口",
+              "version": "1.0.0",
+              "projectRoot": ".",
+              "actions": { "run": { "program": "python", "cwd": "{project_root}", "args": [] } }
+            }
+            """);
+        Directory.CreateDirectory(Path.Combine(registry.ConsoleRoot, ".git"));
+        WriteText(Path.Combine(registry.ConsoleRoot, ".apex", "module.json"),
+            """{"id":"controlpod-self","schemaVersion":1,"projectId":"controlpod-self","name":"枢纽自身","version":"1","projectRoot":".","actions":{"run":{"program":"python"}}}""");
+        var externalLoaded = new ModuleRegistry(root, workspace).Load();
+        Check("从项目根目录发现外部仓库 .apex/module.json",
+            externalLoaded.ContainsKey("external-project")
+            && externalLoaded["external-project"].ManifestPath == Path.GetFullPath(externalManifest));
+        Check("外部 projectRoot 相对所属仓库解析，cwd 可用 {project_root}",
+            externalLoaded["external-project"].ProjectRoot == Path.GetFullPath(externalProject)
+            && externalLoaded["external-project"].Actions["run"].Cwd == Path.GetFullPath(externalProject));
+        Check("项目根扫描跳过 ControlPod 自身的清单",
+            !externalLoaded.ContainsKey("controlpod-self"));
 
         // 未声明 projectName / projectDescription 时的兜底文案
         var bareDir = Path.Combine(root, "bare-mod");
@@ -1018,7 +1048,7 @@ public static class SelfTest
         {
             SetCalls++;
             if (ThrowOnSet)
-                throw new ConsoleWindowError("没有可控制的 APEX 固定窗口，请先打开固定窗口");
+                throw new ConsoleWindowError("没有可控制的 ControlPod 窗口，请先打开 ControlPod");
             Topmost = enabled;
             return Status();
         }
@@ -1041,7 +1071,7 @@ public static class SelfTest
                 && !JsonDocument.Parse(headlessStatus.Text).RootElement.GetProperty("available").GetBoolean());
             var headlessPut = headless.HandleAsync("PUT", "/window/topmost", """{"enabled":true}""").Result;
             Check("无窗口宿主置顶被拒（503 + 中文原因）",
-                headlessPut is { Status: 503 } && headlessPut.Text.Contains("固定窗口"), headlessPut?.Text ?? "");
+                headlessPut is { Status: 503 } && headlessPut.Text.Contains("ControlPod"), headlessPut?.Text ?? "");
 
             // 注入假宿主：契约往返
             var host = new FakeWindowHost();
@@ -1443,7 +1473,7 @@ public static class SelfTest
 
     /* ==================== 二期块6：模块管理 + 项目绑定 ==================== */
 
-    /// <summary>模块域 9 条路由：web 模块增改删预演、内置模块防改写、绑定/解绑、应用适配模块。</summary>
+    /// <summary>模块域 9 条路由：web 模块增改删预演、清单模块防改写、绑定/解绑、应用适配模块。</summary>
     private static void CheckModuleDomainRoutes()
     {
         var dir = TempDir();
@@ -1507,17 +1537,17 @@ public static class SelfTest
                 api.HandleAsync("PATCH", "/modules/web-nope",
                     JsonBody(new { name = "x", entry = "https://example.com/z" })).Result is { Status: 404 });
 
-            // 内置执行模块（有 manifest_path）不得改写 / 删除
+            // 清单管理模块（有 manifest_path）不得从 ControlPod 改写 / 删除
             db.Execute(
                 "INSERT INTO modules(id,name,type,description,entry,args,version,manifest_path,enabled,updated_at) " +
                 "VALUES('builtin-mod','内置模块','script','','builtin','','1','D:\\x\\module.json',1,@p0)", now);
             var patchBuiltin = api.HandleAsync("PATCH", "/modules/builtin-mod",
                 JsonBody(new { name = "改内置", entry = "https://example.com/c" })).Result;
-            Check("内置模块拒绝改写 409", patchBuiltin is { Status: 409 } && patchBuiltin.Text.Contains("内置"), patchBuiltin?.Text ?? "");
+            Check("清单模块拒绝改写 409", patchBuiltin is { Status: 409 } && patchBuiltin.Text.Contains("清单管理"), patchBuiltin?.Text ?? "");
             var delBuiltin = api.HandleAsync("DELETE", "/modules/builtin-mod", null).Result;
-            Check("内置模块拒绝删除 409", delBuiltin is { Status: 409 });
+            Check("清单模块拒绝删除 409", delBuiltin is { Status: 409 });
             var builtinPreview = api.HandleAsync("GET", "/modules/builtin-mod/delete-preview", null).Result;
-            Check("内置模块预演 deletable=false",
+            Check("清单模块预演 deletable=false",
                 builtinPreview is { Status: 200 }
                 && !OkJson(builtinPreview).GetProperty("deletable").GetBoolean());
 

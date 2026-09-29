@@ -10,7 +10,7 @@ public sealed class ConsoleWindowError : Exception
 }
 
 /// <summary>
-/// 窗口置顶控制面。Python 版（window_manager.py）要 EnumWindows 找「APEX 控制台」浏览器窗口
+/// 窗口置顶控制面。Python 版（window_manager.py）要 EnumWindows 找「ControlPod」浏览器窗口
 /// 再 SetWindowPos；壳里目标就是自己这扇原生窗口，直接走 WinUI 的
 /// OverlappedPresenter.IsAlwaysOnTop —— 「topmost 对壳是原生能力」。
 /// 接口化是为了自测能在无窗口环境注入假实现。
@@ -47,7 +47,7 @@ public sealed class ShellWindowHost : IConsoleWindowHost
     public Dictionary<string, object?> SetTopmost(bool enabled)
     {
         var appWindow = _provider()
-            ?? throw new ConsoleWindowError("没有可控制的 APEX 固定窗口，请先打开固定窗口");
+            ?? throw new ConsoleWindowError("没有可控制的 ControlPod 窗口，请先打开 ControlPod");
         if (appWindow.Presenter is not OverlappedPresenter presenter)
             throw new ConsoleWindowError("当前窗口形态不支持置顶");
         presenter.IsAlwaysOnTop = enabled;

@@ -64,7 +64,7 @@ internal sealed class TrayHost : IDisposable
         if (_disposed || _hwnd == IntPtr.Zero) return;
         var data = MakeIconData();
         data.uFlags |= Native.NIF_INFO;
-        data.szInfoTitle = string.IsNullOrWhiteSpace(title) ? "APEX 总控台" : title;
+        data.szInfoTitle = string.IsNullOrWhiteSpace(title) ? "ControlPod" : title;
         data.szInfo = message ?? "";
         data.dwInfoFlags = Native.NIIF_INFO;
         if (!Native.Shell_NotifyIconW(Native.NIM_MODIFY, ref data))
@@ -97,7 +97,7 @@ internal sealed class TrayHost : IDisposable
     private void ShowTrayMenu()
     {
         var menu = Native.CreatePopupMenu();
-        Native.AppendMenuW(menu, 0, (IntPtr)1, "打开 APEX 总控台");
+        Native.AppendMenuW(menu, 0, (IntPtr)1, "打开 ControlPod");
         Native.AppendMenuW(menu, Native.MF_SEPARATOR, IntPtr.Zero, null);
         Native.AppendMenuW(menu, 0, (IntPtr)2, "退出");
         Native.SetForegroundWindow(_hwnd);          // 托盘菜单官方惯例：先置前台再 TrackPopupMenu
@@ -136,7 +136,7 @@ internal sealed class TrayHost : IDisposable
         uFlags = Native.NIF_MESSAGE | Native.NIF_ICON | Native.NIF_TIP,
         uCallbackMessage = WM_APP_TRAY,
         hIcon = _hIcon,
-        szTip = "APEX 总控台",
+        szTip = "ControlPod",
         szInfo = "",
         szInfoTitle = "",
     };

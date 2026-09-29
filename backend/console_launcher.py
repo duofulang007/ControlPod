@@ -419,7 +419,7 @@ def find_console_window(pid: int | None = None) -> int | None:
         if candidates:
             candidates.sort(reverse=True)
             return candidates[0][1]
-    return _window_handle_for_title(user32, "APEX 控制台")
+    return _window_handle_for_title(user32, "ControlPod")
 
 
 def wait_for_console_window(
@@ -469,7 +469,7 @@ def remember_app_window(pid: int, hwnd: int | None) -> None:
         json.dumps({
             "pid": int(pid or 0),
             "hwnd": int(hwnd) if hwnd else None,
-            "title": "APEX 控制台",
+            "title": "ControlPod",
             "profile": str(APP_WINDOW_PROFILE_DIR),
             "width": APP_WINDOW_WIDTH,
             "height": APP_WINDOW_HEIGHT,
@@ -642,7 +642,7 @@ def run(*, open_browser: bool = True, force_restart: bool = False) -> str:
 
 def show_error(message: str) -> None:
     if os.name == "nt":
-        ctypes.windll.user32.MessageBoxW(None, message, "APEX 总控台", 0x10)
+        ctypes.windll.user32.MessageBoxW(None, message, "ControlPod", 0x10)
     else:
         print(message, file=sys.stderr)
 

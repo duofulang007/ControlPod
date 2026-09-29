@@ -1362,7 +1362,8 @@ def test_runtime_picks_latest_run_when_timestamps_tie(tmp_path: Path) -> None:
         assert _wait_terminal(client, stopped["id"])["status"] == "succeeded"
 
         db = client.app.state.db  # type: ignore[attr-defined]
-        same = "2026-09-28T13:47:53.000000+00:00"
+        # 用远未来时间确保 tie 记录始终晚于应用实际生成的运行记录；测试不能依赖执行日期。
+        same = "9999-12-30T23:59:59.000000+00:00"
         for run_id in (started["id"], stopped["id"]):
             db.execute("UPDATE runs SET finished_at=? WHERE id=?", (same, run_id))
 
@@ -1396,7 +1397,7 @@ def test_runtime_picks_latest_run_when_timestamps_tie(tmp_path: Path) -> None:
             "INSERT INTO runs(id,project_id,module_id,action,status,started_at,"
             "finished_at,exit_code,error,run_dir) VALUES(?,?,?,?,?,?,?,?,?,?)"
         )
-        tie = "2026-09-28T23:59:59.000000+00:00"
+        tie = "9999-12-31T00:00:00.000000+00:00"
         conn.execute(insert, ("zzz-tie", "apex", "fake-module", "run", "succeeded",
                               tie, tie, 0, None, str(tmp_path / "tie-run")))
         conn.execute(insert, ("aaa-tie", "apex", "fake-module", "stop", "succeeded",
@@ -1680,5 +1681,5 @@ def test_failed_process_surfaces_stderr_in_run_record(tmp_path: Path) -> None:
 def test_module_program_expands_project_placeholders() -> None:
     assert ModuleRunner._expand(
         "{project_root}\\backend\\.venv\\Scripts\\python.exe",
-        {"project_root": "D:\\Py项目\\APEX"},
-    ) == "D:\\Py项目\\APEX\\backend\\.venv\\Scripts\\python.exe"
+        {"project_root": "D:\\Projects\\example-project"},
+    ) == "D:\\Projects\\example-project\\backend\\.venv\\Scripts\\python.exe"

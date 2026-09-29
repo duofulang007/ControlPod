@@ -110,7 +110,7 @@ public sealed class LocalApi
     {
         _db = db ?? new Db(ConsoleConfig.DbPath);
         _catalog = new ApplicationCatalog(_db, scanner);
-        _registry = registry ?? new ModuleRegistry(ConsoleConfig.ModulesDir);
+        _registry = registry ?? new ModuleRegistry(ConsoleConfig.ModulesDir, ConsoleConfig.ProjectsDir);
         _runner = runner ?? new ModuleRunner(_db, _registry, ConsoleConfig.RunsDir,
             webOpener: webOpener, applicationCatalog: _catalog);
         _execution = execution ?? new ExecutionService(_db, _runner);
@@ -137,7 +137,7 @@ public sealed class LocalApi
         };
 
         public Dictionary<string, object?> SetTopmost(bool enabled) =>
-            throw new ConsoleWindowError("没有可控制的 APEX 固定窗口，请先打开固定窗口");
+            throw new ConsoleWindowError("没有可控制的 ControlPod 窗口，请先打开 ControlPod");
     }
 
     public async Task<Reply?> HandleAsync(string method, string path, string? body)

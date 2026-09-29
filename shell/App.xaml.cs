@@ -59,7 +59,7 @@ public partial class App : Application
             return;
         }
 
-        // 排查：--inspect-shortcuts 列出桌面/开始菜单里所有 APEX 快捷方式及其真实目标
+        // 排查：--inspect-shortcuts 列出桌面/开始菜单里所有 ControlPod 及旧名快捷方式
         if (Array.IndexOf(cli, "--inspect-shortcuts") >= 0)
         {
             foreach (var line in ShortcutMaker.InspectAll()) Console.WriteLine(line);
@@ -94,7 +94,7 @@ public partial class App : Application
         var mutexName = isConsole
             ? @"Local\ApexShell_SingleInstance"
             : @"Local\ApexShell_SingleInstance_Dashboard_" + StableHash(externalUrl!);
-        var windowTitle = isConsole ? "APEX 总控台" : "APEX 看板";
+        var windowTitle = isConsole ? "ControlPod" : "CPod 看板";
 
         // 单实例：已有实例在跑时，二次启动 = 唤起已有窗口，不再开新进程
         _singleInstance = new Mutex(true, mutexName, out var isNew);

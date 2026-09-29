@@ -5,7 +5,7 @@ using System.Reflection;
 namespace ApexShell;
 
 /// <summary>
-/// 一键生成「APEX 总控台」快捷方式（桌面 + 仓库根）。
+/// 一键生成「ControlPod」桌面快捷方式。
 /// 为什么要壳自己来做：exe 的真实路径又深又长
 /// （shell\bin\x64\Debug\net8.0-windows10.0.19041.0\win-x64），不该让人记。
 /// <para>
@@ -17,10 +17,11 @@ namespace ApexShell;
 /// </summary>
 public static class ShortcutMaker
 {
-    public const string ShortcutName = "APEX 总控台";
+    public const string ShortcutName = "ControlPod";
+    public const string LegacyShortcutName = "APEX 总控台";
 
     /// <summary>在桌面建快捷方式（返回路径），已完成「写后读回」校验。
-    /// **只建桌面这一个**：仓库根那个 `00-启动 APEX 总控台.lnk` 已按多弗朗要求删除，
+    /// **只建桌面这一个**：仓库根那个旧启动快捷方式已删除，
     /// 不能再重建——否则每次跑 `--shortcuts` 又会长出来，违背「根目录只留源码」的约定。</summary>
     public static string CreateDesktopShortcut()
     {
@@ -32,6 +33,7 @@ public static class ShortcutMaker
 
         var desktopPath = Path.Combine(desktop, ShortcutName + ".lnk");
         CreateOne(desktopPath, exe);
+        DeleteLegacyShortcut(desktop, desktopPath);
         return desktopPath;
     }
 
@@ -46,9 +48,19 @@ public static class ShortcutMaker
             Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
             "Microsoft", "Windows", "Start Menu", "Programs");
         var path = Path.Combine(programs, ShortcutName + ".lnk");
-        if (!File.Exists(path)) return null;
+        var legacyPath = Path.Combine(programs, LegacyShortcutName + ".lnk");
+        if (!File.Exists(path) && !File.Exists(legacyPath)) return null;
         CreateOne(path, exe);
+        DeleteLegacyShortcut(programs, path);
         return path;
+    }
+
+    private static void DeleteLegacyShortcut(string directory, string replacementPath)
+    {
+        var legacyPath = Path.Combine(directory, LegacyShortcutName + ".lnk");
+        if (string.Equals(legacyPath, replacementPath, StringComparison.OrdinalIgnoreCase)
+            || !File.Exists(legacyPath)) return;
+        File.Delete(legacyPath);
     }
 
     private static void CreateOne(string linkPath, string target)
@@ -82,7 +94,7 @@ public static class ShortcutMaker
         Console.WriteLine($"  {linkPath}\n    → {readBack}");
     }
 
-    /// <summary>排查用：列出桌面与开始菜单里所有 APEX 相关快捷方式及其真实目标。
+    /// <summary>排查用：列出桌面与开始菜单里所有 ControlPod 及旧名快捷方式。
     /// .lnk 内部是 shell 的二进制 IDList，只能靠 COM 解读——所以这个清单必须由壳来出。</summary>
     public static List<string> InspectAll()
     {
@@ -109,8 +121,8 @@ public static class ShortcutMaker
                 continue;
             }
             foreach (var link in links.Where(p =>
-                         p.Contains("APEX", StringComparison.OrdinalIgnoreCase)
-                         || p.Contains("总控台", StringComparison.Ordinal)))
+                         p.Contains(ShortcutName, StringComparison.OrdinalIgnoreCase)
+                         || p.Contains(LegacyShortcutName, StringComparison.OrdinalIgnoreCase)))
             {
                 var target = ReadTarget(link) ?? "(读不出目标)";
                 var exists = File.Exists(target) ? "存在" : "缺失";

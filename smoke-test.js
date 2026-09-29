@@ -142,6 +142,9 @@ TEST_APPS.forEach(app => T.BACKEND_APP_IDS.add(app.id));
 /* 1b. 侧栏导航只保留在 PAGES 中登记的页面 */
 try {
   const html = fs.readFileSync(path.join(__dirname, 'index.html'), 'utf8');
+  check(html.includes('<title>ControlPod</title>') && html.includes('<div class="name">CPod</div>')
+      && !html.includes('<title>APEX 控制台</title>'),
+    '品牌名统一：全称 ControlPod，侧栏简称 CPod');
   const navPages = Array.from(html.matchAll(/data-page="([a-z]+)"/g)).map(m => m[1]);
   const ok = ['home','projects','modules','apps','settings'];
   const bad = navPages.filter(p => !ok.includes(p));
@@ -859,7 +862,7 @@ try {
 
   T.S.runOpen[w1.id] = true;
   const idleDetail = T.viewWorkflows(false);
-  check(idleDetail.includes('id="termRun"') && idleDetail.includes('收起运行详情') && idleDetail.includes('$ apex-console run 项目执行'),
+  check(idleDetail.includes('id="termRun"') && idleDetail.includes('收起运行详情') && idleDetail.includes('$ cpod run 项目执行'),
     '空闲态一次点击可展开最近运行详情');
 
   const restored = T.restoreBackendExecution(w1, {id:'exec-ops', action:'run', status:'running', steps:[{
@@ -887,7 +890,7 @@ try {
 
   T.S.runOpen[w1.id] = true;
   const runningDetail = T.viewWorkflows(false);
-  check(runningDetail.includes('id="termRun"') && runningDetail.includes('$ apex-console run') && runningDetail.includes('收起运行详情'),
+  check(runningDetail.includes('id="termRun"') && runningDetail.includes('$ cpod run') && runningDetail.includes('收起运行详情'),
     '运行中一次点击可查看实时完整日志');
 
   T.S.running = null; T.S.runOpen = {};
@@ -1217,8 +1220,8 @@ try {
   T.S.larderTab = 'app';
   check(T.viewWorkflows(false).includes('li-pj" title="系统资源"'), '执行模块默认归属显示「系统资源」');
   T.S.larderTab = 'script';
-  check(T.viewWorkflows(false).includes('li-pj" title="内置模块"'), 'APEX 清单显示为内置模块');
-  T.DATA.modules.push({id:'__web',type:'web',ref:'https://example.com',name:'示例网页',desc:'',arg:'',builtIn:false});
+  check(T.viewWorkflows(false).includes('li-pj" title="项目清单模块"'), '外部项目清单模块标注来源，不误称为内置模块');
+  T.DATA.modules.push({id:'__web',type:'web',ref:'https://example.com',name:'示例网页',desc:'',arg:'',manifestBacked:false});
   T.S.larderTab = 'web';
   check(T.viewWorkflows(false).includes('li-pj" title="可供项目使用"'), '网站模块标明可供项目复用');
   T.DATA.modules.pop();
@@ -1227,7 +1230,7 @@ try {
 
 /* 6. 资源条目：既有拖拽载荷，也有显式「添加」按钮 */
 try {
-  T.DATA.modules.push({id:'__web',type:'web',ref:'https://example.com',name:'示例网页',desc:'',arg:'',builtIn:false});
+  T.DATA.modules.push({id:'__web',type:'web',ref:'https://example.com',name:'示例网页',desc:'',arg:'',manifestBacked:false});
   T.S.larderTab = 'web';
   const html = T.viewWorkflows(false);
   check(html.includes('draggable="true"') && html.includes('data-act="addStep"'),
@@ -1512,7 +1515,7 @@ try {
   T.S.startupLoading = false; T.S.startupUpdating = false; T.S.startupError = '';
   const settings = T.viewSettings();
   const startupSrc = fs.readFileSync(path.join(__dirname, 'app.js'), 'utf8');
-  check(settings.includes('开机自启动') && settings.includes('登录系统后自动打开 APEX 总控台窗口')
+  check(settings.includes('开机自启动') && settings.includes('登录系统后自动打开 ControlPod 窗口')
     && settings.includes('class="switch on"') && !settings.includes('开机自启动已开启'),
     '开机自启动显示后端读回状态，不再只展示前端假成功提示');
   /* 后端把「注册了没」（registered）和「Windows 允许它启动吗」（approved）分开回答：
@@ -1522,7 +1525,7 @@ try {
     '启动项被任务管理器禁用时开关不显示假绿，并说清该去哪儿恢复');
   T.applyStartupState({ enabled: true, registered: true, approved: true });
   check(T.S.startupEnabled === true && T.S.startupApproved === true
-    && T.viewSettings().includes('登录系统后自动打开 APEX 总控台窗口'),
+    && T.viewSettings().includes('登录系统后自动打开 ControlPod 窗口'),
     'Windows 侧为启用态时开关如实点亮');
   check(startupSrc.includes("apiRequest('/settings/startup')")
     && startupSrc.includes("apiRequest('/settings/startup', {method:'PUT'")
@@ -1604,7 +1607,7 @@ try {
   check(uri.startsWith('obsidian://open?') && uri.includes('vault=Codex%E5%AD%A6%E4%B9%A0')
     && uri.includes('file=Codex%E5%AD%A6%E4%B9%A0%2F%E9%A1%B9%E7%9B%AE%20A'),
     'Obsidian URI 对中文、空格与路径分隔符正确编码');
-  check(T.cleanObsidianPath('\\项目\\APEX Console\\') === '项目/APEX Console',
+  check(T.cleanObsidianPath('\\项目\\ControlPod\\') === '项目/ControlPod',
     '项目笔记路径统一为仓库内正斜杠格式');
 
   const oldObs = JSON.parse(JSON.stringify(T.S.obsidian));
@@ -1636,7 +1639,7 @@ try {
   check(note.includes('完善自动化脚本的异常处理') && note.includes('APEX 架构备忘')
     && note.includes('状态：') && !note.includes('完成度：'),
     '项目主页汇总当前状态、任务和项目记录，不写项目完成百分比');
-  check(note.includes('[返回 APEX 控制台当前项目](')
+  check(note.includes('[返回 ControlPod 当前项目](')
     && note.includes('#/workflows/apex?focus=obsidian'),
     '项目主页写入返回当前项目的稳定链接');
 
@@ -1964,10 +1967,10 @@ try {
   const expectedFiles = ['.gitattributes', '.gitignore', 'AGENTS.md', 'README.md', 'app.js', 'backend', 'index.html', 'shell', 'smoke-test.js', 'styles.css'].sort();
   check(JSON.stringify(dirFiles) === JSON.stringify(expectedFiles),
     '根目录只保留源码与 Git 配置（实际：' + dirFiles.join(', ') + '）');
-  /* 启动入口只在桌面：`00-启动 APEX 总控台.lnk` 已删除，且代码里禁止重建
+  /* 启动入口只在桌面：仓库根旧快捷方式已删除，且代码里禁止重建
      （见 shell/ShortcutMaker.cs 的 CreateDesktopShortcut）。 */
   check(!dirFiles.some(name=>name.endsWith('.lnk')),
-    '根目录不再放启动快捷方式（唯一入口是桌面「APEX 总控台」）');
+    '根目录不再放启动快捷方式（唯一入口是桌面「ControlPod」）');
   const n0 = T.DATA.notes.length;
   T.S.notes.unshift({id:'nX', title:'t', tag:'日常', pinned:false, time:'刚刚', body:'b', proj:T.DATA.projects[0].name});
   check(T.S.notes.length === n0 + 1, '新建项目记录会追加到底层记录（' + (n0 + 1) + ' 条）');
@@ -2315,8 +2318,8 @@ try {
   /* 模块库启动时只保留真实 APEX 模块；网站条目由网页模板创建并从后端恢复 */
   const mods = T.DATA.modules || [];
   const types = ['web','folder','script','cmd'];
-  check(mods.length === 1 && mods[0].ref === 'apex-launcher' && mods[0].builtIn,
-    '源码种子只保留真实 APEX 内置模块（演示网站已清除）');
+  check(mods.length === 1 && mods[0].ref === 'apex-launcher' && mods[0].manifestBacked,
+    '源码种子保留现有 APEX 项目的清单模块（演示网站已清除）');
   check(mods.every(m => typeof m.ref === 'string' && m.ref && types.includes(m.type)
     && typeof m.name === 'string' && m.name && typeof m.desc === 'string'),
     '每个模块都带统一字段 ref / type / name / desc（' + mods.length + ' 条）');
@@ -2342,7 +2345,7 @@ try {
   check(page.includes('内置网页模板：名称 / 网站地址 / 描述'),
     '页头说明网页模块模板的三个输入字段');
   const rows = (page.match(/data-act="editModule"/g) || []).length;
-  check(rows === mods.filter(m=>!m.builtIn).length, '只有用户创建的网站模块提供编辑入口');
+  check(rows === mods.filter(m=>!m.manifestBacked).length, '只有用户创建的网站模块提供编辑入口');
 
   /* 新增 / 编辑共用一份表单骨架，编辑只多一个「删除」（与任务弹窗同一套约定） */
   check((app5.match(/moduleFormHTML\(/g) || []).length >= 3,
@@ -2361,7 +2364,7 @@ try {
   /* 删除模块：预演 + 二次确认（硬约束） */
   T.S.modConfirm = '';
   check(T.modDeleteModalHTML() === '', '未进入删除流程时不渲染预演弹窗');
-  const d = {id:'web-test', ref:'https://example.com', type:'web', name:'测试网站', desc:'', arg:'', builtIn:false};
+  const d = {id:'web-test', ref:'https://example.com', type:'web', name:'测试网站', desc:'', arg:'', manifestBacked:false};
   mods.push(d);
   T.S.modConfirm = T.moduleKey(d.type, d.ref);
   const ask = T.modDeleteModalHTML();
@@ -2457,7 +2460,7 @@ try {
     '旧工作模式的数据、浮层、交互与设置项已彻底移除');
 } catch (e) { console.log('FAIL 0 项目兜底 → ' + e.message); fail++; }
 
-/* 31. 真实后端模块：APEX 启动不再走旧前端 */
+/* 31. 外部项目模块：ControlPod 只负责接入与编排 */
 try {
   const fs31 = require('fs');
   const app31 = fs31.readFileSync(path.join(__dirname, 'app.js'), 'utf8');
@@ -2466,12 +2469,21 @@ try {
   const db31 = fs31.readFileSync(path.join(__dirname, 'backend/app/db.py'), 'utf8');
   const projectRepo31 = fs31.readFileSync(path.join(__dirname, 'backend/app/repositories/project_repository.py'), 'utf8');
   const projectService31 = fs31.readFileSync(path.join(__dirname, 'backend/app/services/project_service.py'), 'utf8');
-  const launcher31 = fs31.readFileSync(path.join(__dirname, 'backend/modules/apex-launcher/runner.py'), 'utf8');
+  const moduleRegistryPy31 = fs31.readFileSync(path.join(__dirname, 'backend/app/module_registry.py'), 'utf8');
+  const moduleRegistry31 = fs31.readFileSync(path.join(__dirname, 'shell/ModuleRegistry.cs'), 'utf8');
+  const apexProject31 = path.resolve(__dirname, '..', 'apex-launcher');
+  const hasApexProject31 = fs31.existsSync(path.join(apexProject31, '.git'));
+  const launcher31 = hasApexProject31
+    ? fs31.readFileSync(path.join(apexProject31, '.apex/runner.py'), 'utf8') : '';
+  const worker31 = hasApexProject31
+    ? fs31.readFileSync(path.join(apexProject31, 'apex_worker.py'), 'utf8') : '';
+  const manifest31 = hasApexProject31
+    ? JSON.parse(fs31.readFileSync(path.join(apexProject31, '.apex/module.json'), 'utf8')) : null;
+  const apexCheck31 = (ok, label) => check(!hasApexProject31 || ok, label);
   const consoleLauncher31 = fs31.readFileSync(path.join(__dirname, 'backend/console_launcher.py'), 'utf8');
   const startPs31 = fs31.readFileSync(path.join(__dirname, 'backend/start.ps1'), 'utf8');
   const startup31 = fs31.readFileSync(path.join(__dirname, 'backend/app/startup_manager.py'), 'utf8');
   const bootstrapPs31 = fs31.readFileSync(path.join(__dirname, 'backend/bootstrap.ps1'), 'utf8');
-  const manifest31 = JSON.parse(fs31.readFileSync(path.join(__dirname, 'backend/modules/apex-launcher/module.json'), 'utf8'));
   const apex31 = T.WF_SEED.find(p=>p.id==='apex');
 
   check(apex31.steps.length === 1 && apex31.steps[0].ref === 'apex-launcher',
@@ -2573,10 +2585,17 @@ try {
     && runner31.includes('if module.requires_admin') && runner31.includes('process.stderr.log')
     && runner31.includes('_read_process_output'),
     '程序路径支持模块占位符，需要提权时保留 UAC 且子进程错误写回运行记录');
-  check(manifest31.id === 'apex-launcher' && manifest31.projectId === 'apex'
+  check(moduleRegistryPy31.includes('DEFAULT_PROJECT_NAME = "未命名模块项目"')
+    && moduleRegistry31.includes('DefaultProjectName = "未命名模块项目"')
+    && moduleRegistryPy31.includes('DEFAULT_PROJECT_DESCRIPTION = "模块清单尚未声明项目说明。"')
+    && moduleRegistry31.includes('DefaultProjectDescription = "模块清单尚未声明项目说明。"'),
+    'Python 与 C# 对未声明项目元数据的兜底保持通用且一致');
+  apexCheck31(!!manifest31 && manifest31.id === 'apex-launcher' && manifest31.projectId === 'apex'
     && manifest31.singleInstance === true && manifest31.requiresAdmin === true
+    && manifest31.projectRoot === '.'
+    && manifest31.actions.run.program === '{project_root}\\.venv\\Scripts\\python.exe'
     && manifest31.actions.run && manifest31.actions.stop && manifest31.actions.restart,
-    '模块清单声明稳定 id、运行/关闭/重启动作、单实例和管理员权限');
+    '独立项目清单声明稳定 id、本地 Python 环境、运行/关闭/重启动作和管理员权限');
   check(app31.includes('function projectRunControlsHTML')
     && app31.includes('data-act="stopProject"') && app31.includes('data-act="restartProject"')
     && app31.includes('/projects/${encodeURIComponent(wf.id)}/executions')
@@ -2590,23 +2609,27 @@ try {
   }, false);
   check(failed31.includes('运行失败') && !failed31.includes('badge b-blue">运行中'),
     '真实启动失败时状态徽标显示失败，不再误报运行中');
-  const worker31 = fs31.readFileSync(path.join(__dirname, 'backend/apex_worker.py'), 'utf8');
-  check(launcher31.includes('WORKER_PORT = 8766') && launcher31.includes('def ensure_worker(')
+  apexCheck31(launcher31.includes('WORKER_PORT = 8766') && launcher31.includes('def ensure_worker(')
     && launcher31.includes('def execute_action(') && launcher31.includes('/actions/{action}')
-    && worker31.includes('get_service') && worker31.includes('ApexOneClickService') === false
+    && launcher31.includes('def project_dir()') && launcher31.includes('root / "apex_worker.py"')
+    && launcher31.includes('root / "data"')
+    && worker31.includes('from apex_launcher.service import get_service')
+    && worker31.includes('ApexOneClickService') === false
     && worker31.includes('service.adopt_running_environment()')
-    && worker31.includes('host="127.0.0.1"') && worker31.includes('port=8766'),
-    'APEX 模块复用内置常驻工作进程，重启严格执行先关闭再启动');
-  check(!fs31.existsSync(path.join(__dirname, 'backend/modules/apex-launcher/adapter.py')),
-    '短命适配器已移除，不再伪造跨进程关闭状态');
-  check(!launcher31.includes('5173') && !launcher31.includes('frontend'),
-    'APEX 模块不启动旧 Vue/Vite 前端或打开旧页面');
-  check(launcher31.includes('execute.lpVerb = "runas"') && launcher31.includes('execute.nShow = 0'),
-    '仅 APEX 模块执行时请求管理员权限，提权子进程隐藏');
-  check(!fs31.existsSync(path.join(__dirname, 'backend/modules/apex-launcher/run.ps1'))
-    && Object.values(manifest31.actions).every(action=>!action.program.toLowerCase().includes('powershell')
+    && worker31.includes('host="127.0.0.1"') && worker31.includes('port=8766')
+    && worker31.includes('apex-launcher-worker'),
+    '独立 APEX 项目自管工作进程、源码与数据，重启严格执行先关闭再启动');
+  apexCheck31(!launcher31.includes('5173') && !launcher31.includes('frontend'),
+    'APEX 项目不启动旧 Vue/Vite 前端或打开旧页面');
+  apexCheck31(launcher31.includes('execute.lpVerb = "runas"') && launcher31.includes('execute.nShow = 0'),
+    'APEX 项目执行时请求管理员权限，提权子进程隐藏');
+  apexCheck31(!!manifest31 && Object.values(manifest31.actions).every(action=>!action.program.toLowerCase().includes('powershell')
       && !action.args.some(arg=>arg.toLowerCase().includes('executionpolicy'))),
-    '真实执行入口已移除被安全软件拦截的 PowerShell 与执行策略绕过');
+    '真实执行入口不使用会被安全软件拦截的长 PowerShell 脚本或执行策略绕过');
+  check(!fs31.existsSync(path.join(__dirname, 'backend/app/apex_launcher'))
+    && !fs31.existsSync(path.join(__dirname, 'backend/apex_worker.py'))
+    && !fs31.existsSync(path.join(__dirname, 'backend/modules/apex-launcher')),
+    'APEX 自动化核心、工作进程与模块清单已从 ControlPod 移出');
   check(consoleLauncher31.includes('def plan_launch(')
     && consoleLauncher31.includes('payload.get("service") == "apex-console"')
     && consoleLauncher31.includes('def source_fingerprint(')
@@ -2654,24 +2677,27 @@ try {
        ① 前端只在初始化问一次运行态（无定时器）→ 补低频轮询；
        ② result.json 从不写 status.state → runner 的 run/stop 都要写；
        ③ /runtime 取 run 只按 finished_at, id 排序 → 同秒落库顺序不定 → 加 rowid。 */
-  const runnerLab31 = fs31.readFileSync(path.join(__dirname, 'backend/modules/runner-lab/runner.py'), 'utf8');
   const localApi31 = fs31.readFileSync(path.join(__dirname, 'shell/LocalApi.cs'), 'utf8');
-  /* serve.py 在另一个仓库（run-analytics），本机是这个路径；找不到就跳过这组断言，
-     不因为一个跨仓库文件缺席把整套 smoke-test 拖崩。用 RUN_ANALYTICS 环境变量可覆盖。 */
+  /* runner.py 与 serve.py 都由独立的 run-analytics 仓库维护；仓库不存在时跳过其专属断言。 */
   const servePyPath31 = process.env.RUN_ANALYTICS
     ? path.join(process.env.RUN_ANALYTICS, 'tools/serve.py')
     : 'D:/Projects/run-analytics/tools/serve.py';
   const servePy31 = fs31.existsSync(servePyPath31) ? fs31.readFileSync(servePyPath31, 'utf8') : null;
   const serveCheck = (ok, label) => check(servePy31 === null || ok, label);
+  const runnerPath31 = process.env.RUN_ANALYTICS
+    ? path.join(process.env.RUN_ANALYTICS, '.apex/runner.py')
+    : 'D:/Projects/run-analytics/.apex/runner.py';
+  const runnerLab31 = fs31.existsSync(runnerPath31) ? fs31.readFileSync(runnerPath31, 'utf8') : null;
+  const runnerCheck = (ok, label) => check(runnerLab31 === null || ok, label);
 
   /* ② runner 写 state：run → running，stop → stopped（后端只认这两个字面值） */
-  check(runnerLab31.includes('"result": {"status": {"state": "stopped"}}'),
+  runnerCheck(runnerLab31 && runnerLab31.includes('"result": {"status": {"state": "stopped"}}'),
     'runner 的 stop 动作写 result.status.state=stopped —— 关掉之后状态如实回落');
-  check(/"result": \{"status": \{"state": "running", "pid": result\.get\("pid"\)\}\}/.test(runnerLab31),
+  runnerCheck(runnerLab31 && /"result": \{"status": \{"state": "running", "pid": result\.get\("pid"\)\}\}/.test(runnerLab31),
     'runner 的 run 动作写 result.status.state=running 并记下桥的 pid（供强杀兜底交叉校验）');
   /* 反向防护：state 必须落在 result.status 下（后端读 result.status.state），
      写成扁平键 result["status.state"] 后端读不到，会静默退化成 unknown */
-  check(!/"status\.state"/.test(runnerLab31),
+  runnerCheck(runnerLab31 && !/"status\.state"/.test(runnerLab31),
     'state 写在嵌套的 result.status 下，不是扁平的 "status.state" 键（后者后端读不到）');
 
   /* ③ /runtime 排序加 rowid 兜底（Python 与 C# 两边都要有） */
@@ -2700,7 +2726,7 @@ try {
     '存活标记目录与总控台 runner-lab 的 STATE_DIR 同口径（同一个 %TEMP%\\run-analytics）');
   serveCheck(!!servePy31 && servePy31.includes('atexit.register(mark_dead)'),
     '桥正常退出（含 Ctrl+C）走 atexit 撤标记，不留「进程没了标记还在」的假存活');
-} catch (e) { console.log('FAIL 真实后端模块 → ' + e.message); fail++; }
+} catch (e) { console.log('FAIL 外部项目模块 → ' + e.message); fail++; }
 
 /* 32. 项目选择页卡片拖拽排序：二维命中 + 长按起拖 + 弹簧让位 + 后端持久化 */
 try {

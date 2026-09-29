@@ -3,7 +3,7 @@
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:wv2="using:Microsoft.UI.Xaml.Controls"
-    Title="APEX 总控台">
+    Title="ControlPod">
 
     <!-- RootGrid 底色 = 页面 body 顶部的合成色：无边框壳在顶部有 8px 系统保留区（WinAppSDK
          对 SetBorderAndTitleBar(false,false) 窗口的既定行为，NCCALCSIZE/PreferredHeightOption
@@ -94,7 +94,7 @@
 
             <StackPanel x:Name="SplashPanel" Opacity="0"
                         HorizontalAlignment="Center" VerticalAlignment="Center">
-                <TextBlock Text="APEX" CharacterSpacing="120"
+                <TextBlock Text="CPod" CharacterSpacing="120"
                            FontSize="40" FontWeight="SemiBold" Foreground="#E8402A"
                            HorizontalAlignment="Center" />
                 <TextBlock Text="掌控主动权 · 更进一步"

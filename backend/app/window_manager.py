@@ -13,9 +13,9 @@ class ConsoleWindowError(RuntimeError):
 
 
 class ConsoleWindowManager:
-    """只控制唯一匹配 APEX 标题的原生窗口，歧义时拒绝操作。"""
+    """只控制唯一匹配 ControlPod 标题的原生窗口，歧义时拒绝操作。"""
 
-    window_title = "APEX 控制台"
+    window_title = "ControlPod"
     state_path = config.DATA_DIR / "console-app-window.json"
 
     def _saved_state(self) -> dict:
@@ -170,7 +170,7 @@ class ConsoleWindowManager:
     def set_topmost(self, enabled: bool) -> dict[str, object]:
         hwnd = self._window_handle()
         if hwnd is None:
-            raise ConsoleWindowError("没有可控制的 APEX 固定窗口，请先打开固定窗口")
+            raise ConsoleWindowError("没有可控制的 ControlPod 窗口，请先打开 ControlPod")
         user32 = self._user32()
         flags = 0x0001 | 0x0002 | 0x0010 | 0x0040  # NOSIZE | NOMOVE | NOACTIVATE | SHOWWINDOW
         insert_after = ctypes.c_void_p(-1 if enabled else -2)  # HWND_TOPMOST / HWND_NOTOPMOST

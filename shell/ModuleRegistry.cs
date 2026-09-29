@@ -9,8 +9,8 @@ namespace ApexShell;
 
 /* 二期 C# 版 backend/app/module_registry.py，逐字段对齐：
    id 正则 ^[a-z][a-z0-9-]{1,63}$、schemaVersion==1、actions.run 必有、
-   timeoutSeconds 1..1800、projectRoot 支持 {console_root} 占位符/绝对/相对（相对 console 根解析，
-   不按 cwd——cwd 取决于谁拉起服务，Python 版踩过）、cwd 支持 {module_dir}/{project_root}。 */
+   timeoutSeconds 1..1800、projectRoot 支持 {console_root} 占位符/绝对/相对（内置清单相对 console 根，
+   外部清单相对所属仓库）、cwd 支持 {module_dir}/{project_root}。 */
 
 public sealed record ModuleActionDef(string Program, IReadOnlyList<string> Args, string Cwd);
 
@@ -36,15 +36,21 @@ public sealed class ModuleRegistryError : Exception
 
 public sealed class ModuleRegistry
 {
-    public const string DefaultProjectName = "APEX 启动";
-    public const string DefaultProjectDescription = "一键启动 AK、Steam 与 APEX，不启动旧前端。";
+    public const string DefaultProjectName = "未命名模块项目";
+    public const string DefaultProjectDescription = "模块清单尚未声明项目说明。";
 
     private static readonly Regex IdRegex = new("^[a-z][a-z0-9-]{1,63}$", RegexOptions.Compiled);
 
     private readonly string _root;
+    private readonly string? _externalProjectsRoot;
     private Dictionary<string, ModuleDefinition> _modules = new(StringComparer.Ordinal);
 
-    public ModuleRegistry(string root) => _root = root;
+    public ModuleRegistry(string root, string? externalProjectsRoot = null)
+    {
+        _root = Path.GetFullPath(root);
+        _externalProjectsRoot = string.IsNullOrWhiteSpace(externalProjectsRoot)
+            ? null : Path.GetFullPath(externalProjectsRoot);
+    }
 
     /// <summary>modules 目录默认 &lt;console&gt;/backend/modules，往上两级即 console 根。
     /// manifest 的 projectRoot 与动作参数都可写 {console_root}，两处必须同一口径。</summary>
@@ -58,21 +64,44 @@ public sealed class ModuleRegistry
     public IReadOnlyDictionary<string, ModuleDefinition> Load()
     {
         var modules = new Dictionary<string, ModuleDefinition>(StringComparer.Ordinal);
+        var manifests = new List<(string Path, string ProjectRootBase)>();
         if (Directory.Exists(_root))
         {
             // 与 Python 版 glob("*/module.json") 同义：只扫一层子目录
-            var manifestPaths = Directory.EnumerateDirectories(_root)
+            manifests.AddRange(Directory.EnumerateDirectories(_root)
                 .Select(dir => Path.Combine(dir, "module.json"))
                 .Where(File.Exists)
-                .OrderBy(p => p, StringComparer.OrdinalIgnoreCase)
-                .ToList();
-            foreach (var path in manifestPaths)
+                .Select(path => (path, ConsoleRoot)));
+        }
+        if (_externalProjectsRoot is not null && Directory.Exists(_externalProjectsRoot))
+        {
+            foreach (var projectDir in Directory.EnumerateDirectories(_externalProjectsRoot))
             {
-                var item = LoadOne(path);
-                if (modules.ContainsKey(item.Id))
-                    throw new ModuleRegistryError($"模块 id 重复：{item.Id}");
-                modules[item.Id] = item;
+                if ((File.GetAttributes(projectDir) & FileAttributes.ReparsePoint) != 0
+                    || string.Equals(Path.GetFullPath(projectDir), ConsoleRoot,
+                        StringComparison.OrdinalIgnoreCase))
+                    continue;
+                var gitMarker = Path.Combine(projectDir, ".git");
+                if (!Directory.Exists(gitMarker) && !File.Exists(gitMarker))
+                    continue;
+                var apexDir = Path.Combine(projectDir, ".apex");
+                if (!Directory.Exists(apexDir)
+                    || (File.GetAttributes(apexDir) & FileAttributes.ReparsePoint) != 0)
+                    continue;
+                var path = Path.Combine(apexDir, "module.json");
+                if (!File.Exists(path)
+                    || (File.GetAttributes(path) & FileAttributes.ReparsePoint) != 0)
+                    continue;
+                manifests.Add((path, Path.GetFullPath(projectDir)));
             }
+        }
+        foreach (var (path, projectRootBase) in manifests.OrderBy(
+                     item => item.Path, StringComparer.OrdinalIgnoreCase))
+        {
+            var item = LoadOne(path, projectRootBase);
+            if (modules.ContainsKey(item.Id))
+                throw new ModuleRegistryError($"模块 id 重复：{item.Id}");
+            modules[item.Id] = item;
         }
         _modules = modules;
         return modules;
@@ -86,7 +115,7 @@ public sealed class ModuleRegistry
         return el.GetString()!.Trim();
     }
 
-    private ModuleDefinition LoadOne(string path)
+    private ModuleDefinition LoadOne(string path, string projectRootBase)
     {
         JsonElement data;
         try
@@ -111,7 +140,7 @@ public sealed class ModuleRegistry
         var projectRootRaw = RequiredText(data, "projectRoot", path);
         var expanded = projectRootRaw.Replace("{console_root}", consoleRoot);
         if (!Path.IsPathRooted(expanded))
-            expanded = Path.Combine(consoleRoot, expanded);
+            expanded = Path.Combine(projectRootBase, expanded);
         var projectRoot = Path.GetFullPath(expanded);
 
         var actions = new Dictionary<string, ModuleActionDef>(StringComparer.Ordinal);

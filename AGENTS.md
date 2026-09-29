@@ -1,7 +1,7 @@
 # AGENTS.md · 控制台项目接手说明书
 
 > 给任何要读 / 改这个项目的 agent：**先读这一份，再动代码**。术语、硬约束、架构、验证方式与全部已踩过的坑都在这里。
-> 最后更新：2026-09-28 · 测试基线：**前端 `node smoke-test.js` ALL_PASS（766 项） + 后端 `pytest backend/tests -q` 106 通过 + 壳自测 `ApexShell.exe --selftest`（280 项）**
+> 最后更新：2026-09-29 · 测试基线：**前端 `node smoke-test.js` ALL_PASS（790 项） + 后端 `pytest backend/tests -q`（91 通过） + 壳自测 `ApexShell.exe --selftest`（283 项）**
 >
 > **当前形态（先看这段）**：**WinUI 3 壳（`shell/`）+ Web 三件套 + Python 后端**的单仓库结构。**日常入口是 Release 版壳**（`shell\bin\Release\publish\ApexShell.exe`，路径深——用桌面快捷方式，或跑该 exe 的 `--shortcuts` 重建；Release 开了 `PublishReadyToRun`、关了符号，冷启动比 Debug 快）；Debug 版（`shell\bin\x64\Debug\...\win-x64\`）只用于调试与自测。**二期移植已完成**：51 条 API 路由都在壳内就地回答，壳可独立运行、不再探测或拉起 Python；Python 保留只为浏览器模式（`backend/start.ps1` → `127.0.0.1:8765`）与 pytest 对照基线。**两套栈共用同一个 SQLite 库**（`backend/data/apex-console.db`，`user_version` 协议）。
 
@@ -27,7 +27,7 @@
 | `smoke-test.js` | 冒烟测试，**同时是本项目的活规格**：读它就知道每个功能的预期行为 |
 | `AGENTS.md` | 本文件 |
 | `shell/` | **WinUI 3 壳**（C# 源码 + 构建产物）。源码在 `shell/*.cs`，产物在 `shell/bin/...`（不进 git） |
-| `backend/` | Python FastAPI 应用、可执行模块包（`backend/modules/`）、运行数据（`backend/data/`）、后端测试 |
+| `backend/` | Python FastAPI 浏览器兼容层、通用模块发现 / 执行服务、运行数据（`backend/data/`）、后端测试 |
 
 - 根目录只放源码（细则见 §12）：不加文档 / 截图 / 备份 / 快捷方式 / 构建产物。`backend/.venv`、`backend/data`、`shell/bin`、`shell/obj` 是本机生成物，不属于源码。
 - 开发过程记录在 `D:\Projects\.workbuddy-ai\memory\YYYY-MM-DD.md`（外层，不在本仓库）。
@@ -38,9 +38,9 @@
 ## 3. 怎么跑、怎么验
 
 ```bash
-# 日常入口：双击桌面「APEX 总控台」（指向壳 exe）；或直接跑
+# 日常入口：双击桌面「ControlPod」（指向壳 exe）；或直接跑
 ApexShell.exe                       # 开窗口（托盘常驻、Ctrl+Alt+A 唤起、关窗缩托盘）
-ApexShell.exe --selftest [日志]      # 壳无头自测（不建窗口不碰 WebView2，280 项）
+ApexShell.exe --selftest [日志]      # 壳无头自测（不建窗口不碰 WebView2，283 项）
 ApexShell.exe --shortcuts           # 重建桌面快捷方式（指向当前 exe）
 ApexShell.exe --inspect-shortcuts   # 列出桌面/开始菜单里所有 APEX 快捷方式及其真实目标
 ApexShell.exe --stages=exec,routes  # 只跑指定自测阶段（排查用二分）
@@ -48,7 +48,7 @@ ApexShell.exe --stages=exec,routes  # 只跑指定自测阶段（排查用二分
 # 前端活规格（末行必须 ALL_PASS）
 node smoke-test.js
 
-# 后端对照测试（106 通过）
+# 后端对照测试（当前 91 通过；Windows 上用独立 basetemp 避免 ACL 干扰）
 backend/.venv/Scripts/python.exe -m pytest backend/tests -q
 
 # 浏览器模式（Python 后端；壳已不依赖它）
@@ -141,7 +141,7 @@ powershell -ExecutionPolicy Bypass -File backend/start.ps1   # → http://127.0.
 | `StartupManager.cs` | 开机自启动（`Run` + `StartupApproved\Run` 双位置） |
 | `ApplicationScanner.cs` | 开始菜单 / UWP / App Paths 扫描 + 图标提取（`SHGetFileInfoW` + 手写 PNG 编码器） |
 | `ApplicationCatalog.cs` | applications 路由组业务层（`ValidateLaunch` 是公共校验） |
-| `ModuleRegistry.cs` | `module.json` 解析与校验 |
+| `ModuleRegistry.cs` | 内置清单与同级项目仓库 `.apex/module.json` 发现、解析与校验 |
 | `ModuleRunner.cs` | 三类模块（web / application / script 落地子进程）+ `sync_registry` |
 | `ExecutionService.cs` | 执行编排（项目锁、失败即停、中断恢复） |
 | `ProjectService.cs` | 项目 / 任务 / 记录 / 文件 / 基本资料 |
@@ -172,7 +172,7 @@ powershell -ExecutionPolicy Bypass -File backend/start.ps1   # → http://127.0.
 - **总控台**：继续工作 hero + 最近打开 + 最近活动；单屏无纵向滚动。
 - **项目（选择页）**：卡片栅格 + 尾部新建卡（切状态 / 复制 / 刷新 / 删除）。运行控件 `projectRunControlsHTML()` **必须由选择页卡片与详情页头共用**，不得各写一套；`S.projectRuntime` 由 `/api/projects/{id}/runtime` 恢复，刷新后不能退回假空闲。
 - **项目详情页**（`S.wf`），四区块：① 概览（身份卡 + 能力卡 + 统计卡）；② **开发上下文**（左：当前任务区 + 高 / 中 / 低优先级区，可拖拽、可空、区高可调；右：Obsidian 资料中枢卡 + 项目记录 + 项目文件）；③ **运行流程**（单张卡：状态徽标 + 「添加模块」入口 → 状态摘要 / 日志终端 → 主流程蛇形视图 → 历史记录；主流程每行 5 节点、蛇形走向、行间 S 形曲线；节点三态：已完成绿 √ / 进行中品牌色 / 未开始空心）；④ 设置（开关 + 裸红色「删除项目」长条）。
-- **模块**（页面 id `scripts`）：执行模块的唯一编辑 / 添加入口。新增用内置 `web` 模板（名称 / 网站地址 / 描述），项目归属只由 `project_modules` 多对多绑定维护。磁盘清单模块显示为「内置模块」，**不得从页面改写或删除**。删除走预演 + 二次确认，解除绑定但**保留历史运行记录**。
+- **模块**（页面 id `scripts`）：执行模块的唯一编辑 / 添加入口。新增用内置 `web` 模板（名称 / 网站地址 / 描述），项目归属只由 `project_modules` 多对多绑定维护。清单管理模块显示为「由项目清单管理」，需在所属仓库维护，**不得从总控台改写或删除**。删除用户创建的网页模块仍走预演 + 二次确认，解除绑定但**保留历史运行记录**。
 - **应用**：列表 + 惯性滚动 + 分类标签；「添加应用」两步（选择真实应用 → 可选改名改标签 → 确认）。扫描结果在弹窗内容区独立滚动、底部操作始终可见；**不得恢复静态池 / 空壳应用 / 后端断开时的假成功**。
 - **设置**：外观（7 个偏好）、通用行为、快捷键、Obsidian 全局连接。
 - **命令面板**：`Ctrl+K`，`buildPalette()`。「常用项目」分组必须由 `DATA.projects` 派生（**不要写死项目 id**）；`startRun(id)` 必须明确判存在，**不要 `find(...) || curWf()` 兜底**。
@@ -220,14 +220,14 @@ powershell -ExecutionPolicy Bypass -File backend/start.ps1   # → http://127.0.
 
 **后端 / 执行栈**
 
-20. **真实 APEX 模块不要改回长启动脚本**：旧入口曾被 Defender 识别为 `HackTool:PowerShell/ApexToolkit.A`，脚本在参数解析前就被 AMSI 拦截。当前 `apex-launcher/runner.py` 由本仓库 venv 执行、通过 `runas` 请求提权；`module.json` 只引用 venv 解释器与 `runner.py`。不要用关防护 / 白名单规避。
-21. **8766 端口被未知服务占用时绝不接管**：先 `worker_healthy()` 探身份、再 `worker_port_occupied()` 探占用 —— 健康就复用、被占用但不是 APEX 就报错退出，不启动、不 kill。别改回「先杀了再说」，有测试锁定。
+20. **独立项目的业务实现与运行环境留在项目仓库**：ControlPod 只维护通用模块发现、权限提示、执行编排和运行记录；项目代码、项目专属依赖、工作进程及其端口生命周期由各自仓库维护。
+21. **外部模块服务不由总控台接管**：未知服务或模块专属端口只能由所属项目验证身份并管理；ControlPod 不探测后擅自启动、终止或重启外部服务。
 22. **自管滚动不要捕获按钮的指针**：惯性滚动容器若对按钮 `setPointerCapture`，鼠标点击会被吞（键盘 Enter 却可用）。交互控件先经 `appScrollDragBlocked()` 排除。
 23. **无人值守的模块绝不能停在交互输入上**：Windows 上 `getpass` 会绕过 stdin 重定向直接读控制台，**永久挂住**（项目卡在「运行中」）。交互式脚本被模块调用前必须加 `--no-prompt` 类开关 + 超时。
 24. **项目名来自 manifest**：新增模块必须在 `module.json` 显式声明 `projectName` / `projectDescription`，否则继承 `module_registry.DEFAULT_PROJECT_*` 的文案。
 25. **占位符**：`{module_dir}` `{project_root}` `{console_root}` `{run_dir}` `{result_path}` `{log_path}`。**跨项目模块引用 console 自己的虚拟环境时必须写 `{console_root}`**，不要写绝对路径。**展开必须留在 `try` 里** —— 异常从 try 前逃出会让 run 永远停在 `running`（项目卡死「运行中」，按钮消失，看着像「点了没反应」）。
 26. **模块要开窗口就用 `pythonw.exe` + `DETACHED_PROCESS`**，不要等窗口关闭（否则跟着来一个黑框，且调用方退出时被连带回收）；pid 记在 `%TEMP%` 下靠它精确结束；**不要**用 `taskkill /IM pythonw.exe`。
-27. **模块项目是独立 git 仓库，放在 console 同级目录**：`module.json` 的 `projectRoot` 写相对路径，`module_registry` **相对 console 根**解析（不按 cwd、不写死盘符）。
+27. **模块项目是独立 git 仓库，放在 `D:\Projects` 下**：总控台直接扫描每个子目录的 `.apex/module.json`，不递归并跳过 ControlPod 自身。内置清单的相对 `projectRoot` 按 console 根解析；外部清单按所属仓库根解析（不按 cwd、不写死盘符）。
 28. **C# 壳侧（二期移植踩过的）**：
     - `catch (A or B ex)` **不是合法 C#**——异常过滤要写 `catch (Exception ex) when (ex is A or B)`。
     - `x.Result;` 作为**丢弃结果的裸语句**编译不过（CS0201），必须 `_ = x.Result;`。
@@ -243,14 +243,14 @@ powershell -ExecutionPolicy Bypass -File backend/start.ps1   # → http://127.0.
 29. **测试基线必须真实**：曾把 4 项可修的失败写成「既存失败」并附「修掉之前别把后端全绿当验收前提」——**那是把可修的 bug 合法化成降低标准**。真相是那些测试测着重构删掉的旧接口（全仓库零调用），重写即过。**遇到失败先查是不是过时测试，别急着记进文档当常态。**
 30. **壳里的模块子进程恒用 `CreateNoWindow = true`，不要复刻 Python 的 `requires_admin` 分支**：Python 版 `creationflags=0` 的语义是「沿用后端自己那个控制台」，壳是 WinUI GUI 进程、**没有控制台可继承**，系统于是给子进程**新分配**一个控制台窗口，而它的 stdout/stderr 全被重定向进日志 → 用户看到一块悬着的空白黑屏。两套栈在这一处是**有意分歧**，别「对齐」回去。
 31. **`result.json` 必须先于 `runs.status` 可见**：`/runtime` **不看** `runs.status`，它重新读 `result.json` 取 `result.status.state`；而子进程落盘的可见性**不保证**早于父进程 `wait()` 返回 → 偶发 `state=unknown`（满负载时才复现）。`finally` 在 `status == "succeeded"` 时先 `_wait_for_result_file()`（上限 2s）再落库。**别把这类偶发失败当成「重跑一次就好」**——它和第 28 条的竞态是同一类病。
-32. **`apex_launcher` 的输入助手必须用被标记 `RUNASADMIN` 的解释器启动，别改成 `sys.executable`**：AK.exe 是提权运行的——**提权窗口在前台时，非提权进程的 `SetCursorPos` 直接返回 0、指针纹丝不动**，所以「动鼠标的那个进程」必须同样提权。现象是「AK 打开后点不动、后面的 Steam / 游戏全不执行」。排查看 `processes.move_mouse()` 返回里的 `error` / `error_detail`（非提权会明确报 `[WinError 740]`）。
+32. **模块子进程的权限必须遵守清单**：需要管理员权限的模块由通用执行器按 `requiresAdmin` 发起 UAC；不得绕开权限声明，也不得在拒绝授权后继续执行。
 33. **读子进程 stdout 必须先并发读走再 `WaitForExit`，否则管道满 → 子进程永不退出**：`Get-StartApps` 会往 stdout 写 **17KB**，而匿名管道缓冲区只有 **4KB**，「先 `WaitForExit` 再 `ReadToEnd`」让子进程卡在自己那次写操作上**永不退出** → 必然超时 → 商店/UWP 清单被判失败。后果不是报错而是**静默丢数据**（搜不到商店应用；已绑定的 UWP 项目一运行就撞 409「入口已失效」）。正确写法：先 `ReadToEndAsync()` 两个流，再 `WaitForExit`。Python 的 `subprocess.run(capture_output=True)` 走 `communicate()` 本身并发，所以同一命令正常。排查入口：`ApexShell.exe --scan`（`--selftest` 覆盖不到这里）。
 34. **`overflow:hidden` 会连「向上浮出的悬停气泡」一起裁掉**：活跃度热力图的气泡是 `position:absolute;bottom:calc(100% + 6px)`，向上溢出格子也溢出卡盒，最上两行整个被裁成「看不见任何东西」。修法是给那一张卡加 `.home-grid .dashboard-heat{overflow:visible clip}`：**只放行纵向**，横向仍保持 `clip`（`clip` 不产生滚动容器，不像 `visible` 会连带把另一轴的 `hidden` 升级成 `auto` 冒出滚动条）。**别改成给 `.home-grid .card` 整体去掉 `overflow:hidden`**。⚠️ 这条只解决纵向，横向是第 35 条。
 35. **气泡的「末列右对齐」阈值是陈旧常量：`n+169` 在 13 周卡片窗下永不命中**（与第 34 条是同一现场的两个独立原因）：`n+169` 是 53 周全窗（371 格）时代写的；卡片可视窗后来缩到 `HEAT_CARD_COLS = 13` 周 = **91 格**，阈值永不命中 → 末列气泡仍居中 → 右半边被裁。正确阈值是 **`HEAT_CARD_CELLS - 14 + 1 = 78`**，**改 `HEAT_CARD_COLS` 就得同步改 CSS 阈值**（测试已把「CSS 阈值 = 13*7-14+1」钉死，并禁止过期阈值以选择器形式复活）。排查手法：别肉眼看截图，量「气泡右缘 − 卡片右缘」的正负号 —— 正数即出界，数值就是被裁掉的像素数。
 36. **设置页开关必须门控它的真实出口，否则只是个「记录意愿」的摆设**：`shellToast()` 原先只判 `IN_SHELL`、**完全不读 `S.notify`** → 关掉「桌面通知」后运行终态（完成 / 失败 / 关闭）照弹系统 Toast（原注释还写着「当前无推送实现」，与实现早就脱节——**「注释说的和代码做的不一致」是配置类 bug 的高发区**）。修法：`if (!(S && S.notify)) return;` 放在 `shellToast()` 内部。**门控要点在「唯一的出口」上做，不是在每个调用点做**。两个易漏边界：①`S.notify` 可能是 `undefined`（老 localStorage 没这个键），要写 `!(S && S.notify)`；②必须是 **early-return**。**验证套路**：抽取真实函数源码到 vm 里真跑（别重写等价逻辑），再做反向验证 —— 把门控行删掉重跑，应精确复现用户报告的现象。
 37. **壳支持 `--url` 打开外部看板**：链路 `runner.py → open_dashboard() → ApexShell.exe --url <地址>` → 壳内 `WebView2.Navigate(url)`。四个设计点：①**单实例锁按角色 + 按 URL 分**（同地址重复启动 = 唤起已有窗口，不堆第二个；不同地址 = 各自独立窗口），②**窗口状态按角色分文件**（`shell-window-console.json` / `shell-window-dashboard.json`），③**`--url` 与 `--url=` 两种写法都要认**（只认一种的表现是「参数传了没生效、开出来还是总控台」），④**外部 URL 分支要在虚拟主机映射之前 `return`**（`apex.local` 映射是总控台专用路径）。
 38. **窗口位置尺寸持久化：`DisplayArea.FindAll()` 在窗口构造早期抛 `E_NOINTERFACE`**，会把「还原布局」整个吞进 catch → 表现是**位置怎么都记不住**（日志里能读到状态、但永远跟着一行 `1440x900 centered`）。改用**纯 Win32** 的 `MonitorFromRect(MONITOR_DEFAULTTONULL)` + `GetMonitorInfo().rcWork`。**判据口径**：`GetWindowRect` 含每边约 7–8px 的不可见调整边框，`DwmGetWindowAttribute(DWMWA_EXTENDED_FRAME_BOUNDS)` 才是肉眼可见矩形；**存档写的是 DWM 可见矩形**，所以「存档 1100×720 → 重开 GetWindowRect 1143×735」的差值**是正常的**，别当成没记住反复改代码。验证三段都要有：写自定义状态 → 启动壳 → 从日志读 `window: 还原上次布局` → 再量窗口矩形。
-39. **新起的桥也要走「开看板」决策点，不然第一次运行和第二次的观感不一致**：`launch_bridge` 原先是**复用已有桥**才调 `open_dashboard()`，**新起桥**那条路只让 `serve.py --open-browser` 自己开系统浏览器 → 同一个按钮第一次开浏览器小窗、关闭后再点才开壳。修法是两个分支都收敛到 `open_dashboard()`，并让 `serve.py` 的 `open_browser()` 也优先起壳、留 `os.startfile` 兜底。**为什么两边都开不怕重复**：壳的单实例锁按 URL 分，「幂等的打开动作」比「小心翼翼地只开一次」更抗漏。`serve.py` 属 run-analytics 仓库、壳属 apex-console 仓库，两者没有固定相对关系 → 只能靠环境变量 / 写死的已知仓库路径，且**只认 Debug 产物**。
+39. **新起的桥也要走「开看板」决策点，不然第一次运行和第二次的观感不一致**：`launch_bridge` 原先是**复用已有桥**才调 `open_dashboard()`，**新起桥**那条路只让 `serve.py --open-browser` 自己开系统浏览器 → 同一个按钮第一次开浏览器小窗、关闭后再点才开壳。修法是两个分支都收敛到 `open_dashboard()`，并让 `serve.py` 的 `open_browser()` 也优先起壳、留 `os.startfile` 兜底。**为什么两边都开不怕重复**：壳的单实例锁按 URL 分，「幂等的打开动作」比「小心翼翼地只开一次」更抗漏。适配器现由 `run-analytics/.apex/runner.py` 维护；ControlPod 用 `--console-root` 显式传入自身路径，runner 优先找 Release 壳、再找 Debug 壳，并通过 `APEX_SHELL_EXE` 传给桥进程。`serve.py` 被独立直启时仍优先读该环境变量，找不到则按其原有本机 Debug 路径查找，最后退回系统浏览器。
 40. **卡片卡在「运行中 / 关闭中」是三个独立原因叠加，修一个不够**（链路：`runner.py 写 result.json → /runtime 读 result.status.state → 前端 S.projectRuntime → 卡片红点`）：
     - **① 前端只在页面初始化问过一次**：`syncProjectRuntime()` 原先没有任何定时器 → 用户关掉看板 / 从任务管理器杀桥之后前端永远不知道，字段恒为 `running` → 红点永久亮。修法：加 `startRuntimePoll()`（`RUNTIME_POLL_MS = 5000`），`document.hidden` 跳过、`visibilitychange` 回来自补、`!S.backendReady` 时不发。**必须「只在状态真变时 render(true)」** —— 全量重绘会让 hover 过渡与运行动画从头重播（观感是卡片反复弹跳）。
     - **② `result.json` 从不写 `status.state`**：`/runtime` 只认 `result.status.state ∈ {running, stopped}`，其它一律退化成 `unknown`。修法：两个分支都补 `"result": {"status": {"state": ...}}`（`run` 额外写 `pid`）。**必须是嵌套的 `result.status.state`，不是扁平键 `"status.state"`**（扁平键会静默读不到，有反向断言钉住）。
@@ -275,18 +275,18 @@ powershell -ExecutionPolicy Bypass -File backend/start.ps1   # → http://127.0.
 - **「找不到就顶上第一个」的静默兜底**：`startRun` 明确判存在；命令面板常用分组由数据派生。**这类兜底一律不要**——它把「失败」变成「做了另一件事」。
 - **75 条孤儿 CSS 规则**已清（现零孤儿，有全局护栏断言）。**注意护栏的子串匹配会放过**含相同子串的类名。
 - **无宿主的引用展示层 + 只写不读的状态字段**（2026-09-24 第二轮清扫）：前端删 `refBadgeOf` / `linkBadgeOf` / `notesLinkedTo` / `noteIsIdea` / `MOD_ENTRY_PH` / `IC` 的 6 个零引用键 / `S._modId` / `S.prepOpen` / `S.projectFileDeletePreview`；后端删 `_rename_tmp.py` / `ACTIVE_STATES`。**有负向断言锁定，不要加回来**。
-- **缺宿主的启动/关闭旧接口 + 零规则类钩子**（2026-09-25 第三轮清扫）：前端删 `S._modType` / `S._modProj` / `S.projectFileDeletePreview`（后者 2026-09-24 删过一次、又被当成键写回 `S` 字面量，当时的护栏只查 `S.xxx` 点号形式没拦住；现已改成**裸名字查**）与 5 个零规则类钩子（`dashboard-head` / `tile-menu` / `wf-steps-card` / `txt` / 概览编辑卡上的裸 `ov-edit`）；后端 `apex_launcher` 删 23 个零调用定义（`*_for_ui` / `test_mouse_move` / `launch_game` / `close_game` / `close_steam` / `save_config` / `capture_template` / `AUTOMATION_REVISION` / `ensure_ak_running` 一族，含 7 个连带孤儿，如 `_wait_state` 的调用点全在被删子树里）+ 3 处未使用 import。**有负向断言锁定**（前端 `smoke-test.js` + 后端 `tests/test_automation_dead_code.py`），不要加回来。
+- **缺宿主的旧接口 + 零规则类钩子**（2026-09-25 第三轮清扫）：前端删 `S._modType` / `S._modProj` / `S.projectFileDeletePreview`（后者 2026-09-24 删过一次、又被当成键写回 `S` 字面量，当时的护栏只查 `S.xxx` 点号形式没拦住；现已改成**裸名字查**）与 5 个零规则类钩子（`dashboard-head` / `tile-menu` / `wf-steps-card` / `txt` / 概览编辑卡上的裸 `ov-edit`）。**有负向断言锁定**（前端 `smoke-test.js`），不要加回来。独立项目的业务接口与死代码测试由所属仓库维护，不放回总控台。
 - **第四轮清扫（2026-09-26）——子串护栏拦不住的伪装孤儿 + 无生产宿主的函数**：①「云同步」抽屉全链（`openTool` / `case 'syncNow'` / 导航 `data-tool` 分支 / `IC.cloud` / `.track` / `.metrics` / `.metric b`）——无元素带 `data-tool`，整条不可达；② `applyBasicInfo`（本地落库兜底，生产一律走 `basicInfoApiPayload` + 后端 + `applyBackendBasicInfo`）；③ `S.windowState` 的只写字段 `width` / `height`；④ `C` 的零引用色键 `ink2` / `ink3` / `brand`；⑤ 孤儿 CSS：`.chat` / `.msg` / `.typing` / `@keyframes bob`、`.anim` / `.larder` / `.split` / `.app-tile.add` / `.cat-chip.ghost` / `.cnt.warn` / `.cnt.live`。**有负向断言锁定**（smoke-test 两条），不要加回来。**教训**：孤儿护栏是子串匹配，`chatgpt` / `const typing` / `.split(` 这类同形词会掩护真孤儿，得靠词边界扫描 + 人工排除运行时拼接；`h${heatLevel(...)}` 这类模板拼接不算孤儿。
 - **开发上下文卡头整行删除**：卡片直接以 `<div class="dev-cols">` 开场，**没有卡头、没有标题**——不要「顺手」补回来。
 - **任务行格式 `N. [待办][优先级] 正文（截止）`**：类型徽章**恒写「待办」**（「待修改」不出现在任何输出里），优先级三档全显式。**类型徽章刻意不参与解析**——否则模板恒写「待办」会在保存时把 `fix` 条目**静默改成 `todo`**。
 - **`0 项目白屏`**：`render()` 里任何在返回 HTML **之前**就取属性的写法，抛错都会造成「页面冻结」而不是报错。现为两层防护（拦「删除最后一个项目」+ 两页空态兜底）。
-- **零引用声明与重复注释**（2026-09-28 清理）：壳侧删 `WindowChrome.DragBarHeight`（`DragBar` 那版拖拽区拆掉后的残留常量）、`WindowChrome.FallbackDragWidth`、`WindowChrome.GetDpiForWindow`（三者全仓零调用）、`ModuleRegistry.Root`（没人读的转发属性）；runner-lab 删 `GUI_SCRIPT`（`--gui` 降级入口去掉后的残留常量）与未使用的 `import sys`；`LocalApi.IsProcessAlive` 上重复的一整段 `<summary>`。**有负向断言锁定**（壳 `SelfTest.CheckDeadDeclarations`、后端 `test_module_project_metadata.py`），不要加回来。
+- **零引用声明与重复注释**（2026-09-28 清理）：壳侧删 `WindowChrome.DragBarHeight`（`DragBar` 那版拖拽区拆掉后的残留常量）、`WindowChrome.FallbackDragWidth`、`WindowChrome.GetDpiForWindow`（三者全仓零调用）、`ModuleRegistry.Root`（没人读的转发属性）；跑步看板的 `GUI_SCRIPT`（`--gui` 降级入口去掉后的残留常量）与未使用的 `import sys` 已随适配器迁入 `run-analytics/.apex/runner.py`，由该 runner 自检保护；`LocalApi.IsProcessAlive` 上重复的一整段 `<summary>`。本仓库只保留通用外部模块发现测试，不再把独立项目的 runner 当作本仓源码。
 
 ---
 
 ## 12. 交接规则
 
-- **改完必跑**：`node smoke-test.js`（末行 `ALL_PASS`，766 项）；改壳代码还要跑 `ApexShell.exe --selftest`（280 项，逐条落盘便于定位死点）；改后端还要跑 `pytest backend/tests -q`（106 通过）。**结构变了补断言，删功能补负向断言**。
+- **改完必跑**：`node smoke-test.js`（末行 `ALL_PASS`，790 项）；改壳代码还要跑 `ApexShell.exe --selftest`（283 项，逐条落盘便于定位死点）；改后端还要跑 `pytest backend/tests -q`（当前 91 项通过）。**结构变了补断言，删功能补负向断言**。
   - **删根目录文件后务必跑前端冒烟测试**：里面有一条「根目录白名单」断言（`expectedFiles`），删了文件不同步改断言就会红——2026-09-25 删 `00-启动 APEX 总控台.lnk` 时就漏跑过一次。
 - **本目录有 git**（`D:\Projects\apex-console`）：动手前先看 `git status`，别破坏性覆盖；提交粒度按主题，别把多个主题混在一个提交里。
 - **根目录只放源码**（Web 三件套 + `smoke-test.js` + `AGENTS.md` + `README.md`），其余一律进 `shell/` 或 `backend/`。源码**纯 LF**：批量改写后复核 `b.count(b'\r\n') === 0`（见 §10 第 11 条）。

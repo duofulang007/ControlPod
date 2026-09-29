@@ -80,7 +80,7 @@ public sealed partial class MainWindow : Window
     /// <summary>本窗口的布局持久化（位置 / 尺寸 / 最大化态）。</summary>
     private readonly WindowStateStore _stateStore;
 
-    /// <summary>总控台模式构造（保持原有行为：1440×900 居中，标题「APEX 总控台」）。</summary>
+    /// <summary>总控台模式构造（1440×900 居中，标题「ControlPod」）。</summary>
     public MainWindow() : this(null) { }
 
     /// <summary>
@@ -94,7 +94,7 @@ public sealed partial class MainWindow : Window
         _role = _externalUrl is null ? WindowStateStore.Role.Console : WindowStateStore.Role.Dashboard;
         _stateStore = new WindowStateStore(_role, ShellLog.Log);
 
-        Title = _externalUrl is null ? "APEX 总控台" : "APEX 看板";
+        Title = _externalUrl is null ? "ControlPod" : "CPod 看板";
 
         ApplyStoredShellTheme();   // 深色用户启动不白闪：壳底色先对齐上次页面主题
         ApplyStoredOrDefaultPlacement();
@@ -1006,7 +1006,7 @@ public sealed partial class MainWindow : Window
                     // JS 侧运行终态的系统通知：fire-and-forget，不回帖
                     var title = root.TryGetProperty("title", out var tt) ? tt.GetString() : null;
                     var message = root.TryGetProperty("message", out var mm2) ? mm2.GetString() : null;
-                    _tray?.ShowToast(title ?? "APEX 总控台", message ?? "");
+                    _tray?.ShowToast(title ?? "ControlPod", message ?? "");
                     return;
                 }
                 if (type == "chrome-command")

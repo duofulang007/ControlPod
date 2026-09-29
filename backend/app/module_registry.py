@@ -9,9 +9,9 @@ from typing import Any
 
 ID_RE = re.compile(r"^[a-z][a-z0-9-]{1,63}$")
 
-# 未声明项目元数据时的兜底，保持既有「APEX 一键启动」项目的显示文案不变。
-DEFAULT_PROJECT_NAME = "APEX 启动"
-DEFAULT_PROJECT_DESCRIPTION = "一键启动 AK、Steam 与 APEX，不启动旧前端。"
+# 兼容尚未声明项目元数据的旧清单；新模块应显式提供这两个字段。
+DEFAULT_PROJECT_NAME = "未命名模块项目"
+DEFAULT_PROJECT_DESCRIPTION = "模块清单尚未声明项目说明。"
 
 
 @dataclass(frozen=True)
@@ -39,8 +39,12 @@ class ModuleDefinition:
 
 
 class ModuleRegistry:
-    def __init__(self, root: Path) -> None:
+    def __init__(self, root: Path, external_projects_root: Path | None = None) -> None:
         self.root = Path(root)
+        self.external_projects_root = (
+            Path(external_projects_root).resolve()
+            if external_projects_root is not None else None
+        )
         self._modules: dict[str, ModuleDefinition] = {}
 
     @property
@@ -54,11 +58,27 @@ class ModuleRegistry:
 
     def load(self) -> dict[str, ModuleDefinition]:
         modules: dict[str, ModuleDefinition] = {}
-        if not self.root.exists():
-            self._modules = modules
-            return modules
-        for path in sorted(self.root.glob("*/module.json")):
-            item = self._load_one(path)
+        manifests: list[tuple[Path, Path]] = []
+        if self.root.exists():
+            manifests.extend((path, self.console_root) for path in self.root.glob("*/module.json"))
+        if self.external_projects_root is not None and self.external_projects_root.is_dir():
+            console_root = self.console_root
+            for project_dir in self.external_projects_root.iterdir():
+                if not project_dir.is_dir() or project_dir.is_symlink():
+                    continue
+                if not (project_dir / ".git").exists():
+                    continue
+                resolved_project = project_dir.resolve()
+                if resolved_project == console_root:
+                    continue
+                apex_dir = project_dir / ".apex"
+                manifest = apex_dir / "module.json"
+                if apex_dir.is_symlink() or manifest.is_symlink() or not manifest.is_file():
+                    continue
+                manifests.append((manifest, resolved_project))
+        manifests.sort(key=lambda item: str(item[0]).casefold())
+        for path, project_root_base in manifests:
+            item = self._load_one(path, project_root_base)
             if item.id in modules:
                 raise ValueError(f"模块 id 重复：{item.id}")
             modules[item.id] = item
@@ -78,7 +98,7 @@ class ModuleRegistry:
             raise ValueError(f"{source}: {key} 必须是非空字符串")
         return value.strip()
 
-    def _load_one(self, path: Path) -> ModuleDefinition:
+    def _load_one(self, path: Path, project_root_base: Path | None = None) -> ModuleDefinition:
         data = json.loads(path.read_text(encoding="utf-8"))
         module_id = self._required_text(data, "id", path)
         if not ID_RE.fullmatch(module_id):
@@ -91,14 +111,12 @@ class ModuleRegistry:
         module_dir = path.parent.resolve()
         project_root_raw = self._required_text(data, "projectRoot", path)
         console_root = str(self.console_root)
-        # projectRoot 支持三种写法：{console_root} 占位符、绝对路径、相对路径。
-        # 相对路径相对 console 根解析（约定：模块项目仓库 clone 在 console 的同级目录，
-        # 如 "..\\run-analytics"）——这样模块可以是独立 git 仓库，而 manifest 不写死盘符。
-        # 直接 resolve() 会相对服务进程的 cwd，那不是稳定基准（踩过：cwd 取决于谁拉起服务）。
+        # 内置模块的相对路径锚定 console 根；外部仓库清单的相对路径锚定所属仓库。
+        # 两种路径都不依赖服务进程 cwd，也不需要在清单里写死盘符。
         expanded = project_root_raw.replace("{console_root}", console_root)
         candidate = Path(expanded)
         if not candidate.is_absolute():
-            candidate = self.console_root / candidate
+            candidate = (project_root_base or self.console_root) / candidate
         project_root = candidate.resolve()
         actions: dict[str, ModuleAction] = {}
         for action_name, action_raw in actions_raw.items():

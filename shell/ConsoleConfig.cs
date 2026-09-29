@@ -15,6 +15,11 @@ public static class ConsoleConfig
 
     public static string BackendDir { get; } = Path.Combine(ProjectDir, "backend");
 
+    public static string ProjectsDir =>
+        Environment.GetEnvironmentVariable("APEX_CONSOLE_PROJECTS_DIR")
+        ?? Directory.GetParent(ProjectDir)?.FullName
+        ?? throw new InvalidOperationException("无法定位 D:\\Projects 项目目录");
+
     public static string DataDir =>
         Environment.GetEnvironmentVariable("APEX_CONSOLE_DATA_DIR")
         ?? Path.Combine(BackendDir, "data");

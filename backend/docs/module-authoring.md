@@ -4,16 +4,20 @@
 
 ## 必填字段
 
-每个模块目录都要有 `module.json`，并至少提供：
+模块清单有两种位置：总控台内置模块放在 `backend/modules/<模块 id>/module.json`；独立 Git 项目仓库放在仓库根的 `.apex/module.json`。ControlPod 启动时扫描内置模块目录，以及 `APEX_CONSOLE_PROJECTS_DIR`（默认 `D:\Projects`）下每个直接子目录的 `.apex/module.json`。外部目录必须包含 Git 的 `.git` 文件或目录；不递归扫描，也会跳过 ControlPod 自身仓库。
+
+每份清单至少提供：
 
 - `schemaVersion: 1`
 - 稳定且唯一的 `id`
 - `projectId`、`name`、`version`、`projectRoot`
 - `actions.run`，其中包含 `program`、`cwd` 与字符串数组 `args`
 
-可用占位符为 `{module_dir}`、`{project_root}`、`{console_root}`、`{run_dir}`、`{result_path}`、`{log_path}`。未知占位符会被拒绝，不会交给 shell 解释。跨项目的模块若要引用 console 自己的虚拟环境，写 `{console_root}`，不要写绝对路径。
+相对 `projectRoot` 的基准取决于清单位置：内置模块相对 ControlPod 仓库根，独立项目清单相对所属项目仓库根。外部清单通常写 `"projectRoot": "."`。此时 `{module_dir}` 指向 `.apex`，`{project_root}` 指向项目仓库根；建议把动作 `cwd` 设为 `{project_root}`，并从这里调用项目自己的入口和运行环境。
 
-建议同时声明 `projectName` 与 `projectDescription`：项目名与描述取自 manifest，缺省会继承内置模块的文案。
+可用占位符为 `{module_dir}`、`{project_root}`、`{console_root}`、`{run_dir}`、`{result_path}`、`{log_path}`。未知占位符会被拒绝，不会交给 shell 解释。独立项目应优先使用自己的依赖与运行环境；只有确实调用 ControlPod 自己的工具时才写 `{console_root}`，不要写绝对路径。
+
+建议同时声明 `projectName` 与 `projectDescription`：项目名与描述取自 manifest；未声明时只使用通用兜底文案，不与某个独立项目绑定。
 
 ## 动作含义
 

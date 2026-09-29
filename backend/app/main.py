@@ -200,6 +200,7 @@ def create_app(
     *,
     db_path: Path | None = None,
     modules_dir: Path | None = None,
+    projects_dir: Path | None = None,
     runs_dir: Path | None = None,
     static_root: Path | None = config.PROJECT_DIR,
     application_scanner: Callable[[], list[dict[str, str]]] | None = None,
@@ -210,7 +211,13 @@ def create_app(
 ) -> FastAPI:
     db = Database(db_path or config.DB_PATH)
     db.init()
-    registry = ModuleRegistry(modules_dir or config.MODULES_DIR)
+    external_projects_root = projects_dir
+    if external_projects_root is None and modules_dir is None:
+        external_projects_root = config.PROJECTS_DIR
+    registry = ModuleRegistry(
+        modules_dir or config.MODULES_DIR,
+        external_projects_root=external_projects_root,
+    )
     registry.load()
     scan_local_applications = application_scanner or scan_windows_applications
     open_local_application = application_opener or open_windows_application
@@ -258,7 +265,7 @@ def create_app(
     execution_service.recover_interrupted()
     project_service = ProjectService(ProjectRepository(db))
 
-    app = FastAPI(title="Apex Console API", version="0.1.0")
+    app = FastAPI(title="ControlPod API", version="0.1.0")
     app.state.db = db
     app.state.registry = registry
     app.state.runner = runner
@@ -935,7 +942,7 @@ def create_app(
         if current is None:
             raise HTTPException(status_code=404, detail="模块不存在")
         if current.get("type") != "web" or current.get("manifest_path"):
-            raise HTTPException(status_code=409, detail="内置执行模块不能在这里修改")
+            raise HTTPException(status_code=409, detail="清单管理的模块不能在总控台修改")
         entry = normalized_web_url(payload.entry)
         duplicate = db.fetch_one(
             "SELECT id FROM modules WHERE type='web' AND entry=? AND enabled=1 AND id<>?",
@@ -971,7 +978,7 @@ def create_app(
         if module is None:
             raise HTTPException(status_code=404, detail="模块不存在")
         if module.get("type") != "web" or module.get("manifest_path"):
-            raise HTTPException(status_code=409, detail="内置执行模块不能删除")
+            raise HTTPException(status_code=409, detail="清单管理的模块不能在总控台删除")
         bindings = db.fetch_all(
             "SELECT project_id FROM project_modules WHERE module_id=? AND enabled=1", (module_id,)
         )

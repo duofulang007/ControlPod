@@ -1,5 +1,5 @@
 /* =========================================================
-   APEX 控制台 · 交互原型
+   ControlPod · 本地项目总控台
    ========================================================= */
 'use strict';
 
@@ -46,7 +46,7 @@ function shellToast(message, title){
   if (!IN_SHELL) return;
   if (!(S && S.notify)) return;   /* 桌面通知已关闭：不推系统通知（页面内 toast 不受影响，另有出口） */
   try {
-    window.chrome.webview.postMessage({ type:'shell-toast', title: title || 'APEX 总控台', message: message || '' });
+    window.chrome.webview.postMessage({ type:'shell-toast', title: title || 'ControlPod', message: message || '' });
   } catch (_) {}
 }
 
@@ -329,12 +329,12 @@ const DATA = {
   },
 
   /* ---- 执行模块库：可以放进项目运行流程的模块（统一封装标准） ----
-     实际数据由 /api/bootstrap 恢复。源码只保留 APEX 内置模块用于静态规格测试，
+     实际数据由 /api/bootstrap 恢复。源码只保留 APEX 项目的清单模块用于静态规格测试，
      不再附带 Product Hunt / Notion 等演示网站。网站模块统一从「新增模块」创建。 */
   modules: [
     /* 真实后端模块：运行由 /api/projects/apex/run 接管，前端不拼接或执行 shell。 */
     {id:'apex-launcher', ref:'apex-launcher', type:'script', name:'APEX 一键启动',
-     desc:'调用 APEX 启动核心，不打开旧前端', arg:'', builtIn:true, st:'就绪'}
+     desc:'调用独立 APEX 启动项目，不打开旧前端', arg:'', manifestBacked:true, st:'就绪'}
   ]
 
   /* 下载捕获没有接入真实系统服务，已随下载模块移除。 */
@@ -672,7 +672,7 @@ function obsidianProjectNote(w){
     `### ${oneLine(n.title)}\n\n> ${oneLine(n.tag)} · ${oneLine(n.time)}\n\n${String(n.body || '').trim() || '暂无正文'}`
   ).join('\n\n') : '暂无项目记录';
   const back = consoleProjectUrl(w);
-  return `---\nproject_id: ${w.id}\nproject: ${JSON.stringify(String(w.name || ''))}\nconsole_managed: true\ntags:\n  - 项目\n---\n\n# ${w.name}\n\n> 此页面由 APEX 控制台生成；再次更新会覆盖全文。\n\n[返回 APEX 控制台当前项目](${back})\n\n## 项目概览\n\n- 状态：${w.st}\n- 运行流程：${flowNameOf(w)}\n- 最近运行：${w.last}\n\n## 项目说明\n\n${w.desc || ''}\n\n## 项目任务\n\n${taskText}\n\n## 项目记录\n\n${noteText}\n`;
+  return `---\nproject_id: ${w.id}\nproject: ${JSON.stringify(String(w.name || ''))}\nconsole_managed: true\ntags:\n  - 项目\n---\n\n# ${w.name}\n\n> 此页面由 ControlPod 生成；再次更新会覆盖全文。\n\n[返回 ControlPod 当前项目](${back})\n\n## 项目概览\n\n- 状态：${w.st}\n- 运行流程：${flowNameOf(w)}\n- 最近运行：${w.last}\n\n## 项目说明\n\n${w.desc || ''}\n\n## 项目任务\n\n${taskText}\n\n## 项目记录\n\n${noteText}\n`;
 }
 function newObsidianProject(id){
   const w = DATA.projects.find(x=>x.id===id); if (!w) return false;
@@ -1590,7 +1590,7 @@ function uninstallApp(id){
 /* ---------------- 模块页 ----------------
    页面 id 沿用 scripts（历史遗留路由，勿改）。「新增模块」当前提供内置网页模板：
    用户只填名称、网站地址和描述，后端保存为可被任意项目选择的网站模块。
-   APEX 等磁盘清单模块仍会显示，但不在这里改写其执行定义。 */
+   磁盘清单模块仍会显示，但不在这里改写其执行定义。 */
 const MOD_TABS = [['all','全部'],['web','网页'],['folder','目录'],['script','脚本'],['cmd','命令']];
 /* 模块唯一键 = 类型 + 入口。ref 里不允许出现「|」——拖拽载荷用「|」分隔类型与入口 */
 const moduleKey = (type, ref) => type + '|' + ref;
@@ -1608,8 +1608,8 @@ function moduleRowHTML(m){
         m.st ? `<span class="badge ${m.st === '需确认' ? 'b-amber' : 'b-green'}" style="margin-left:4px">${esc(m.st)}</span>` : ''}</div>
       <div class="r-meta" style="font-family:Consolas,monospace">${esc(m.ref)}${m.arg ? ' ' + esc(m.arg) : ''}<span style="font-family:Inter,sans-serif;color:var(--ink-3)"> · ${esc(m.desc || '无描述')}</span></div>
     </div>
-    <span class="badge b-slate">${m.builtIn ? '内置模块' : '可供项目使用'}</span>
-    ${m.builtIn ? '' : `<button class="btn btn-ghost btn-sm" data-act="editModule" data-t="${m.type}" data-id="${esc(m.ref)}">${IC.pen('var(--ink-2)')}编辑</button>`}
+    <span class="badge b-slate">${m.manifestBacked ? '由项目清单管理' : '可供项目使用'}</span>
+    ${m.manifestBacked ? '' : `<button class="btn btn-ghost btn-sm" data-act="editModule" data-t="${m.type}" data-id="${esc(m.ref)}">${IC.pen('var(--ink-2)')}编辑</button>`}
   </div>`;
 }
 function viewModules(){
@@ -1660,7 +1660,7 @@ function modShowErr(msg, fieldId){
 }
 const webModuleFromApi = row => ({
   id:row.id, ref:row.entry || row.id, type:row.type || 'script', name:row.name,
-  desc:row.description || '', arg:row.args || '', builtIn:!!row.manifest_path,
+  desc:row.description || '', arg:row.args || '', manifestBacked:!!row.manifest_path,
   st:row.manifest_path ? '就绪' : ''
 });
 function validWebModuleUrl(value){
@@ -1680,7 +1680,7 @@ function newModule(){
    _modKey 记住**原始** 类型 + 入口，入口被改写时靠它定位原条目并级联更新运行流程里的引用。 */
 function editModule(type, ref){
   const m = findModule(type, ref); if (!m) return;
-  if (m.builtIn || m.type !== 'web'){ toast('内置执行模块不能在这里修改'); return; }
+  if (m.manifestBacked || m.type !== 'web'){ toast('由项目清单管理的模块请在所属仓库中维护'); return; }
   S._modKey = moduleKey(m.type, m.ref);
   openModal(`${mHead('编辑网站模块', '保存后，所有使用它的项目都会读取新地址')}
     ${moduleFormHTML({ nameId:'modName', name:m.name, desc:m.desc, entry:m.ref })}
@@ -1976,7 +1976,7 @@ async function updateStartupSetting(enabled){
   try {
     applyStartupState(await apiRequest('/settings/startup', {method:'PUT', body:JSON.stringify({enabled})}));
     toast(S.startupEnabled
-      ? '开机自启动已开启，登录后将自动打开 APEX 总控台窗口'
+      ? '开机自启动已开启，登录后将自动打开 ControlPod 窗口'
       : '开机自启动已关闭，Windows 启动项已移除');
   } catch (err) {
     S.startupError = err && err.message ? err.message : '无法更新 Windows 启动项';
@@ -2151,7 +2151,7 @@ async function modDelete(k){
   const i = DATA.modules.findIndex(m => moduleKey(m.type, m.ref) === k);
   if (i < 0) return;
   const gone = DATA.modules[i];
-  if (gone.builtIn){ toast('内置执行模块不能删除'); return; }
+  if (gone.manifestBacked){ toast('由项目清单管理的模块请在所属仓库中维护'); return; }
   try {
     await apiRequest(`/modules/${encodeURIComponent(gone.id)}`, {method:'DELETE'});
     DATA.modules.splice(i, 1);
@@ -2244,7 +2244,7 @@ function larderItems(){
   let items = t === 'app'
     ? S.apps.map(a=>({ref:a.id, label:a.name, note:a.cat+' · '+a.size, icon:appIconHTML(a.icon), proj:a.projectName}))
     : DATA.modules.filter(m=>m.type===t).map(m=>({ref:m.ref, label:m.name, note:m.desc,
-        proj:m.builtIn ? '内置模块' : '可供项目使用'}));
+        proj:m.manifestBacked ? '项目清单模块' : '可供项目使用'}));
   if (q) items = items.filter(i=>i.label.toLowerCase().includes(q) || String(i.note).toLowerCase().includes(q));
 
   const used = new Set(curWf().steps.map(s=>s.type+':'+s.ref));
@@ -2488,7 +2488,7 @@ function obsidianHubHTML(w, counts){
       <div class="obs-panel-head"><div><b>连接设置</b><span>这里只保存路径，无法确认页面是否存在</span></div></div>
       <div class="field obs-path-field">
         ${IC.note('var(--ink-3)')}
-        <input id="obsProjectPath" value="${esc(path)}" placeholder="例如：项目/APEX Console" aria-label="Obsidian 项目主页路径">
+        <input id="obsProjectPath" value="${esc(path)}" placeholder="例如：项目/ControlPod" aria-label="Obsidian 项目主页路径">
       </div>
       <div class="obs-panel-actions">
         <button class="btn btn-ghost btn-sm" data-act="obsidianBind" data-id="${w.id}">保存已有路径</button>
@@ -4059,7 +4059,7 @@ function viewSettings(){
       ? (S.startupUpdating ? '正在更新 Windows 启动项…' : '正在读取 Windows 启动项…')
       : startupBlocked
         ? '已被 Windows 任务管理器的启动项开关禁用，重新打开即可恢复'
-        : '登录系统后自动打开 APEX 总控台窗口，并启动后台服务';
+        : '登录系统后自动打开 ControlPod 窗口，并启动后台服务';
   const startupSwitch = `<div class="set-row">
       <div class="s-txt"><div class="s-t">开机自启动</div><div class="s-d">${startupDesc}</div></div>
       <button class="switch ${S.startupEnabled===true?'on':''}" data-act="switch" data-k="auto"
@@ -4748,7 +4748,7 @@ function backendLogClass(line){
 }
 function executionLogEntries(execution){
   if (!execution || !Array.isArray(execution.steps)) return [];
-  const rows = [{c:'cmd', t:`$ apex-console ${execution.action || 'run'} 项目执行`}];
+  const rows = [{c:'cmd', t:`$ cpod ${execution.action || 'run'} 项目执行`}];
   execution.steps.forEach((step, index) => {
     const prefix = `${index + 1}. ${step.module_name || step.module_id || '未命名模块'}`;
     const status = step.status || 'queued';
@@ -4835,7 +4835,7 @@ function applyBackendRun(wf, token, payload){
   const stepId = r.order[0];
   const lines = Array.isArray(payload.logs) ? payload.logs : [];
   r.log = Array.isArray(payload.steps) ? executionLogEntries(payload) : [
-    {c:'cmd', t:`$ apex-console ${r.action} "${wf.name}"`},
+    {c:'cmd', t:`$ cpod ${r.action} "${wf.name}"`},
     {c:'dim', t:`[${now()}] 已交给后端模块执行`},
     ...lines.map(line=>({c:backendLogClass(String(line)), t:String(line)})
   )];
@@ -4905,7 +4905,7 @@ function stopProject(id){
   runToken++;
   S.running = {token:runToken, wfId:wf.id, i:-1, done:0, total:steps.length || 1, states:{}, log:[], order:steps.map(s=>s.id), real:true, action:'stop', status:'queued'};
   steps.forEach(s=>S.running.states[s.id]='wait');
-  S.running.log.push({c:'cmd', t:`$ apex-console stop "${wf.name}"`});
+  S.running.log.push({c:'cmd', t:`$ cpod stop "${wf.name}"`});
   S.running.log.push({c:'dim', t:`[${now()}] 正在连接 APEX 常驻后端…`});
   S.runOpen[wf.id] = true;
   render(true);
@@ -4921,7 +4921,7 @@ function restartProject(id){
   runToken++;
   S.running = {token:runToken, wfId:wf.id, i:-1, done:0, total:steps.length || 1, states:{}, log:[], order:steps.map(s=>s.id), real:true, action:'restart', status:'queued'};
   steps.forEach(s=>S.running.states[s.id]='wait');
-  S.running.log.push({c:'cmd', t:`$ apex-console restart "${wf.name}"`});
+  S.running.log.push({c:'cmd', t:`$ cpod restart "${wf.name}"`});
   S.running.log.push({c:'dim', t:`[${now()}] 正在关闭项目并重新启动…`});
   S.runOpen[wf.id] = true;
   render(true);
@@ -4976,7 +4976,7 @@ function startRun(id, opts){
   const real = REAL_PROJECT_IDS.has(wf.id);
   S.running = {token:runToken, wfId:wf.id, i:-1, done:0, total:steps.length, states:{}, log:[], order:steps.map(s=>s.id), real, action:'run', status:real?'queued':''};
   steps.forEach(s=>S.running.states[s.id]='wait');
-  S.running.log.push({c:'cmd', t:`$ apex-console run "${wf.name}"`});
+  S.running.log.push({c:'cmd', t:`$ cpod run "${wf.name}"`});
   S.running.log.push({c:'dim', t: real ? `[${now()}] 正在连接本地后端…` : `[${now()}] 配置已确认：${steps.length} 个步骤，按顺序启动`});
   const stay = !!(opts && opts.stay);
   if (!stay && S.page !== 'workflows') go('workflows'); else render(true);
@@ -5091,7 +5091,7 @@ function aiReply(q){
   if (/跑|运行|start\.sh|脚本/.test(q)) return 'start.sh 已经跑完，退出码 0，耗时 4.2s。输出里有一条警告：有 2 个模块存在未使用的依赖，不影响运行。需要我把这条警告整理成待办吗？';
   if (/待办|先做|优先/.test(q)) return '按「今天到期 + 阻塞其他任务」排序，我建议先收掉「完善自动化脚本的异常处理」——它挂着两项依赖它的任务。其次是「整理项目文档结构」，大约 20 分钟能完成。';
   if (/活动|总结|今天/.test(q)) return '今天你一共产生了 6 条活动：3 条文件修改集中在 APEX Automation，1 次脚本运行，1 次网页浏览，1 次提交。主要精力在自动化脚本的异常处理上。';
-  if (/设计稿|文档|整理/.test(q)) return '设计稿_v3.fig 目前放在 D:/Design/APEX Console，还没登记进项目。可以在 APEX Automation 下建一个 docs/design 目录，把路径写进项目索引。要我执行吗？';
+  if (/设计稿|文档|整理/.test(q)) return '设计稿_v3.fig 目前放在 D:/Design/ControlPod，还没登记进项目。可以在 APEX Automation 下建一个 docs/design 目录，把路径写进项目索引。要我执行吗？';
   return '这一步可以拆成：先定位相关文件与脚本，再给出可执行的改动，最后等你确认落地。也可以直接说「启动晨间开工」，我立即执行。';
 }
 

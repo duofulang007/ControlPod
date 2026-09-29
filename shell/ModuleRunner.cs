@@ -334,7 +334,7 @@ public sealed class ModuleRunner
             foreach (var arg in args) psi.ArgumentList.Add(arg);
 
             // requiresAdmin 在壳里不再影响窗口标志（见上），但它是真话：带这个声明的模块会自己用
-            // runas 提权（apex-launcher 就是），运行时会弹 UAC。提前写一行进运行日志，
+            // 需要管理员权限的模块会触发 UAC。提前写一行进运行日志，
             // 免得用户以为那个提权确认是别人弹的。这里也是本字段在壳里的唯一读取点。
             if (module.RequiresAdmin)
                 File.AppendAllText(logPath,

@@ -19,7 +19,7 @@ public sealed class ModuleDomainConflictError : Exception
 
 /// <summary>
 /// 二期 C# 版 main.py 的模块管理面：模块列表（含 web 模板模块的增改删预演）
-/// 与项目↔模块 / 项目↔应用的绑定解绑。内置执行模块（有 manifest_path 或非 web）
+/// 与项目↔模块 / 项目↔应用的绑定解绑。清单管理模块（有 manifest_path 或非 web）
 /// 一律不允许在页面上改写或删除；应用绑定复用「隐藏 application 适配模块」机制。
 /// </summary>
 public sealed class ModuleService
@@ -62,7 +62,7 @@ public sealed class ModuleService
             ?? throw new ModuleDomainMissingError("模块不存在");
         if ((current.GetValueOrDefault("type") as string) != "web"
             || ((current.GetValueOrDefault("manifest_path") as string) ?? "").Length > 0)
-            throw new ModuleDomainConflictError("内置执行模块不能在这里修改");
+            throw new ModuleDomainConflictError("清单管理的模块不能在总控台修改");
         var normalized = NormalizedWebUrl(entry);
         if (_db.FetchOne(
                 "SELECT id FROM modules WHERE type='web' AND entry=@p0 AND enabled=1 AND id<>@p1",
@@ -100,7 +100,7 @@ public sealed class ModuleService
             ?? throw new ModuleDomainMissingError("模块不存在");
         if ((module.GetValueOrDefault("type") as string) != "web"
             || ((module.GetValueOrDefault("manifest_path") as string) ?? "").Length > 0)
-            throw new ModuleDomainConflictError("内置执行模块不能删除");
+            throw new ModuleDomainConflictError("清单管理的模块不能在总控台删除");
         var bindings = _db.FetchAll(
             "SELECT project_id FROM project_modules WHERE module_id=@p0 AND enabled=1", moduleId);
         // 删除只解除绑定并停用模块；历史运行记录保留（runs 的外键是 RESTRICT，模块行不物理删除）

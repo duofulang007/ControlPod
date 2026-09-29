@@ -37,4 +37,4 @@ if (-not (Test-Path -LiteralPath $venvPython)) {
 & $venvPython -m pip install --disable-pip-version-check -r $requirements
 Assert-NativeSuccess "Installing backend dependencies"
 
-Write-Host "Backend environment is ready. Run backend\start.ps1 to start Apex Console."
+Write-Host "Backend environment is ready. Run backend\start.ps1 to start ControlPod."

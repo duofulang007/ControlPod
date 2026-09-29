@@ -1,17 +1,18 @@
-# APEX Console
+# ControlPod
 
-面向 Windows 的本地个人总控台：把项目、可执行模块、常用应用、项目任务、记录和运行历史收在一个界面中。
+ControlPod（简称 CPod）是面向 Windows 的本地个人总控台：把项目、可执行模块、常用应用、项目任务、记录和运行历史收在一个界面中。
 
 自用的真实工具，不是原型演示、也不是可上线产品。日常入口是桌面外壳（WinUI 3），界面是原生 HTML / CSS / JavaScript，数据全部落在本机磁盘。
 
 ## 当前能力
 
 - 项目管理：创建、复制、编辑、删除项目，拖拽调整项目卡顺序，并查看项目运行状态与历史。
-- 执行模块：维护可复用的网站模块与内置模块（APEX 启动、跑步数据导入、抖音链接气泡），将模块组合到项目中运行。
+- 执行模块：发现内置模块和 `D:\Projects` 各项目仓库中的 `.apex/module.json`，并将模块组合到项目中运行；ControlPod 负责枢纽编排，不收纳独立项目的业务代码与运行环境。
 - 开发者活跃度：首页热力图，底色表达控制台在线时长（页面每分钟静默上报一次），悬停显示当日在线分钟与代码新增 / 删减行数；代码行数由本机 git 仓库只读扫描得出，可在每日 / 每周 / 累计三个口径间切换。
 - 跑步数据看板：解析小米运动健康官方导出包，本地生成跑步数据分析看板
   （训练负荷模型、跑姿体检、每日建议）。看板是**独立仓库** `../run-analytics`，
   总控台只负责接入与启动；健康数据不出本机。
+- APEX 一键启动：真实检查并编排 AK、Steam 与 APEX 的启动 / 关闭。实现和本地运行环境位于**独立仓库** `../apex-launcher`，ControlPod 只负责发现、权限提示、编排和运行记录。
 - 真实应用：识别 Windows 开始菜单、已注册应用与 App Paths 中的可启动程序；添加后可从控制台启动，并显示 Windows 原生图标。
 - 项目上下文：在项目内维护待办、项目记录、文件关联和 Obsidian 主页连接。
 - 界面偏好：主题、强调色、信息密度、玻璃质感等外观选项保存在浏览器本机，刷新后保持。
@@ -21,7 +22,7 @@
 ## 运行环境
 
 - Windows 10 / 11
-- Python 3.12 —— **执行模块必需**（模块的 runner 都跑在这个 venv 里）；外壳本身不需要
+- Python 3.12 —— 浏览器模式与后端测试需要；`D:\Projects` 下的独立模块使用各自仓库声明的运行环境；外壳本身不需要
 - .NET 8 SDK —— 仅构建外壳时需要（用 `dotnet --list-sdks` 确认有输出；只装运行时的话这里会是空的）。外壳的运行时自带，最终用户不必安装
 - Node.js —— 仅用于前端冒烟测试
 
@@ -33,7 +34,7 @@
 git clone https://github.com/duofulang007/apex-console.git apex-console
 cd apex-console
 
-# 1. 后端虚拟环境：执行模块要用它（外壳自身不依赖 Python）
+# 1. 后端虚拟环境：浏览器模式与后端测试使用（外壳自身不依赖 Python）
 powershell -ExecutionPolicy Bypass -File backend\bootstrap.ps1
 
 # 2. 构建外壳（需 .NET 8 SDK：dotnet --list-sdks 必须有输出）
@@ -90,7 +91,7 @@ apex-console/
 │  └─ SelfTest.cs             无头自测（--selftest）
 ├─ backend/
 │  ├─ app/                    FastAPI、数据访问与执行服务
-│  ├─ modules/                内置可执行模块（runner-lab 导入、dou-link 剪贴板链接）
+│  ├─ modules/                可选的内置模块清单；独立项目在各自仓库维护
 │  ├─ tests/                  后端测试
 │  ├─ bootstrap.ps1           环境初始化
 │  ├─ start.ps1               浏览器模式服务启动
@@ -98,23 +99,16 @@ apex-console/
 └─ AGENTS.md                  项目约束与维护说明（改代码前先读）
 ```
 
-`run-analytics/`（跑步数据看板）是**独立 git 仓库**，按「每个项目模块一个仓库」的约定
-放在本仓库的同级目录（`D:\Projects\run-analytics`），`backend/modules/runner-lab/module.json`
-的 `projectRoot` 用相对路径 `..\run-analytics` 指向它。总控台仓库不跟踪其任何文件。
-（接入层目录沿用历史名 `runner-lab`，与运行历史、模块 id 绑定，**不要改名**。）
-
-`dou-link/`（抖音链接气泡）是另一个同级模块仓库，接入层在 `backend/modules/dou-link/`，
-`module.json` 的 `projectRoot` 用相对路径 `..\dou-link` 指向它，负责调起项目自带的
-`start.ps1` / `stop.ps1` 并核对进程状态。
+`run-analytics/`、`dou-link/` 与 `apex-launcher/` 是 `D:\Projects` 下的独立 Git 仓库。项目代码、模块适配器、依赖和虚拟环境均归各自仓库维护；ControlPod 扫描直接子级 Git 仓库中的 `.apex/module.json`，负责发现、绑定、编排、权限提示和运行记录。运行时数据留在所属项目的本地 `data/`，不提交 Git。
 
 ## 模块仓库约定
 
 平台（本仓库）与模块项目（如 run-analytics）分仓库管理：
 
-- 模块项目 clone 到 `D:\Projects\<名称>`（与本仓库同级），在 `backend/modules/<模块>/module.json`
-  里用相对路径 `..\<名称>` 声明 `projectRoot`。
-- 提交口诀：改了模块项目 → 在模块仓库里 commit/push；改了总控台（含 `backend/modules/`
-  下的模块接入层）→ 在本仓库 commit/push。两边都改就两边各提交一次。
+- 模块项目 clone 到 `D:\Projects\<名称>`（与本仓库同级），在项目仓库根创建 `.apex/module.json`，并用 `"projectRoot": "."` 指向本仓库。
+- 迁移状态：`run-analytics`、`dou-link` 与 `apex-launcher` 都在自己的 `.apex/` 内维护清单和 runner，并使用各自仓库的依赖与虚拟环境。
+- 本地项目按自己的 `README.md` 初始化环境；ControlPod 的 `backend/.venv` 不再作为独立项目的运行环境。
+- 提交口诀：改了模块项目 → 在对应仓库 commit/push；改了 ControlPod → 在本仓库 commit/push。若两边都改，分别提交。
 - 自检跟着仓库走：模块项目跑它自己的 `tools/check.js`，总控台跑 `smoke-test.js` 与 pytest。
 
 ## 验证
@@ -144,4 +138,4 @@ shell\bin\x64\Debug\net8.0-windows10.0.19041.0\win-x64\ApexShell.exe --selftest
 
 ## 现阶段范围
 
-APEX Console 目前服务于本机开发与自动化管理，不是多用户、云同步或公网部署产品。提交问题时请写明 Windows 版本、复现步骤、页面提示和对应的运行日志。
+ControlPod（简称 CPod）目前服务于本机开发与自动化管理，不是多用户、云同步或公网部署产品。提交问题时请写明 Windows 版本、复现步骤、页面提示和对应的运行日志。
