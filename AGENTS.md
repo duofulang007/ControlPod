@@ -17,6 +17,13 @@ ControlPod 是 Windows 本地总控台。当前实现为 WinUI 3 外壳（`shell
 - WebView2 页面通过消息桥访问壳内 API。新增或删除路由时，同步更新 `LocalApi.CoveredRoutes` 和 `shell/SelfTest.cs`。
 - 模块的清单、适配器和依赖由所属仓库维护；ControlPod 不改写外部模块清单。
 
+## 前端维护
+
+- 项目卡片主按钮负责运行、关闭和重启；铅笔按钮进入详情。卡片空白处用于长按排序，按钮点击和拖拽不能互相抢占。
+- 卡片与详情共用 `projectRunControlsHTML()` 和项目运行状态；恢复页面时按后端实际状态对账。流程名统一经 `flowNameOf()` 读取。
+- 外观尺寸和动效参数集中在 `styles.css` 的令牌；交互保持键盘可用，并遵守 `prefers-reduced-motion`。删除功能时一并清理动作分支、样式和对应断言。
+- 后端数据以成功响应为准再更新页面；外观偏好沿用 `PREF_KEYS` 白名单，新增持久数据先明确归属。
+
 ## 验证
 
 ```powershell
@@ -26,3 +33,5 @@ shell\bin\x64\Debug\net10.0-windows10.0.19041.0\win-x64\ApexShell.exe --selftest
 ```
 
 前端测试以末行 `ALL_PASS` 为准；壳自测以进程退出码和测试报告为准。改外部模块时，另跑该仓库自己的检查。视觉与桌面交互需在实际窗口复核，不能把无头自测当作窗口验收。
+
+构建环境、源码路径和发布版区别见 `README.md`。无需为文档或 Web 文件更新重新发布桌面程序；用户要求更新安装版时，再构建并发布。

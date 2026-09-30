@@ -154,9 +154,11 @@ textarea,
 
   /* Obsidian 项目资料中枢：尺寸与动效集中在令牌，组件规则不硬写数值 */
   --ease-out:cubic-bezier(.23,1,.32,1);
+  --ease-in-out:cubic-bezier(.77,0,.175,1);
   --motion-press:140ms;
   --motion-panel:200ms;
   --motion-return:280ms;
+  --motion-theme:420ms;
   --obs-hub-pad:14px;
   --obs-hub-gap:12px;
   --obs-node-pad:12px;
@@ -312,6 +314,7 @@ input,select{font:inherit;color:inherit}
 .view{flex:1;min-height:0;overflow:hidden auto;display:flex;flex-direction:column;gap:var(--gap);padding-bottom:2px;
   scrollbar-width:none;              /* 页面侧边不显示滚动条（滚轮 / 键盘 / 触控滚动能力保留） */
   -ms-overflow-style:none}
+.view.project-view{margin-inline:calc(-1 * var(--pg));padding-inline:var(--pg)}
 .view::-webkit-scrollbar{display:none}
 /* 应用页：整页锁死，滚动只发生在「全部应用」列表容器内部——索引条因此始终停在可视区 */
 .view.no-scroll{overflow:hidden}
@@ -524,7 +527,7 @@ input,select{font:inherit;color:inherit}
 /* ---------- 主题切换按钮：太阳 ↔ 月亮（一枚 SVG，按 data-theme 切换形态）----------
    形态只由 <html data-theme> 决定，切主题不动 DOM —— 浅色态显示太阳（日盘 + 8 根光条），
    深色态显示月亮（光条收起、月盘撑开把日盘挖成月牙）。
-   本按钮**不带任何过渡**：形态随主题硬切，与整页换肤同一拍到位，不做补间。
+   图元在新主题快照中直接换形；整页由下方的圆形揭示过渡呈现。
 
    两处硬约束：
    1) --theme-moon-ink 必须是**不透明**色。这不是美观问题：SVG 的 fill 认 alpha ——
@@ -565,10 +568,17 @@ input,select{font:inherit;color:inherit}
    真正不透明的只有 .sidebar 与各卡片，且它们都是半透明毛玻璃、采样其下的地板。 */
 #app{position:relative;z-index:1}
 
-/* 前两代的主题切换遮罩（「全屏渐变交叉淡出」「独立涟漪层」）与第三代「色彩级联」
-   都已整条链路废弃（又卡又闪、且级联的 260ms 错峰与用户要的「扫过即定色」相冲），
-   选择器一并删掉 —— 留一个 display:none 的死类只会被孤儿护栏抓出来
-   （styles.css 里不允许存在 app.js / index.html 从不出现的类名）。 */
+/* 切深色：新深色在上层外扩。切回浅色：旧深色在上层收回。
+   禁用浏览器默认交叉淡出，保持两层同位并避免叠色。 */
+:root.theme-transition-active,
+:root.theme-transition-active *{transition-duration:0s!important}
+:root.theme-transition-active::view-transition-group(root){animation:none}
+:root.theme-transition-active::view-transition-old(root),
+:root.theme-transition-active::view-transition-new(root){animation:none;mix-blend-mode:normal}
+:root.theme-transition-active::view-transition-old(root){z-index:1}
+:root.theme-transition-active::view-transition-new(root){z-index:2}
+:root.theme-transition-active.theme-transition-contract::view-transition-old(root){z-index:2}
+:root.theme-transition-active.theme-transition-contract::view-transition-new(root){z-index:1}
 
 
 /* ---------- 卡片 ----------
@@ -1079,26 +1089,24 @@ svg{display:block}
 .board-note{font-size:11.5px;color:var(--ink-4)}
 
 /* ---------- 项目选择页：卡片栅格 + 卡片内操作条 ----------
-   一张卡 = 一个项目。上半部 .pjt-main 是信息区（点它进入详情），下半部 .pjt-acts 是操作条
-   （启动·停止 / 复制 / 刷新 / 编辑 / 删除），两者是兄弟节点，点按钮不会误触「进入」。
+   一张卡 = 一个项目。上半部 .pjt-main 展示信息及明确的进入按钮，
+   下半部 .pjt-acts 放复制 / 刷新 / 编辑 / 删除控件；卡片空白处不负责进入。
    列数由 repeat(auto-fill,minmax(...)) 自适应，不写宽度断点 ——
    符合本项目「只有标准窗口 / 全屏两态」的约定。
-   ⚠️ 溢出防线：轨道下限写 min(--tile-min, 100%)（容器更窄时轨道跟着缩，而不是撑破容器），
-      外加 overflow:hidden auto —— 纵向可滚、横向永远不滚。任何宽度下都不出横向滚动条。 */
+   ⚠️ 溢出防线：轨道下限写 min(--tile-min, 100%)（容器更窄时轨道跟着缩，而不是撑破容器）。
+   看板向外借用页面侧边距，再给卡片留活动余量；横向仍不滚动。 */
 .pjt-board{
+  --pjt-motion-gutter:20px;
   display:grid;grid-template-columns:repeat(auto-fill,minmax(min(var(--tile-min),100%),1fr));
   gap:var(--board-gap);align-content:start;flex:1;min-height:0;
   min-width:0;overflow:hidden auto;
-  /* 滚动容器的裁剪边界 = 它的 padding box，而它正好压在第一行卡片的静止顶边上。
-     卡片悬停上移 --pjt-hover-lift 后顶边越界 → 上边框连同两个上圆角被切掉
-     （表现为「边框包裹不全」；第二行及以后的卡片不移到边界外，所以看不出问题）。
-     故向上预留等量空间：margin 与 padding 数值相反、互相抵消，
-     卡的静止位置与容器高度都不动，只是把裁剪边界整体抬高一格。 */
-  margin-top:calc(-1 * var(--pjt-hover-lift));
-  padding:var(--pjt-hover-lift) 0 2px;
+  /* 卡面在四角移动时仍落在看板的裁切范围内。左右借用 .view 的页边距，
+     顶部用等量负边距抵消内边距，保持原有卡片静止位置。 */
+  margin:calc(-1 * var(--pjt-motion-gutter)) calc(-1 * var(--pg)) 0;
+  padding:var(--pjt-motion-gutter) var(--pjt-motion-gutter) var(--pjt-motion-gutter);
 }
 .pjt-card{
-  position:relative;display:flex;flex-direction:column;min-width:0;
+  position:relative;display:flex;flex-direction:column;min-width:0;overflow:hidden;
   border:1px solid rgba(255,255,255,.85);border-radius:var(--r-tile);
   background:var(--card);box-shadow:var(--sh);
   transition:border-color var(--motion-panel) var(--ease-out),
@@ -1107,49 +1115,117 @@ svg{display:block}
              transform var(--motion-panel) var(--ease-out);
 }
 [data-theme="dark"] .pjt-card{border-color:var(--line)}
-/* 悬停：抬起 2px 的同时投影换到 --sh-hov（更长但同样回落到 0），
-   两者同时发生才有「卡片离地」的确定感；只加阴影不位移会显得发虚 */
-.pjt-card:hover{box-shadow:var(--sh-hov);border-color:var(--brand-line);background:var(--card-strong);transform:translateY(calc(-1 * var(--pjt-hover-lift)))}
-/* 信息区：进入详情的唯一入口；flex:1 保证操作条贴着卡片底部（同行卡片等高时也不留缝） */
-.pjt-main{flex:1;display:flex;flex-direction:column;gap:9px;min-width:0;cursor:pointer;
-  padding:var(--tile-pad) var(--tile-pad) 11px;border-radius:var(--r-tile) var(--r-tile) 0 0}
-.pjt-main:focus-visible{outline:2px solid var(--brand);outline-offset:-2px}
-.pjt-top{display:flex;align-items:flex-start;gap:10px;min-width:0}
-.pjt-ico{width:36px;height:36px;flex:0 0 36px;border-radius:11px;display:grid;place-items:center;overflow:hidden}
-.pjt-ico>svg{width:18px;height:18px}
-.pjt-hd{flex:1;min-width:0;display:flex;flex-direction:column;gap:5px}
-/* 运行态标签宁可换行，也不挤压项目名（4 列时卡窄，名字被截断会很难认） */
-.pjt-name-line{display:flex;align-items:center;gap:7px;min-width:0;flex-wrap:wrap;row-gap:4px}
-.pjt-name{font-size:14px;font-weight:650;letter-spacing:-.2px;min-width:0;
+/* 山景内部固定成一幅画；底板小幅倾斜和位移，文字与控件移动更多。 */
+.pjt-card[data-id]{overflow:visible;border:0;background:transparent;box-shadow:none}
+.pjt-visual{position:absolute;left:0;top:0;width:100%;height:100%;z-index:0;overflow:hidden;border:1px solid rgba(255,255,255,.85);
+  border-radius:var(--r-tile);background:#d5e6df;box-shadow:var(--sh);
+  transition:left var(--motion-return) var(--ease-out),top var(--motion-return) var(--ease-out),
+    transform var(--motion-return) var(--ease-out),
+    box-shadow var(--motion-press) var(--ease-out),filter var(--motion-press) var(--ease-out)}
+[data-theme="dark"] .pjt-visual{border-color:rgba(176,205,209,.19);background:#1e3039}
+@media (hover:hover) and (pointer:fine){
+  .pjt-card[data-id]:hover .pjt-visual{box-shadow:var(--sh-hov)}
+}
+.pjt-card.is-parallax{z-index:1}
+.pjt-card.is-parallax .pjt-visual{
+  transform:perspective(900px) rotateX(var(--pjt-rotate-x,0deg)) rotateY(var(--pjt-rotate-y,0deg));
+  transition-duration:var(--motion-press)}
+.pjt-card[data-id]:active:not(.is-dragging) .pjt-visual{
+  box-shadow:0 1px 4px rgba(8,27,35,.16),inset 0 2px 12px rgba(8,27,35,.1);filter:brightness(.97)}
+/* 山景各层在底板内部始终静止，并被卡片圆角裁切。 */
+.pjt-scene{position:absolute;inset:0;z-index:0;overflow:hidden;pointer-events:none;
+  background:#cde0d8}
+.pjt-scene::after{content:"";position:absolute;inset:48% 0 0;z-index:5;
+  background:linear-gradient(transparent,rgba(9,41,54,.16) 60%,rgba(9,41,54,.6));pointer-events:none}
+.pjt-sky{position:absolute;inset:-64px;z-index:0;
+  background:linear-gradient(145deg,color-mix(in srgb,var(--pjt-accent) 8%,#d7e9df),#b9d2d5 72%)}
+.pjt-sun{position:absolute;top:30px;right:66px;width:74px;height:74px;border-radius:50%;z-index:1;
+  background:rgba(255,245,202,.66);box-shadow:0 0 34px rgba(255,245,202,.22)}
+.pjt-ridge{position:absolute;left:-20%;width:140%}
+.pjt-ridge-far{z-index:2;bottom:-42px;height:230px;
+  clip-path:polygon(0 88%,31% 13%,54% 84%,72% 34%,100% 83%,100% 100%,0 100%);
+  background:linear-gradient(160deg,#a6b7b7 6%,#788fa1 55%,#5c7890)}
+.pjt-ridge-far::after{content:"";position:absolute;inset:0;background:#f1eedc;
+  clip-path:polygon(25% 28%,31% 13%,38% 35%,34% 30%,31% 36%,28% 30%,69% 40%,72% 34%,76% 47%,72% 42%)}
+.pjt-ridge-mid{z-index:3;bottom:-24px;height:155px;
+  clip-path:polygon(0 88%,27% 17%,53% 88%,72% 31%,100% 79%,100% 100%,0 100%);
+  background:linear-gradient(155deg,#5f8090,#3b6171 58%,#294d61)}
+.pjt-ridge-near{z-index:4;bottom:-25px;height:92px;
+  clip-path:polygon(0 73%,22% 52%,47% 87%,69% 46%,100% 18%,100% 100%,0 100%);
+  background:linear-gradient(115deg,#224b59,#153843 78%)}
+/* 项目各自保留同一山景语言，稳定地微调天体和山脊位置。 */
+.pjt-card[data-scene="1"] .pjt-sun{right:35px;top:40px;width:62px;height:62px}
+.pjt-card[data-scene="1"] .pjt-ridge-far{transform:translateX(7%)}
+.pjt-card[data-scene="1"] .pjt-ridge-mid{transform:translateX(-5%)}
+.pjt-card[data-scene="2"] .pjt-sun{right:96px;top:27px;width:68px;height:68px}
+.pjt-card[data-scene="2"] .pjt-ridge-far{transform:translateX(-8%)}
+.pjt-card[data-scene="2"] .pjt-ridge-near{transform:translateX(5%)}
+/* 夜间卡片使用低亮度的蓝灰层次，保留山景但不在暗色工作台上形成亮块。 */
+[data-theme="dark"] .pjt-scene{background:#21343b}
+[data-theme="dark"] .pjt-scene::after{background:linear-gradient(180deg,transparent,rgba(5,17,24,.2) 35%,rgba(5,17,24,.52))}
+[data-theme="dark"] .pjt-sky{background:linear-gradient(145deg,color-mix(in srgb,var(--pjt-accent) 10%,#29404a),#1d303c 76%)}
+[data-theme="dark"] .pjt-sun{background:rgba(206,215,190,.23);box-shadow:0 0 36px rgba(207,219,196,.08)}
+[data-theme="dark"] .pjt-ridge-far{background:linear-gradient(160deg,#516b72,#394f60 58%,#2c4354)}
+[data-theme="dark"] .pjt-ridge-far::after{background:#839494;opacity:.42}
+[data-theme="dark"] .pjt-ridge-mid{background:linear-gradient(155deg,#355867,#274656 58%,#203b4c)}
+[data-theme="dark"] .pjt-ridge-near{background:linear-gradient(115deg,#193b48,#102c38 78%)}
+/* 文字和控件位于独立上层，按现有幅度跟随而不受画面滤镜影响。 */
+.pjt-main{position:relative;z-index:6;flex:1;display:flex;flex-direction:column;min-height:300px;min-width:0;
+  left:0;top:0;padding:22px 22px 16px;
+  transition:left var(--motion-return) var(--ease-out),top var(--motion-return) var(--ease-out)}
+.pjt-card.is-parallax .pjt-main,.pjt-card.is-parallax .pjt-acts{transition-duration:var(--motion-press)}
+.pjt-copy-plane{display:flex;flex-direction:column;align-items:stretch;width:100%;min-width:0}
+.pjt-topline{display:flex;align-items:center;justify-content:space-between;gap:8px;min-width:0}
+.pjt-flow{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+  font-size:10px;font-weight:700;letter-spacing:.09em;color:#35545b}
+.pjt-name{display:block;max-width:100%;margin-top:17px;font-size:30px;font-weight:780;letter-spacing:-.8px;line-height:1.08;color:#17343e;
   overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .pjt-live{display:inline-flex;align-items:center;gap:5px;flex:0 0 auto;font-size:10.5px;
-  color:var(--brand-dark);background:var(--brand-soft);border-radius:var(--r-pill);padding:2px 8px}
-[data-theme="dark"] .pjt-live{color:#FF8A76}
+  color:#9b301f;background:rgba(255,255,255,.72);border-radius:var(--r-pill);padding:2px 8px}
 .pjt-live .dot{background:currentColor;animation:pjtPulse 1.5s ease-in-out infinite}
 @keyframes pjtPulse{0%,100%{opacity:1}50%{opacity:.32}}
-/* 进入提示：常驻但低权重，悬停点亮 —— 它在信息区，和下方操作条各占一行，互不抢注意力 */
-.pjt-enter{flex:0 0 auto;margin-left:auto;display:inline-flex;align-items:center;gap:2px;
-  font-size:11px;color:var(--ink-4);white-space:nowrap;transition:color .18s ease,transform .18s ease}
-.pjt-enter>svg{width:12px;height:12px;display:block}
-.pjt-main:hover .pjt-enter{color:var(--brand);transform:translateX(2px)}
-.pjt-desc{font-size:12px;color:var(--ink-3);line-height:1.5;min-width:0;
-  display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
-/* margin-top:auto 把「事实」一行压到信息区底部：同行卡片的 chip 能横向对齐 */
-.pjt-meta{display:flex;align-items:center;gap:6px;flex-wrap:wrap;min-width:0;row-gap:6px;margin-top:auto}
-/* 长文案 chip 必须能缩（min-width:0 打破 nowrap 的最小内容宽硬底），
-   否则窄卡里它会顶出卡片边界；缩到放不下时由自身 ellipsis 收尾 */
-.pjt-chip{font-size:10.5px;color:var(--ink-3);background:var(--tile);border-radius:var(--r-pill);
-  padding:2px 9px;white-space:nowrap;min-width:0;max-width:100%;overflow:hidden;text-overflow:ellipsis}
-.pjt-chip.ok{color:var(--green);background:var(--green-bg)}
-.pjt-chip.warn{color:var(--amber);background:var(--amber-bg)}
-/* 层级标记：子项目看「归属谁」，父项目看「有几个下级」——上下两个方向都能读出结构 */
-.pjt-chip.pjt-up{color:var(--brand-dark);background:var(--brand-soft)}
-.pjt-chip.pjt-down{color:var(--ink-2);background:var(--card-strong);border:1px solid var(--line-2)}
-[data-theme="dark"] .pjt-chip.pjt-up{color:#FF8A76}
-/* 操作条：主操作在左、图标组在右（同一簇），上方分隔线把「进入」与「操作」分成两件事。
-   min-width:0 允许窄卡里 flex-wrap 正常生效，而不是被最小内容宽顶出去 */
-.pjt-acts{display:flex;align-items:center;gap:10px;flex-wrap:wrap;row-gap:6px;min-width:0;
-  padding:9px var(--tile-pad) 11px;border-top:1px solid var(--line-2)}
+.pjt-desc{margin-top:9px;max-width:26ch;font-size:11.5px;line-height:1.4;color:#405b62;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pjt-bottom{display:flex;align-items:flex-end;justify-content:space-between;gap:12px;min-width:0;margin-top:auto;
+  padding-top:16px;color:#fff}
+.pjt-stat{display:flex;flex-direction:column;gap:4px;white-space:nowrap}
+.pjt-stat strong{font-size:29px;font-weight:760;letter-spacing:-1px;line-height:1}
+.pjt-stat strong small{font-size:13px;font-weight:600;letter-spacing:0}
+.pjt-stat span{font-size:10.5px;font-weight:600;color:rgba(255,255,255,.87)}
+.pjt-facts{display:flex;align-items:center;justify-content:space-between;gap:6px;min-height:18px;margin-top:9px;
+  font-size:10.5px;color:#33453d;line-height:1.25}
+.pjt-ready.ok{color:#255e50}.pjt-ready.warn{color:#805419}
+.pjt-relation{min-width:0;max-width:65%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:right}
+.pjt-run-controls{display:flex;flex:1;flex-wrap:wrap;justify-content:flex-end;gap:6px;min-width:0}
+.pjt-enter{min-width:112px;height:42px;border-radius:var(--r-pill);display:inline-flex;align-items:center;justify-content:center;gap:8px;
+  padding:0 13px;background:#f4eacb;color:#17343e;font-size:12px;font-weight:700;
+  box-shadow:0 4px 12px rgba(8,27,35,.18);cursor:pointer;
+  transition:background var(--motion-press) var(--ease-out),transform var(--motion-press) var(--ease-out)}
+.pjt-enter>svg{width:16px;height:16px;display:block}
+.pjt-enter:hover:not(:disabled){background:#fff3d6;transform:translateY(-1px)}
+.pjt-enter:disabled{opacity:.55;cursor:not-allowed;box-shadow:none}
+.pjt-enter:focus-visible{outline:2px solid #17343e;outline-offset:2px}
+[data-theme="dark"] .pjt-flow{color:#adc7c8}
+[data-theme="dark"] .pjt-name{color:#eaf2f0}
+[data-theme="dark"] .pjt-desc{color:#b5cacc}
+[data-theme="dark"] .pjt-facts{color:#a7bdbc}
+[data-theme="dark"] .pjt-ready.ok{color:#9ad3be}
+[data-theme="dark"] .pjt-ready.warn{color:#e2bd80}
+[data-theme="dark"] .pjt-live{color:#a8e5bd;background:rgba(8,26,31,.52)}
+[data-theme="dark"] .pjt-topline .badge{background:rgba(8,26,31,.5)}
+[data-theme="dark"] .pjt-enter{background:#d6ded4;color:#17343e;box-shadow:0 4px 14px rgba(0,0,0,.24)}
+[data-theme="dark"] .pjt-enter:hover:not(:disabled){background:#edf2e8}
+@media (prefers-reduced-motion:reduce){
+  .pjt-visual{transition:none!important;filter:none!important;left:0!important;top:0!important}
+  .pjt-main,.pjt-acts{transition:none!important;left:0!important;top:0!important}
+  .pjt-enter:hover{transform:none}
+}
+/* 操作控件覆盖在同一张山景卡片的下沿，与进入区域各自处理点击。
+   min-width:0 允许窄卡里 flex-wrap 正常生效。 */
+.pjt-acts{position:relative;z-index:6;display:flex;align-items:center;gap:10px;flex-wrap:wrap;row-gap:6px;min-width:0;
+  left:0;top:0;padding:9px 20px 24px;background:transparent;
+  transition:left var(--motion-return) var(--ease-out),top var(--motion-return) var(--ease-out)}
+.pjt-acts-label{font-size:10.5px;font-weight:600;color:rgba(255,255,255,.75)}
 .pjt-start,.pjt-stop,.pjt-restart{min-width:76px;justify-content:center;gap:5px}
 .pjt-start{background:var(--brand);color:#fff;box-shadow:0 6px 16px rgba(232,64,42,.28)}
 .pjt-start:hover{background:var(--brand-dark)}
@@ -1158,19 +1234,21 @@ svg{display:block}
 .pjt-stop{background:transparent;color:var(--err);border:1px solid var(--err-line)}
 .pjt-stop:hover{background:var(--err-bg);border-color:var(--err)}
 .pjt-stop>svg{fill:currentColor}
+.pjt-restart{color:#fff;border:1px solid rgba(255,255,255,.32);background:rgba(255,255,255,.08)}
+.pjt-restart:hover{color:#fff;background:rgba(255,255,255,.17)}
 /* 图标组本身也允许换行：否则 4 个定宽按钮的最小内容宽（126px）会顶住卡片，
    极窄窗口下把卡片内容挤出容器（正常宽度不会有任何变化，只在真挤不下时才折行） */
 .pjt-icons{display:flex;align-items:center;gap:2px;flex-wrap:wrap;justify-content:flex-end;
   margin-left:auto;min-width:0}
 .pjt-i{width:30px;height:30px;border-radius:9px;display:grid;place-items:center;flex:0 0 auto;
-  color:var(--ink-3);border:1px solid transparent;
+  color:rgba(255,255,255,.85);border:1px solid transparent;
   transition:color .15s ease,background .15s ease,border-color .15s ease}
 .pjt-i>svg{width:16px;height:16px}
-.pjt-i:hover{color:var(--ink);background:var(--tile);border-color:var(--line-2)}
+.pjt-i:hover{color:#fff;background:rgba(255,255,255,.16);border-color:rgba(255,255,255,.12)}
 .pjt-i:active{transform:scale(.92)}
 .pjt-i.pjt-del:hover{color:var(--err);background:var(--err-bg);border-color:var(--err-line)}
 /* 尾部占位卡：虚线 + 居中加号，和项目卡同栅格同高度 */
-.pjt-new{align-items:center;justify-content:center;gap:7px;min-height:150px;
+.pjt-new{align-items:center;justify-content:center;gap:7px;min-height:340px;
   border-style:dashed;border-color:var(--line);background:transparent;box-shadow:none;color:var(--ink-3)}
 .pjt-new:hover{border-color:var(--brand-line);background:var(--card);box-shadow:var(--sh-hov);transform:translateY(calc(-1 * var(--pjt-hover-lift)))}
 .pjt-new-ico{width:34px;height:34px;border-radius:50%;display:grid;place-items:center;
@@ -1187,10 +1265,8 @@ svg{display:block}
 .pjt-board.is-sorting .pjt-card{transition-property:border-color,box-shadow,background}
 .pjt-card.is-dragging{cursor:grabbing;z-index:30;border-color:var(--brand-line);
   background:var(--card-strong);box-shadow:var(--pjt-sh-drag)}
-/* 触屏没有悬停：进入提示直接上色，否则它永远停在低权重的灰字状态 */
-@media (hover:none){
-  .pjt-enter{color:var(--brand)}
-}
+.pjt-card[data-id].is-dragging{border:0;background:transparent;box-shadow:none}
+.pjt-card.is-dragging .pjt-visual{box-shadow:var(--pjt-sh-drag);border-color:var(--brand-line)}
 /* 详情页顶部「返回项目列表」 */
 .back-link{display:inline-flex;align-items:center;gap:4px;font-size:11.5px;margin-bottom:3px}
 /* ---------- 概览三卡（进入项目页 · 区块 1） ----------

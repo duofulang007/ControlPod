@@ -32,8 +32,8 @@ const ctx = {
         const set = new Set();
         return {
           _set:set,
-          add(c){ set.add(c); },
-          remove(c){ set.delete(c); },
+          add(...classes){ classes.forEach(c => set.add(c)); },
+          remove(...classes){ classes.forEach(c => set.delete(c)); },
           toggle(c, force){ const on = force === undefined ? !set.has(c) : !!force; on ? set.add(c) : set.delete(c); return on; },
           contains(c){ return set.has(c); }
         };
@@ -85,7 +85,7 @@ src += `\nglobalThis.__T = { viewHome, viewApps, viewProjects, viewModules, view
   projTileHTML, projFlat, projKids, projParentOf, unwrapProjKids,
   initProjSort, projSortBlocked, projSortSlotAt, applyProjectOrder, PROJ_SORT,
   projectRunControlsHTML, projIsRunning, projIsStarted, stopProject, restartProject, dupProject, refreshProj,
-  alphaOf, groupByAlpha, fitAppList, alphaJump, appScrollDragBlocked,
+  alphaOf, groupByAlpha, fitAppList, alphaJump, appScrollDragBlocked, initProjectCardParallax,
   addApp, appPopMenu, tagPop, setCat, newCatFor, removeFromList,
   scannedAppFromApi, loadScannedApps, pickScan, beginAdd, backToAdd, createFromScan,
   moduleFormHTML, modShowErr, newModule, editModule, saveModule, modDelete, modDeleteModalHTML,
@@ -219,21 +219,23 @@ try {
     '栅格尾部保留「新建项目」占位卡');
 } catch (e) { console.log('FAIL 卡片栅格 → ' + e.message); fail++; }
 
-/* 3b. 选择页每张卡：进入入口 + 卡面字段 + 详情抽屉内容（详情抽屉供页内导航复用） */
+/* 3b. 选择页每张卡：铅笔进入项目，主按钮运行项目。 */
 try {
   const html = T.viewProjects();
   const entries = (html.match(/data-act="enterProj"/g) || []).length;
-  check(entries === T.DATA.projects.length, '每张卡都是「进入项目」入口（' + entries + ' 个）');
-  check(html.includes('role="button"') && !html.includes('data-act="pickWf"'),
-    '卡面信息区以 role=button 承载进入动作（旧的页内切换 pickWf 已移除）');
-  /* 卡面字段：名称 / 状态 / 当前流程 / 模块数（启用/总数）/ 运行次数 / 预备状态 */
+  check(entries === T.DATA.projects.length, '每张卡都有铅笔「编辑并进入项目」入口（' + entries + ' 个）');
+  check(!html.includes('role="button"') && !html.includes('data-act="pickWf"')
+    && (html.match(/<button class="pjt-i" data-act="enterProj"/g) || []).length === T.DATA.projects.length,
+    '铅笔进入完整详情，卡面空白不触发进入');
+  /* 卡面保留身份、模块与预备状态，去掉原先密集的标签排。 */
   const w0 = T.DATA.projects[0];
   check(html.includes('APEX 一键启动') && html.includes('深度开发') && html.includes('日常助理'),
     '卡面展示当前运行流程（APEX 真实启动 / 深度开发 / 日常助理）');
-  check((html.match(/\d+\/\d+ 模块</g) || []).length >= 3 && html.includes('次运行') && html.includes(w0.st),
-    '卡面展示 模块数（启用/总数）/ 累计运行次数 / 项目状态');
-  check(html.includes('pjt-enter') && html.includes('进入'),
-    '卡面保留「进入」提示（悬停点亮）');
+  check((html.match(/<span>启用模块<\/span><strong>\d+<small> \/ \d+<\/small><\/strong>/g) || []).length >= 3
+    && !html.includes('次运行') && html.includes(w0.st) && html.includes('预备就绪'),
+    '卡面突出启用模块数、项目状态和预备结果；运行历史留在详情');
+  check(html.includes('pjt-enter') && html.includes('运行项目'),
+    '卡面主按钮明确标注运行项目');
   check(html.includes('pjt-desc') && html.includes('调用 APEX 启动核心'), '每张卡保留一句话描述');
   const w1 = T.DATA.projects[0];
   /* 「完整开发上下文」移除后，右侧项目详情抽屉（wfDetailHTML）失去唯一入口，一并清掉；
@@ -244,28 +246,31 @@ try {
     '开发上下文卡底部改用「编辑基本资料」入口（打开居中弹窗）');
 } catch (e) { console.log('FAIL 项目详情 → ' + e.message); fail++; }
 
-/* 3c. 每张卡统一运行控件 / 复制 / 刷新 / 编辑 / 删除 */
+/* 3c. 列表卡直接运行，铅笔进入项目，次级管理控件仍可用。 */
 try {
   T.S.running = null; T.S.projectRuntime = {};
   const html = T.viewProjects();
   const n = T.DATA.projects.length;
   const cnt = re => (html.match(re) || []).length;
-  check(cnt(/data-act="runProject"/g) === n, '每张卡都有统一的项目运行控件（' + n + '）');
+  check(cnt(/data-act="runProject"/g) === n, '每张列表卡都能一键运行项目');
   check(cnt(/data-act="dupProject"/g) === n, '每张卡都有「复制」控件');
   check(cnt(/data-act="refreshProj"/g) === n, '每张卡都有「刷新」控件');
-  check(cnt(/data-act="editWf"/g) === n, '每张卡都有「编辑」控件');
+  check(cnt(/data-act="enterProj"/g) === n && cnt(/data-act="editWf"/g) === 0,
+    '每张卡的铅笔进入完整项目详情');
   check(cnt(/data-act="projDeleteAsk"/g) === n, '每张卡都有「删除」控件');
   check(cnt(/class="pjt-i(?:\s+pjt-del)?"/g) === n * 4, '图标操作组固定 4 个（复制 / 刷新 / 编辑 / 删除）');
-  check(html.includes('pjt-start') && html.includes('运行项目</button>') && !html.includes('关闭项目</button>') && !html.includes('重启项目</button>'),
-    '未启动时只显示「运行项目」');
+  check(cnt(/<button class="pjt-enter" data-act="runProject"[^>]*data-stay="1"/g) === n,
+    '胶囊主按钮直接就地运行，不要求先进入详情');
   /* 结构纪律：操作条与「进入」信息区是兄弟节点 —— 否则点按钮会同时触发进入 */
   const blocks = html.match(/<article class="pjt-card"[\s\S]*?<\/article>/g) || [];
   check(blocks.length === n && blocks.every(b => {
     const m = b.indexOf('class="pjt-main"'), a = b.indexOf('class="pjt-acts"'), e = b.indexOf('data-act="enterProj"');
-    return m > -1 && a > m && e > m && e < a;
-  }), '每张卡 = 信息区（承载进入）+ 独立操作条（不抢点击）');
+    return m > -1 && a > m && e > a;
+  }), '进入入口位于管理操作区，运行按钮位于卡面主操作区');
   const bare = Object.assign({}, T.DATA.projectTemplate, { id:'__proj0', name:'探针项目0', parent:null, steps:[] });
-  check(T.projTileHTML(bare).includes('disabled'), '没有启用执行模块的项目：启动按钮置灰');
+  check(T.projTileHTML(bare).includes('data-act="enterProj"')
+    && /data-act="runProject"[^>]*disabled/.test(T.projTileHTML(bare)),
+    '没有启用模块时运行按钮禁用，铅笔仍可进入详情配置');
 } catch (e) { console.log('FAIL 卡片操作 → ' + e.message); fail++; }
 
 /* 3d. 层级呈现：父子关系一目了然（归属标记 + 父项目紧邻其子项目的顺序） */
@@ -277,42 +282,161 @@ try {
   check(subs.length === 1 && subs[0].p.id === 'ops' && subs[0].depth === 1,
     '层级数据：local-ops 是 APEX Automation 的子项目（depth=1）');
   check(rows[0].p.id === 'apex' && rows[1].p.id === 'ops', '栅格顺序：父项目紧接其子项目');
-  check(html.includes('子项目 · 归属 APEX Automation'), '子项目卡片标注「归属哪个父项目」');
+  check(html.includes('子项目 · APEX Automation'), '子项目卡片标注所属父项目');
   check(html.includes('1 个子项目'), '父项目卡片标注「有几个子项目」');
-  check(html.includes('pjt-up') && html.includes('pjt-down'), '归属 / 子项目标记是两个独立样式钩子');
+  check((html.match(/class="pjt-relation"/g) || []).length === 2,
+    '仅有父子关系的两张卡显示一条层级信息，不堆成标签组');
   check(T.projParentOf(T.DATA.projects.find(p => p.id === 'ops')).id === 'apex', 'projParentOf 可反查父项目');
   check(!T.projParentOf(T.DATA.projects.find(p => p.id === 'apex')), '根项目没有父项目');
   check(T.projKids('apex').length === 1 && T.projKids('ai').length === 0, 'projKids 按父 id 取子项目');
   const root = Object.assign({}, T.DATA.projectTemplate, { id:'__projH0', name:'探针层级0', parent:null, steps:[] });
-  check(!T.projTileHTML(root).includes('pjt-up') && !T.projTileHTML(root).includes('pjt-down'),
-    '无父无子的项目：不渲染层级标记（不留空壳元素）');
+  check(!T.projTileHTML(root).includes('pjt-relation'),
+    '无父无子的项目：不渲染层级信息（不留空壳元素）');
   const cssSrc = require('fs').readFileSync(path.join(__dirname, 'styles.css'), 'utf8');
   check(cssSrc.includes('--tile-min:290px')
     && /\.pjt-board\{[\s\S]{0,300}?minmax\(min\(var\(--tile-min\),100%\),1fr\)/.test(cssSrc),
     '卡片列宽走设计令牌 --tile-min + minmax 自适应，不硬写像素');
 } catch (e) { console.log('FAIL 层级 → ' + e.message); fail++; }
 
-/* 3e. 运行 / 关闭 / 重启与列表就地操作 */
+/* 3d-2. 山景内部固定，底板有限倾斜和轻移；文字与控件移动更多。 */
+try {
+  const html = T.viewProjects();
+  const n = T.DATA.projects.length;
+  check((html.match(/class="pjt-scene" aria-hidden="true"/g) || []).length === n
+    && (html.match(/class="pjt-visual" aria-hidden="true"/g) || []).length === n
+    && (html.match(/class="pjt-sky"/g) || []).length === n
+    && (html.match(/class="pjt-ridge pjt-ridge-far"/g) || []).length === n
+    && (html.match(/class="pjt-ridge pjt-ridge-mid"/g) || []).length === n
+    && (html.match(/class="pjt-ridge pjt-ridge-near"/g) || []).length === n
+    && !html.includes('data-parallax='),
+    '每张项目卡有三层装饰地形，装饰层不进入辅助技术阅读');
+  const scenes = [...html.matchAll(/data-scene="([0-2])"/g)].map(match => match[1]);
+  const sceneCss = fs.readFileSync(path.join(__dirname, 'styles.css'), 'utf8');
+  check(scenes.length === n && new Set(scenes).size > 1
+    && sceneCss.includes('.pjt-card[data-scene="1"] .pjt-sun')
+    && sceneCss.includes('.pjt-card[data-scene="2"] .pjt-ridge-near'),
+    '项目卡按稳定项目标识呈现轻微不同的山景构图');
+  check(sceneCss.includes('[data-theme="dark"] .pjt-sky')
+    && sceneCss.includes('[data-theme="dark"] .pjt-ridge-near')
+    && sceneCss.includes('[data-theme="dark"] .pjt-name')
+    && sceneCss.includes('[data-theme="dark"] .pjt-enter'),
+    '夜间项目卡的天空、山脊、文字和按钮均有独立配色');
+  const originalQuery = ctx.document.querySelector;
+  const originalMatch = ctx.matchMedia;
+  const originalFrame = ctx.requestAnimationFrame;
+  const listeners = {};
+  const classes = new Set();
+  const visualVars = {};
+  const visual = {style:{left:'',top:'',setProperty:(k,v)=>{visualVars[k]=v;},removeProperty:k=>{delete visualVars[k];}}};
+  const main = {style:{left:'',top:''}};
+  const acts = {style:{left:'',top:''}};
+  const card = {
+    classList:{add:k=>classes.add(k),remove:k=>classes.delete(k)},
+    style:{transform:''},
+    querySelector:s=>s === '.pjt-visual' ? visual : s === '.pjt-main' ? main : acts,
+    getBoundingClientRect:()=>({left:0,top:0,width:300,height:340})
+  };
+  const target = {closest:()=>card};
+  const board = {
+    classList:{contains:()=>false},
+    addEventListener:(type,fn)=>{listeners[type]=fn;}
+  };
+  let scheduled;
+  ctx.document.querySelector = s => s === '#view .pjt-board' ? board : originalQuery(s);
+  ctx.matchMedia = q => ({matches:q.includes('hover: hover')});
+  ctx.requestAnimationFrame = fn => {scheduled=fn;return 1;};
+  T.initProjectCardParallax();
+  listeners.pointermove({target,clientX:270,clientY:270});
+  scheduled();
+  check(main.style.left === acts.style.left && main.style.top === acts.style.top
+    && visual.style.left === '10px' && visual.style.top === '5px'
+    && visualVars['--pjt-rotate-y'] === '3.20deg'
+    && visualVars['--pjt-rotate-x'] === '-1.76deg'
+    && main.style.left !== '' && card.style.transform === '' && classes.has('is-parallax'),
+    '底板小幅倾斜并轻移，文字与控件在独立平面上移动更多');
+  listeners.pointermove({target,clientX:300,clientY:170});
+  scheduled();
+  check(visual.style.left === '12px' && visual.style.top === '0px'
+    && main.style.left === '20px' && main.style.top === '0px',
+    '右边缘底板与文字同向移动，文字幅度更大');
+  listeners.pointermove({target,clientX:300,clientY:340});
+  scheduled();
+  check(visual.style.left === '12px' && visual.style.top === '8px'
+    && visualVars['--pjt-rotate-y'] === '4.00deg'
+    && visualVars['--pjt-rotate-x'] === '-3.00deg'
+    && main.style.left === '20px' && acts.style.left === '20px'
+    && main.style.top === '12px' && acts.style.top === '12px',
+    '右下角达到两轴最大幅度，文字和操作控件同步位移');
+  listeners.pointermove({target,clientX:0,clientY:0});
+  scheduled();
+  check(visual.style.left === '-12px' && visual.style.top === '-8px'
+    && visualVars['--pjt-rotate-y'] === '-4.00deg'
+    && visualVars['--pjt-rotate-x'] === '3.00deg'
+    && main.style.left === '-20px' && acts.style.left === '-20px'
+    && main.style.top === '-12px' && acts.style.top === '-12px',
+    '左上角以相同幅度反向位移');
+  listeners.pointermove({target,clientX:150,clientY:170});
+  scheduled();
+  check(visual.style.left === '0px' && visual.style.top === '0px'
+    && visualVars['--pjt-rotate-y'] === '0.00deg'
+    && visualVars['--pjt-rotate-x'] === '0.00deg'
+    && main.style.left === '0px' && acts.style.left === '0px'
+    && main.style.top === '0px' && acts.style.top === '0px',
+    '指针回到中心时底板和前景回到中性位置');
+  listeners.scroll();
+  check(!classes.has('is-parallax') && visual.style.left === '' && visual.style.top === ''
+    && !visualVars['--pjt-rotate-y'] && !visualVars['--pjt-rotate-x']
+    && main.style.left === '' && acts.style.top === '',
+    '看板滚动时整张卡片回中，下一次输入重新计算坐标');
+  listeners.pointermove({target,clientX:270,clientY:270});
+  scheduled();
+  listeners.pointerleave();
+  check(!classes.has('is-parallax') && visual.style.left === '' && visual.style.top === ''
+    && !visualVars['--pjt-rotate-y'] && !visualVars['--pjt-rotate-x']
+    && main.style.left === '' && acts.style.left === ''
+    && main.style.top === '' && acts.style.top === '',
+    '指针离开后底板、文字与控件回到中性位置');
+  const css = require('fs').readFileSync(path.join(__dirname, 'styles.css'), 'utf8');
+  check(/\.view\.project-view\{[^}]*margin-inline:calc\(-1 \* var\(--pg\)\);padding-inline:var\(--pg\)/.test(css)
+    && /\.pjt-board\{[^}]*--pjt-motion-gutter:20px/.test(css)
+    && /padding:var\(--pjt-motion-gutter\) var\(--pjt-motion-gutter\) var\(--pjt-motion-gutter\)/.test(css),
+    '看板借用页面侧边距，四边留出位移和倾斜的裁切余量');
+  check(/\.pjt-card\[data-id\]:active:not\(\.is-dragging\) \.pjt-visual\{[^}]*box-shadow:[^}]*filter:brightness/.test(css)
+    && /\.pjt-card\.is-parallax \.pjt-visual\{[^}]*perspective\(900px\) rotateX/.test(css)
+    && /\.pjt-sky\{[^}]*inset:-64px/.test(css)
+    && /\.pjt-ridge\{[^}]*left:-20%;width:140%/.test(css)
+    && !/\.pjt-card\.is-parallax \.pjt-sky/.test(css)
+    && !/\.pjt-card\.is-parallax \.pjt-ridge/.test(css),
+    '按压有光影反馈，山景有裁切余量且内部没有各层独立位移');
+  ctx.document.querySelector = originalQuery;
+  ctx.matchMedia = originalMatch;
+  ctx.requestAnimationFrame = originalFrame;
+} catch (e) { console.log('FAIL 项目地形 → ' + e.message); fail++; }
+
+/* 3e. 列表卡直接运行，并与详情页共用关闭和重启状态。 */
 try {
   T.S.page = 'projects'; T.S.wf = 'ops'; T.S.wfEdit = null; T.S.projEdit = null; T.S.running = null;
   const apex = T.DATA.projects.find(p => p.id === 'ops');
 
-  /* 启动：就地进入运行态（不跳页），按钮切成「关闭项目」 */
+  /* 启动：运行态仍能在列表卡看到，操作入口位于详情页。 */
   T.startRun('ops', {stay:true});
   check(T.S.running && T.S.running.wfId === 'ops', '「运行项目」进入运行态');
   check(T.S.page === 'projects', '启动后仍停在项目选择页（就地运行，不跳页）');
   const liveRow = T.projTileHTML(apex);
-  check(liveRow.includes('pjt-stop') && liveRow.includes('关闭项目') && liveRow.includes('pjt-live'),
-    '运行中：主操作切成「关闭项目」并显示运行中标记');
+  check(liveRow.includes('data-act="stopProject"') && liveRow.includes('pjt-live')
+    && T.projectRunControlsHTML(apex, false).includes('关闭项目'),
+    '运行中：列表卡与详情页都提供关闭操作');
   check(T.stopProject('ops') === true && T.S.running === null, '关闭非真实项目后回到未启动态');
-  check(T.projTileHTML(apex).includes('pjt-start'), '关闭后主操作回到「运行项目」');
+  check(T.projTileHTML(apex).includes('data-act="runProject"')
+    && T.projectRunControlsHTML(apex, false).includes('运行项目'),
+    '关闭后列表卡和详情页都恢复运行操作');
 
   const real = T.DATA.projects.find(p => p.id === 'apex');
   T.S.projectRuntime.apex = 'running'; T.S.wf = 'apex'; T.S.running = null;
-  const cardControls = T.projectRunControlsHTML(real, true);
+  const cardControls = T.projTileHTML(real);
   const detailControls = T.projectRunControlsHTML(real, false);
   check([cardControls, detailControls].every(x=>x.includes('关闭项目') && x.includes('重启项目') && !x.includes('运行项目')),
-    '真实项目启动后：项目卡与详情页头同时显示「关闭项目 + 重启项目」');
+    '真实项目启动后：详情页运行控件显示「关闭项目 + 重启项目」');
   T.S.running = {wfId:'apex', action:'run', status:'running'};
   const busyControls = [T.projectRunControlsHTML(real, true), T.projectRunControlsHTML(real, false)];
   check(busyControls.every(x=>x.includes('data-act="stopProject"') && x.includes('data-act="restartProject"')
@@ -320,11 +444,11 @@ try {
     '真实项目运行中：关闭和重启仍可点击，以便强制接管当前执行');
   T.S.running = null;
   check(!T.projRunHTML(real, null, false).includes('data-act="stopProject"'),
-    '运行流程卡不再单独放关闭按钮，项目操作只保留在两处统一位置');
+    '运行流程卡不重复放关闭按钮，项目运行操作集中于详情页头');
   T.S.projectRuntime.apex = 'stopped';
   check([T.projectRunControlsHTML(real, true), T.projectRunControlsHTML(real, false)]
     .every(x=>x.includes('运行项目') && !x.includes('关闭项目') && !x.includes('重启项目')),
-    '真实项目关闭后：两处都恢复为单一「运行项目」按钮');
+    '真实项目关闭后：详情页头恢复为单一「运行项目」按钮');
 
   /* 运行态对账：轮询器存在、低频、后台不空转、只变才重绘 */
   check(typeof T.startRuntimePoll === 'function' && typeof T.stopRuntimePoll === 'function',
@@ -1143,7 +1267,7 @@ try {
   check(!cssSrc.includes('.wf-tile') && !cssSrc.includes('.pjt-list') && !cssSrc.includes('.pjt-sub'),
     '旧磁贴样式与已废弃的层级列表样式都不残留（不留死代码）');
   check(cssSrc.includes('.pjt-board{') && cssSrc.includes('repeat(auto-fill,minmax(min(var(--tile-min),100%),1fr))')
-    && cssSrc.includes('.pjt-acts{display:flex'),
+    && /\.pjt-acts\{[^}]*display:flex/.test(cssSrc),
     '卡片栅格自适应列数 + 操作条 flex-wrap 自然换行（无新增宽度断点）');
   /* 横向溢出防线：容器比 --tile-min 还窄时，轨道必须跟着缩，而不是撑破容器出横向滚动条 */
   check(!/minmax\(var\(--tile-min\),1fr\)/.test(cssSrc)
@@ -1151,8 +1275,8 @@ try {
     '栅格轨道下限用 min(--tile-min,100%) 兜底：容器更窄时轨道收缩，不撑出横向滚动条');
   check(/\.pjt-board\{[\s\S]{0,300}?overflow:hidden auto/.test(cssSrc),
     '卡片栅格横向禁滚、纵向可滚（overflow:hidden auto）');
-  check(/\.pjt-chip\{[\s\S]{0,220}?min-width:0/.test(cssSrc),
-    '长 chip 允许收缩（min-width:0）：窄卡里不会顶出卡片边界');
+  check(/\.pjt-relation\{[^}]*min-width:0/.test(cssSrc),
+    '长项目归属可收缩并省略：窄卡里不会顶出边界');
   check(/\.view\{[^}]*scrollbar-width:none/.test(cssSrc) && /\.view::-webkit-scrollbar\{display:none\}/.test(cssSrc),
     '页面侧边滚动条已隐藏（滚动能力保留，仅视觉去除）');
   check(/\.pjt-acts\{[^}]*min-width:0/.test(cssSrc),
@@ -1720,7 +1844,7 @@ try {
   const cases = [
     {p:'viewHome',     must: ['项目仪表盘'], mustNot: ['当前会话','正在做','工作流','次级模块收起','集中查看项目状态']},
     {p:'viewApps',     must: ['<h1>应用</h1>'], mustNot: ['按使用频率排序','其余默认收起','最常用的','上方为最近打开的应用']},
-    {p:'viewProjects', must: ['个项目 ·', '点任意卡片进入详情'], mustNot: ['全部在一屏内可选','选中后立即在下方展开']},
+    {p:'viewProjects', must: ['个项目 ·'], mustNot: ['点任意卡片进入详情','全部在一屏内可选','选中后立即在下方展开']},
     {p:'viewWorkflows',must: ['执行模块启用'], mustNot: ['个 · 当前选中']}
   ];
   cases.forEach(c => {
@@ -2086,6 +2210,7 @@ try {
 try {
   const css2 = require('fs').readFileSync(path.join(__dirname, 'styles.css'), 'utf8');
   const html2 = require('fs').readFileSync(path.join(__dirname, 'index.html'), 'utf8');
+  const appMotion = fs.readFileSync(path.join(__dirname, 'app.js'), 'utf8');
   check(!/@media\s*\(max-width:(1280|1180|1100|1080|900|860|640|560)px\)/.test(css2),
     '历史废弃断点不再回潮（860/900/1080/1180/1280 等保持移除）');
   check(!/@media\s*\(max-height:(820|760)px\)/.test(css2), '历史废弃矮屏断点（820/760）保持移除');
@@ -2096,8 +2221,11 @@ try {
   check(/--dash-title:clamp\(/.test(css2) && /--dash-stat:clamp\(/.test(css2)
     && /--dash-card-pad:clamp\(/.test(css2),
     '密度令牌走 clamp 连续缩放（断点之间不跳变）');
-  check(css2.includes('@media (prefers-reduced-motion:reduce)') && css2.includes('@media (hover:none)'),
-    '无障碍媒体查询保留（动效降级 / 触屏）');
+  check(css2.includes('@media (prefers-reduced-motion:reduce)')
+    && css2.includes('@media (hover:hover) and (pointer:fine)')
+    && appMotion.includes("'(hover: hover) and (pointer: fine)'")
+    && appMotion.includes("'(prefers-reduced-motion: reduce)'"),
+    '无障碍媒体查询保留：视差只响应精细指针，减少动态效果时静止');
   check(css2.includes('--side-w:240px') && css2.includes('--main-max:1440px'),
     '规格令牌就位：侧栏 240px / 全屏主内容上限 1440px');
   check(css2.includes('.is-fullscreen .view{') && css2.includes('margin-inline:auto'),
@@ -2799,7 +2927,7 @@ try {
 
   check(T.PROJ_SORT.holdMs === 200 && T.PROJ_SORT.tolerance > 0,
     '长按 200ms 才起拖，起拖前位移超过容差就交回原生滚动');
-  check(typeof T.initProjSort === 'function' && /S\.page === 'projects'\)\s*initProjSort\(\)/.test(app32),
+  check(typeof T.initProjSort === 'function' && /S\.page === 'projects'\)\s*\{\s*initProjSort\(\)/.test(app32),
     '项目选择页每次渲染都重新绑定拖拽排序');
   check(T.projSortBlocked({ closest:() => ({}) }) === true && T.projSortBlocked({ closest:() => null }) === false,
     '卡片内的按钮 / 链接长按不参与拖拽，卡片空白处可以起拖');
@@ -2951,12 +3079,14 @@ try {
   check(appPref.includes('function applyPrefs(){ applyTheme(S.theme); applyAccent(S.accent); applyDensity(S.density); applyGlass(S.glass); }'),
     'applyPrefs 是唯一入口：启动时一次把主题 / 强调色 / 密度 / 玻璃质感都写回');
   const themeBranch = seg("case 'theme':", "case 'accent':");
-  check(themeBranch.includes('applyTheme(S.theme)') && themeBranch.includes('persistPrefs()'),
-    '设置页切换主题走 applier + 落偏好，不直接写 dataset');
+  check(themeBranch.includes("setTheme(v === 'dark' ? 'dark' : 'light', e)")
+     && appPref.includes('function setTheme(next, event){')
+     && appPref.includes('applyTheme(S.theme)') && appPref.includes('persistPrefs()'),
+    '设置页切换主题走共用的过渡入口、applier 与偏好存储');
   const accentBranch = seg("case 'accent': {", "case 'switch': {");
   check(accentBranch.includes('applyAccent(v)') && accentBranch.includes('persistPrefs()'),
     '设置页切换强调色走 applier + 落偏好');
-  const toggleBranch = seg('function toggleTheme(){', 'function launch(');
+  const toggleBranch = seg('function setTheme(', 'function launch(');
   check(toggleBranch.includes('applyTheme(S.theme)') && toggleBranch.includes('persistPrefs()'),
     '顶栏主题按钮与设置页共用同一套 applier + 落偏好，不出现两套写法');
   const switchBranch = seg("case 'switch': {", "case 'obsidianSave':");
@@ -2980,15 +3110,13 @@ try {
     '死类名 tight 在 app.js 里零残留（样式侧 0 条规则，markup 侧也必须 0 次）');
 } catch (e) { console.log('FAIL 外观偏好 → ' + e.message); fail++; }
 
-/* 34b. 主题切换：只换肤，不做过渡动效（用户决定撤掉整套切换动画）
-   （历史上试过「全屏渐变交叉淡出」「独立涟漪层」「按钮 ::after 扩张体」「背景板」
-     「快照揭罩 + 呼吸节拍」五版，全部否掉。这里既不实现，也钉成负向断言防回潮。） */
+/* 34b. 主题切换：指针点击时用 View Transition 圆形揭示新主题。 */
 try {
   const cssT = fs.readFileSync(path.join(__dirname, 'styles.css'), 'utf8');
   const htmlT = fs.readFileSync(path.join(__dirname, 'index.html'), 'utf8');
   const appT = fs.readFileSync(path.join(__dirname, 'app.js'), 'utf8');
 
-  /* ---- 形态仍在：太阳（浅色）/ 月亮（深色）由 data-theme 切换，但走硬切 ---- */
+  /* 图元仍由 data-theme 决定形态；只给页面快照做揭示过渡。 */
   check(/class="icon-btn theme-btn"[^>]*id="themeBtn"/.test(htmlT),
     '主题按钮仍挂 #themeBtn（app.js 的绑定按这个 id 取元素）');
   check(htmlT.includes('class="theme-rays"') && htmlT.includes('class="theme-moon-fill"'),
@@ -3002,19 +3130,32 @@ try {
   check(/--theme-moon-turn:\s*-?\d+deg/.test(cssT),
     '月牙开口角度有独立令牌 --theme-moon-turn（与太阳光芒方向拉开差别）');
 
-  /* ---- 零过渡：本按钮不许再有任何 transition / animation ---- */
+  /* 图元不单独动，避免新主题扩散时叠出另一层运动。 */
   check(!/\.theme-ico[^{]*\{[^}]*transition/.test(cssT)
      && !/\.theme-btn[^{]*\{[^}]*animation/.test(cssT)
      && !/themeIconBreath/.test(cssT),
-    '主题图元零过渡：没有 transition、没有呼吸 keyframes（形态随主题硬切）');
+    '主题图元不单独补间或呼吸，新主题快照中直接换形');
 
-  /* ---- 整套切换动效的痕迹必须清干净 ---- */
+  check(appT.includes('document.startViewTransition(commit)')
+     && appT.includes('Math.hypot(Math.max(x, innerWidth - x), Math.max(y, innerHeight - y))')
+     && appT.includes("pseudoElement:darkExpands ? '::view-transition-new(root)' : '::view-transition-old(root)'")
+     && appT.includes('const x = event.clientX, y = event.clientY;')
+     && !appT.includes('activeThemeAnimation.reverse()')
+     && cssT.includes('--motion-theme:420ms')
+     && cssT.includes(':root.theme-transition-active.theme-transition-contract::view-transition-old(root){z-index:2}')
+     && cssT.includes(':root.theme-transition-active *{transition-duration:0s!important}'),
+    '主题揭示的位置、时长和层级恢复为已安装版本的实现');
+  check(appT.includes("event.detail > 0") && appT.includes("'(prefers-reduced-motion: reduce)'")
+     && appT.includes('!document.startViewTransition') && appT.includes('!document.documentElement.animate'),
+    '键盘、减少动态效果及不支持 View Transition 的 WebView2 直接换肤');
+
+  /* 旧遮罩实现仍须清干净。 */
   check(!/theme-mask/.test(cssT) && !/theme-mask/.test(htmlT),
     '揭罩层已删净（.theme-mask 在 CSS 与 markup 里都为零）');
   check(!/themeHoleOpen|theme-hole-r|theme-hole-x|theme-hole-y|--theme-floor/.test(cssT),
     '揭罩的几何与地板令牌已删净（themeHoleOpen / --theme-hole-* / --theme-floor-*）');
   check(!/--theme-breath|--theme-reveal|--theme-morph|--theme-rays-scale/.test(cssT),
-    '切换动效的时长 / 曲线令牌已删净（--theme-breath / --theme-reveal / --theme-morph / --theme-rays-scale）');
+    '旧版切换动效令牌已删净');
   check(!/@property/.test(cssT),
     '@property 注册块已删净（那些注册只为补间服务，动效撤掉后不该留）');
   check(!/maskAutoRefresh|armThemeBurst|themeBurstDurations|burstOriginOf|burstRadiusFor|burstSkinFrom/.test(appT),
@@ -3026,7 +3167,7 @@ try {
   check(!/localStorage\.getItem\('apex-console\.prefs\.v1'\)/.test(htmlT),
     '首帧主题预置内联脚本已删除（head 不再预读 localStorage 猜主题）');
 
-  /* ---- 行为：一次 toggle 必须真的换肤（同步、无动画） ---- */
+  /* 无可用 View Transition 的环境仍同步换肤并保存。 */
   T.applyTheme(T.S.theme);                       /* 先对齐状态与 DOM，不受前面用例污染 */
   const beforeTheme = T.S.theme;
   const beforeDom = ctx.document.documentElement.dataset.theme;
@@ -3034,9 +3175,83 @@ try {
   try { T.toggleTheme(); } catch (_) { threw = true; }
   check(!threw, 'toggleTheme 在任何环境下都不抛错');
   check(T.S.theme !== beforeTheme && ctx.document.documentElement.dataset.theme === T.S.theme,
-    'toggleTheme 同步翻转主题：S.theme 与 <html data-theme> 一起变，且同拍到位');
+    '不支持动画时 toggleTheme 同步翻转 S.theme 与 <html data-theme>');
   ctx.document.documentElement.dataset.theme = beforeDom; T.S.theme = beforeTheme;   /* 复原 */
 } catch (e) { console.log('FAIL 主题切换 → ' + e.message); fail++; }
+
+/* 主题来回切换：按已安装版检查揭示方向与手感，连点只做状态保护。 */
+try {
+  const root = ctx.document.documentElement;
+  const calls = [];
+  let skipped = 0;
+  let captures = 0;
+  let finish;
+  const css = fs.readFileSync(path.join(__dirname, 'styles.css'), 'utf8');
+  const duration = css.match(/--motion-theme:\s*(\d+ms)/)?.[1] || '';
+  ctx.getComputedStyle = () => ({ getPropertyValue:k => k === '--motion-theme' ? duration : 'cubic-bezier(.77,0,.175,1)' });
+  root.animate = (frames, options) => { calls.push({frames, options}); return {}; };
+  ctx.document.startViewTransition = commit => {
+    captures++;
+    commit();
+    return {
+      ready:{ then(fn){ fn(); return { catch(){} }; } },
+      finished:{ then(fn){ finish = fn; } },
+      skipTransition(){ skipped++; }
+    };
+  };
+  T.S.theme = 'light'; T.applyTheme('light');
+  const pointerEvent = {detail:1, clientX:100, clientY:80};
+  T.toggleTheme(pointerEvent);
+  check(calls.length === 1 && calls[0].options.pseudoElement === '::view-transition-new(root)'
+     && calls[0].frames.clipPath[0] === 'circle(0px at 100px 80px)'
+     && calls[0].frames.clipPath[1].includes('at 100px 80px')
+     && calls[0].options.duration === 420 && calls[0].options.fill === 'both',
+    '浅色到深色：沿用已安装版从点击点向外揭开的时长');
+  finish();
+  T.toggleTheme(pointerEvent);
+  check(calls.length === 2 && calls[1].options.pseudoElement === '::view-transition-old(root)'
+     && calls[1].frames.clipPath[0].includes('at 100px 80px')
+     && calls[1].frames.clipPath[1] === 'circle(0px at 100px 80px)'
+     && calls[1].options.duration === 420 && calls[1].options.fill === 'both',
+    '深色到浅色：沿用已安装版向点击点收回的时长');
+  finish();
+  T.toggleTheme(pointerEvent);
+  T.toggleTheme(pointerEvent);
+  T.toggleTheme(pointerEvent);
+  check(skipped === 1 && captures === 3 && T.S.theme === 'dark',
+    '连续点击只取消当前快照一次，保留最后的主题选择');
+  finish();
+  check(T.S.theme === 'dark' && root.dataset.theme === 'dark' && captures === 3
+     && !root.classList.contains('theme-transition-active'),
+    '连续点击收尾后主题和 DOM 一致，过渡类清理完成');
+  T.toggleTheme(pointerEvent);
+  T.toggleTheme(pointerEvent);
+  finish();
+  check(T.S.theme === 'dark' && root.dataset.theme === 'dark' && captures === 4
+    && skipped === 2 && !root.classList.contains('theme-transition-contract'),
+    '回切途中再次点击合并请求并恢复原主题');
+  let readyLater, finishLater;
+  ctx.document.startViewTransition = commit => {
+    captures++;
+    commit();
+    return {
+      ready:{ then(fn){ readyLater = fn; return {catch(){}}; } },
+      finished:{ then(fn){ finishLater = fn; } },
+      skipTransition(){ skipped++; }
+    };
+  };
+  T.toggleTheme(pointerEvent);
+  T.toggleTheme(pointerEvent);
+  readyLater();
+  check(skipped === 3 && captures === 5 && calls.length === 4,
+    '快照准备期间连点返回原主题时，不再启动一轮动画');
+  finishLater();
+  check(T.S.theme === 'dark' && root.dataset.theme === 'dark',
+    '准备阶段取消后，页面主题与最终点击保持一致');
+  delete ctx.document.startViewTransition;
+  delete root.animate;
+  delete ctx.getComputedStyle;
+} catch (e) { console.log('FAIL 主题往返 → ' + e.message); fail++; }
 
 /* 35. 流程名缺失时的呈现：占位符不许当数据
    （后端 projects 表没有流程名字段，走控制台新建的项目也从未填过 —— 「没有名字」才是常态。

@@ -3092,18 +3092,18 @@ const projIsStarted = id => REAL_PROJECT_IDS.has(id)
   ? S.projectRuntime[id] === 'running'
   : projIsRunning(id);
 
-/* 项目列表卡与项目详情页头共用这一份控制器：未启动只显示运行；启动后显示关闭 + 重启。 */
-function projectRunControlsHTML(w, stay){
+/* 项目卡与详情页共用运行状态，卡片使用原有胶囊按钮外观。 */
+function projectRunControlsHTML(w, stay, card){
   const on = w.steps.filter(s=>s.on).length;
   const real = REAL_PROJECT_IDS.has(w.id);
   const busy = projIsRunning(w.id);
   const action = busy && S.running ? S.running.action : '';
-  const attr = `data-id="${w.id}"`;
-  const runBtn = (disabled, label) => `<button class="btn btn-primary btn-sm pjt-start" data-act="runProject" ${attr} data-stay="${stay ? '1' : '0'}" ${disabled ? 'disabled' : ''}
-    title="${on ? '按顺序启动这个项目运行流程里所有已启用的执行模块' : '这个项目还没有启用任何执行模块'}">${IC.play('#fff')}${label}</button>`;
-  const stopBtn = (disabled, label) => `<button class="btn btn-sm pjt-stop" data-act="stopProject" ${attr} ${disabled ? 'disabled' : ''}
+  const attr = `data-id="${esc(w.id)}"`;
+  const runBtn = (disabled, label) => `<button class="${card ? 'pjt-enter' : 'btn btn-primary btn-sm pjt-start'}" data-act="runProject" ${attr} data-stay="${stay ? '1' : '0'}" ${disabled ? 'disabled' : ''}
+    title="${on ? '按顺序启动这个项目运行流程里所有已启用的执行模块' : '这个项目还没有启用任何执行模块'}">${IC.play(card ? 'currentColor' : '#fff')}${label}</button>`;
+  const stopBtn = (disabled, label) => `<button class="${card ? 'pjt-enter' : 'btn btn-sm pjt-stop'}" data-act="stopProject" ${attr} ${disabled ? 'disabled' : ''}
     title="按原项目关闭流程停止所有关联进程">${IC.stop('currentColor')}${label}</button>`;
-  const restartBtn = (disabled, label) => `<button class="btn btn-ghost btn-sm pjt-restart" data-act="restartProject" ${attr} ${disabled ? 'disabled' : ''}
+  const restartBtn = (disabled, label) => `<button class="${card ? 'pjt-enter' : 'btn btn-ghost btn-sm pjt-restart'}" data-act="restartProject" ${attr} ${disabled ? 'disabled' : ''}
     title="先完整关闭项目，再重新启动">${IC.reset('currentColor')}${label}</button>`;
   if (real && busy){
     if (action === 'stop') return stopBtn(true, '关闭中') + restartBtn(false, '改为重启');
@@ -3157,7 +3157,7 @@ function viewProjects(){
   <div class="page-head">
     <div>
       <h1>项目选择</h1>
-      <p>${DATA.projects.length} 个项目 · ${roots} 个根项目 · 点任意卡片进入详情</p>
+      <p>${DATA.projects.length} 个项目 · ${roots} 个根项目</p>
     </div>
   </div>
 
@@ -3172,52 +3172,130 @@ function viewProjects(){
   ${projDeleteModalHTML()}`;
 }
 
-/* 单张项目卡：信息区（承载进入）+ 操作条（启动·停止 / 复制 / 刷新 / 编辑 / 删除） */
+/* 单张完整项目卡：主按钮直接运行，铅笔进入完整详情查看和编辑。 */
 function projTileHTML(w){
   const prep = preflight(w);
   const parent = projParentOf(w);
   const kidCount = projKids(w.id).length;
   const live = projIsRunning(w.id) || projIsStarted(w.id);
   const on = w.steps.filter(s => s.on).length;
-  return `<article class="pjt-card" data-id="${w.id}">
-    <div class="pjt-main" role="button" tabindex="0" data-act="enterProj" data-id="${w.id}"
-      title="进入「${esc(w.name)}」：概览 / 开发上下文 / 执行模块 / 运行流程 / 设置">
-      <div class="pjt-top">
-        <span class="pjt-ico" style="background:${w.color}1f">${wfIcon(w.ico, w.color)}</span>
-        <div class="pjt-hd">
-          <div class="pjt-name-line">
-            <span class="pjt-name">${esc(w.name)}</span>
-            <span class="badge ${w.stCls}">${esc(w.st)}</span>
-            ${live ? `<span class="pjt-live"><span class="dot"></span>运行中</span>` : ''}
-          </div>
-          <div class="pjt-desc">${esc(w.desc)}</div>
-        </div>
-        <span class="pjt-enter" aria-hidden="true">进入${IC.chevR('currentColor')}</span>
+  const accent = /^#[0-9a-fA-F]{6}$/.test(w.color) ? w.color : '#536780';
+  const scene = [...String(w.id)].reduce((hash, char) => (hash * 31 + char.charCodeAt(0)) >>> 0, 0) % 3;
+  const statusClass = ['pst-ok', 'pst-dev', 'pst-pause'].includes(w.stCls) ? w.stCls : 'pst-pause';
+  const relation = parent ? `子项目 · ${esc(parent.name)}` : kidCount ? `${kidCount} 个子项目` : '';
+  return `<article class="pjt-card" data-id="${esc(w.id)}" data-scene="${scene}" style="--pjt-accent:${accent}">
+    <div class="pjt-visual" aria-hidden="true">
+    <div class="pjt-scene" aria-hidden="true">
+      <span class="pjt-sky"></span>
+      <span class="pjt-sun"></span>
+      <span class="pjt-ridge pjt-ridge-far"></span>
+      <span class="pjt-ridge pjt-ridge-mid"></span>
+      <span class="pjt-ridge pjt-ridge-near"></span>
+    </div>
+    </div>
+    <div class="pjt-main">
+      <div class="pjt-copy-plane">
+      <div class="pjt-topline">
+        <span class="pjt-flow">${esc(flowNameOf(w))}</span>
+        ${live ? `<span class="pjt-live"><span class="dot"></span>运行中</span>`
+          : `<span class="badge ${statusClass}">${esc(w.st)}</span>`}
       </div>
-      <div class="pjt-meta">
-        <span class="pjt-chip">${esc(flowNameOf(w))}</span>
-        <span class="pjt-chip">${on}/${w.steps.length} 模块</span>
-        <span class="pjt-chip">${w.runs} 次运行</span>
-        ${parent ? `<span class="pjt-chip pjt-up" title="层级：归属「${esc(parent.name)}」">子项目 · 归属 ${esc(parent.name)}</span>` : ''}
-        ${kidCount ? `<span class="pjt-chip pjt-down" title="这个项目下还有 ${kidCount} 个子项目">${kidCount} 个子项目</span>` : ''}
-        <span class="pjt-chip ${prep.ready ? 'ok' : 'warn'}">${prep.ready ? '预备就绪' : prep.issues.length + ' 项待处理'}</span>
+      <span class="pjt-name">${esc(w.name)}</span>
+      <span class="pjt-desc">${esc(w.desc)}</span>
+      <div class="pjt-facts">
+        <span class="pjt-ready ${prep.ready ? 'ok' : 'warn'}">${prep.ready ? '预备就绪' : prep.issues.length + ' 项待处理'}</span>
+        ${relation ? `<span class="pjt-relation">${relation}</span>` : ''}
+      </div>
+      </div>
+      <div class="pjt-bottom">
+        <div class="pjt-stat"><span>启用模块</span><strong>${on}<small> / ${w.steps.length}</small></strong></div>
+        <div class="pjt-run-controls">${projectRunControlsHTML(w, true, true)}</div>
       </div>
     </div>
     <div class="pjt-acts">
-      ${projectRunControlsHTML(w, true)}
-      <div class="pjt-icons">
-        <button class="pjt-i" data-act="dupProject" data-id="${w.id}" title="复制项目（含执行模块）" aria-label="复制项目">${IC.copy('currentColor')}</button>
-        <button class="pjt-i" data-act="refreshProj" data-id="${w.id}" title="刷新：重新执行预备检查并清空临时状态" aria-label="刷新项目">${IC.reset('currentColor')}</button>
-        <button class="pjt-i" data-act="editWf" data-id="${w.id}" title="编辑这个项目的步骤编排" aria-label="编辑项目">${IC.pen('currentColor')}</button>
-        <button class="pjt-i pjt-del" data-act="projDeleteAsk" data-id="${w.id}" title="${DATA.projects.length <= 1 ? '至少要保留一个项目' : '删除项目（会先预演删除范围）'}" aria-label="删除项目">${IC.trash('currentColor')}</button>
+      <span class="pjt-acts-label">项目管理</span>
+      <div class="pjt-icons" role="group" aria-label="项目管理操作">
+        <button class="pjt-i" data-act="dupProject" data-id="${esc(w.id)}" title="复制项目（含执行模块）" aria-label="复制项目">${IC.copy('currentColor')}</button>
+        <button class="pjt-i" data-act="refreshProj" data-id="${esc(w.id)}" title="刷新：重新执行预备检查并清空临时状态" aria-label="刷新项目">${IC.reset('currentColor')}</button>
+        <button class="pjt-i" data-act="enterProj" data-id="${esc(w.id)}" title="编辑并进入项目" aria-label="编辑并进入${esc(w.name)}">${IC.pen('currentColor')}</button>
+        <button class="pjt-i pjt-del" data-act="projDeleteAsk" data-id="${esc(w.id)}" title="${DATA.projects.length <= 1 ? '至少要保留一个项目' : '删除项目（会先预演删除范围）'}" aria-label="删除项目">${IC.trash('currentColor')}</button>
       </div>
     </div>
   </article>`;
 }
 
+/* 山景内部保持一幅画；底板小幅位移和有限倾斜，文字与控件移动更多。 */
+let projectCardParallaxCleanup = null;
+function initProjectCardParallax(){
+  if (projectCardParallaxCleanup){ projectCardParallaxCleanup(); projectCardParallaxCleanup = null; }
+  const board = $('#view .pjt-board');
+  if (!board || !globalThis.matchMedia
+    || !globalThis.matchMedia('(hover: hover) and (pointer: fine)').matches
+    || globalThis.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  let active = null, frame = 0, point = null;
+  const reset = () => {
+    if (!active) return;
+    active.classList.remove('is-parallax');
+    const visual = active.querySelector('.pjt-visual');
+    visual.style.left = '';
+    visual.style.top = '';
+    visual.style.removeProperty('--pjt-rotate-x');
+    visual.style.removeProperty('--pjt-rotate-y');
+    active.querySelector('.pjt-main').style.left = '';
+    active.querySelector('.pjt-main').style.top = '';
+    active.querySelector('.pjt-acts').style.left = '';
+    active.querySelector('.pjt-acts').style.top = '';
+    active = null;
+    point = null;
+  };
+  board.addEventListener('pointermove', e => {
+    if (board.classList.contains('is-arming') || board.classList.contains('is-sorting')){ reset(); return; }
+    const card = e.target.closest('.pjt-card[data-id]');
+    if (!card){ reset(); return; }
+    if (active !== card){ reset(); active = card; card.classList.add('is-parallax'); }
+    const rect = card.getBoundingClientRect();
+    point = {
+      x:Math.max(-1, Math.min(1, (e.clientX - rect.left - rect.width / 2) / (rect.width / 2))),
+      y:Math.max(-1, Math.min(1, (e.clientY - rect.top - rect.height / 2) / (rect.height / 2)))
+    };
+    if (frame) return;
+    frame = requestAnimationFrame(() => {
+      frame = 0;
+      if (!active || point === null) return;
+      const visual = active.querySelector('.pjt-visual');
+      visual.style.left = Math.round(point.x * 12) + 'px';
+      visual.style.top = Math.round(point.y * 8) + 'px';
+      visual.style.setProperty('--pjt-rotate-y', (point.x * 4).toFixed(2) + 'deg');
+      visual.style.setProperty('--pjt-rotate-x', (-point.y * 3).toFixed(2) + 'deg');
+      const frontX = Math.round(point.x * 20) + 'px';
+      const frontY = Math.round(point.y * 12) + 'px';
+      for (const selector of ['.pjt-main', '.pjt-acts']){
+        const plane = active.querySelector(selector);
+        plane.style.left = frontX;
+        plane.style.top = frontY;
+      }
+    });
+  });
+  board.addEventListener('pointerleave', reset);
+  board.addEventListener('pointerdown', e => {
+    if (!e.target.closest('button')) reset();
+  });
+  board.addEventListener('scroll', reset, {passive:true});
+  const viewport = typeof window !== 'undefined' && window && window.addEventListener ? window : null;
+  if (viewport) viewport.addEventListener('resize', reset);
+  const observer = typeof ResizeObserver === 'function' ? new ResizeObserver(reset) : null;
+  if (observer) observer.observe(board);
+  projectCardParallaxCleanup = () => {
+    reset();
+    board.removeEventListener?.('scroll', reset);
+    if (viewport) viewport.removeEventListener('resize', reset);
+    if (observer) observer.disconnect();
+  };
+}
+
 /* ---------------- 项目选择页：卡片二维拖拽排序 ----------------
    零额外 UI：没有手柄、没有指示线、没有占位卡。长按卡片空白处约 200ms 才起拖；
-   卡片内的按钮 / 链接长按不参与 —— 否则「运行项目」会被长按吃掉，点不动。
+   卡片内的按钮 / 链接长按不参与 —— 保持进入与管理控件可点击。
    命中判定是**二维**的：只比「拖动卡片的中心离哪个槽位的中心最近」，所以左右换位、跨行、跨列都成立。
    让位不走 CSS transition —— 卡片位移由 JS 的物理弹簧逐帧写 transform（与 initInertialScroll 同一套
    半隐式欧拉 + 固定子步积分），松手后同一套积分把卡片收进槽位，因此没有瞬移与闪烁。
@@ -3237,9 +3315,7 @@ const PROJ_SORT = {
   restEps:0.4,          // 判定静止的位移阈值（px）
   restVel:14,           // 判定静止的速度阈值（px/s）
 };
-/* 起拖黑名单：只排除卡片内的真实控件。
-   刻意**不用** appScrollDragBlocked —— 它把 [data-act] 一并排掉，而整块 .pjt-main 就挂着
-   data-act="enterProj"，照搬会让整张卡都拖不起来。 */
+/* 起拖黑名单：只排除卡片内的真实控件。卡片空白可拖拽，只有明确的按钮可进入项目。 */
 function projSortBlocked(target){
   return !!(target && target.closest && target.closest('button,a,input,textarea,select'));
 }
@@ -3423,7 +3499,7 @@ function initProjSort(){
     const drag = st.drag;
     if (!drag) return;
     st.drag = null;
-    st.suppressClick = true;                            // 拖过就不算「点卡片进入项目」
+    st.suppressClick = true;                            // 拖拽结束时拦截可能产生的点击
     setTimeout(() => { st.suppressClick = false; }, 0);
     drag.el.classList.remove('is-dragging');
     board.classList.remove('is-sorting');
@@ -4091,6 +4167,7 @@ function render(keepScroll){
   $('#view').innerHTML = PAGES[S.page](animate);
   $('#view').dataset.anim = animate ? '1' : '0';
   $('#view').classList.toggle('no-scroll', S.page === 'apps');   // 应用页锁屏：滚动交给列表容器内部
+  $('#view').classList.toggle('project-view', S.page === 'projects');
   $('#view').scrollTop = sc;
   if (S.page === 'workflows' && S.obsidianReturnFocus){
     const returned = S.obsidianReturnFocus;
@@ -4108,7 +4185,10 @@ function render(keepScroll){
   $('#bellBadge').style.display = S.notices.some(n=>!n.read) ? 'block' : 'none';
   if (S.page === 'apps'){ fitAppList(); const ctl = initInertialScroll(); if (ctl) ctl.refresh(); }
   // 应用页：渲染后锁「一屏整数行」，滚动由自管物理惯性驱动（见 initInertialScroll）
-  if (S.page === 'projects') initProjSort();      // 看板每次重建都要重新绑定拖拽排序（见 initProjSort）
+  if (S.page === 'projects'){
+    initProjSort();                               // 看板每次重建都要重新绑定拖拽排序
+    initProjectCardParallax();
+  }
 }
 const go = (p, keep) => { S.page = p; clearObsidianHubFlow(false); S.obsidianReturnFocus = ''; location.hash = '#/'+p; closeNoteModal(); render(keep); };
 
@@ -4492,17 +4572,77 @@ function todoMenu(id){
 }
 
 /* ---------------- 行为 ---------------- */
-/* 主题切换：只换肤，不带过渡动效。
-   形态（太阳 / 月亮）由 <html data-theme> 决定，CSS 里硬切 —— 本函数只负责改状态、
-   落偏好、必要时重绘设置页，并在壳内把主题同步给壳（否则深色下顶部会露白带）。 */
-function toggleTheme(){
-  S.theme = S.theme==='light' ? 'dark' : 'light';
-  applyTheme(S.theme);            /* 顶栏按钮与设置页共用同一套 applier，壳内同步也在这里 */
-  persistPrefs();
-  /* 设置页的「浅色 / 深色」两枚按钮直接读 S.theme 渲染，所以就地重绘一次。 */
-  if (S.page==='settings') render(true);
-  toast(S.theme==='light' ? '已切换到浅色主题' : '已切换到深色主题');
+/* 深色从接触点向外揭开，返回浅色时旧深色从接触点向内收回。
+   键盘、减少动态效果和旧版 WebView2 即时换肤。
+   View Transition 只截取旧 / 新画面，不克隆 DOM，页面内容与滚动位置始终原位。 */
+let activeThemeTransition = null;
+let themeChangeId = 0;
+let pendingTheme = null;
+let themeCancelRequested = false;
+function setTheme(next, event){
+  if (activeThemeTransition){
+    if (next === (pendingTheme ?? S.theme)) return;
+    pendingTheme = next;
+    if (!themeCancelRequested){
+      themeCancelRequested = true;
+      activeThemeTransition.skipTransition();
+    }
+    return;
+  }
+  if (next === S.theme) return;
+  S.theme = next;
+  const changeId = ++themeChangeId;
+  const commit = () => {
+    if (changeId !== themeChangeId) return;
+    applyTheme(S.theme);          /* 同步壳底色，避免 WebView2 顶部系统保留区露出白带 */
+    persistPrefs();
+    /* 设置页只更新两枚选项，不在快照阶段重建整个页面。 */
+    if (S.page === 'settings') $$('[data-act="theme"]').forEach(b => b.classList.toggle('on', b.dataset.v === S.theme));
+  };
+  const announce = () => toast(S.theme === 'light' ? '已切换到浅色主题' : '已切换到深色主题');
+  const reduce = globalThis.matchMedia && globalThis.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const pointer = event && event.detail > 0 && Number.isFinite(event.clientX) && Number.isFinite(event.clientY);
+  if (!pointer || reduce || !document.startViewTransition || !document.documentElement.animate){ commit(); announce(); return; }
+
+  const x = event.clientX, y = event.clientY;
+  const radius = Math.hypot(Math.max(x, innerWidth - x), Math.max(y, innerHeight - y));
+  const darkExpands = next === 'dark';
+  const root = document.documentElement;
+  root.classList.add('theme-transition-active');
+  root.classList.toggle('theme-transition-contract', !darkExpands);
+  let transition;
+  try { transition = document.startViewTransition(commit); }
+  catch (_) { root.classList.remove('theme-transition-active', 'theme-transition-contract'); commit(); announce(); return; }
+  activeThemeTransition = transition;
+  transition.ready.then(() => {
+    if (activeThemeTransition !== transition || themeCancelRequested) return;
+    const style = getComputedStyle(root);
+    const small = `circle(0px at ${x}px ${y}px)`;
+    const large = `circle(${radius}px at ${x}px ${y}px)`;
+    root.animate({ clipPath:darkExpands ? [small, large] : [large, small] }, {
+      duration:parseFloat(style.getPropertyValue('--motion-theme')) || 420,
+      easing:style.getPropertyValue('--ease-in-out').trim() || 'cubic-bezier(.77,0,.175,1)',
+      fill:'both',
+      pseudoElement:darkExpands ? '::view-transition-new(root)' : '::view-transition-old(root)'
+    });
+  }).catch(() => {
+    if (activeThemeTransition === transition && !themeCancelRequested) transition.skipTransition();
+  });
+  const finish = () => {
+    if (activeThemeTransition !== transition) return;
+    activeThemeTransition = null;
+    themeCancelRequested = false;
+    root.classList.remove('theme-transition-active', 'theme-transition-contract');
+    if (pendingTheme !== null){
+      const requested = pendingTheme;
+      pendingTheme = null;
+      if (requested !== S.theme){ setTheme(requested); return; }
+    }
+    announce();                 /* 提示条不参与整页快照，减少多余合成 */
+  };
+  transition.finished.then(finish, finish);
 }
+function toggleTheme(event){ setTheme((pendingTheme ?? S.theme) === 'light' ? 'dark' : 'light', event); }
 function launch(id){
   const a = S.apps.find(x=>x.id===id); if(!a) return;
   const done = saved => {
@@ -5186,8 +5326,7 @@ document.addEventListener('click', e => {
     case 'appView':  S.appView = v; render(true); break;
     case 'alphaJump': alphaJump(v); break;                          // 字母索引条：平滑滚动定位到该分组（列表内容不变）
     case 'askWorkflows': closePalette(); go('projects'); break;
-    case 'theme':    S.theme = v === 'dark' ? 'dark' : 'light'; applyTheme(S.theme); persistPrefs();
-                     toast(S.theme==='light'?'已切换到浅色主题':'已切换到深色主题'); render(true); break;
+    case 'theme':    setTheme(v === 'dark' ? 'dark' : 'light', e); break;
     case 'accent': {
       S.accent = v;
       applyAccent(v);
@@ -5230,7 +5369,7 @@ document.addEventListener('click', e => {
     case 'closeModal':  closeModal(); break;
     /* ---- 工作流 / 步骤编排 ---- */
     case 'enterProj': { const w = DATA.projects.find(x=>x.id===id); if (!w) break;
-                        S.wf = w.id; S.wfEdit = null; S.projEdit = null; S.running = null; S.projConfirm = '';
+                        S.wf = w.id; S.wfEdit = null; S.projEdit = null; S.projConfirm = '';
                         go('workflows'); toast(`已进入「${w.name}」`); break; }
     case 'backProj':  S.wfEdit = null; S.projEdit = null; go('projects'); break;
     /* ---- 进入项目页 · 标题旁的项目状态三态切换 ---- */

@@ -9,8 +9,7 @@ ControlPod（简称 CPod）是面向 Windows 的本地个人总控台：把项�
 - 项目管理：创建、复制、编辑、删除项目，拖拽调整项目卡顺序，并查看项目运行状态与历史。
 - 执行模块：发现内置模块和 `D:\Projects` 各项目仓库中的 `.apex/module.json`，并将模块组合到项目中运行；ControlPod 负责枢纽编排，不收纳独立项目的业务代码与运行环境。
 - 开发者活跃度：首页热力图，底色表达控制台在线时长（页面每分钟静默上报一次），悬停显示当日在线分钟与代码新增 / 删减行数；代码行数由本机 git 仓库只读扫描得出，可在每日 / 每周 / 累计三个口径间切换。
-- 跑步数据看板：解析小米运动健康官方导出包，本地生成跑步数据分析看板
-  （训练负荷模型、跑姿体检、每日建议）。看板是**独立仓库** `../run-analytics`，
+- 跑步数据看板：解析小米运动健康官方导出包，展示单场复盘、训练负荷趋势、六维对比、周复盘和历史记录。看板是**独立仓库** `../run-analytics`，
   总控台只负责接入与启动；健康数据不出本机。
 - APEX 一键启动：真实检查并编排 AK、Steam 与 APEX 的启动 / 关闭。实现和本地运行环境位于**独立仓库** `../apex-launcher`，ControlPod 只负责发现、权限提示、编排和运行记录。
 - 真实应用：识别 Windows 开始菜单、已注册应用与 App Paths 中的可启动程序；添加后可从控制台启动，并显示 Windows 原生图标。
@@ -21,7 +20,7 @@ ControlPod（简称 CPod）是面向 Windows 的本地个人总控台：把项�
 
 ## 运行环境
 
-- Windows 10 / 11
+- Windows 10（版本 2004 及以上）/ 11，x64
 - `D:\Projects` 下的独立模块使用各自仓库声明的运行环境；ControlPod 本身不依赖 Python
 - .NET 10 SDK —— 仅构建外壳时需要（用 `dotnet --list-sdks` 确认有输出；只装运行时的话这里会是空的）。外壳的运行时自带，最终用户不必安装
 - Node.js —— 仅用于前端冒烟测试
@@ -43,6 +42,8 @@ shell\bin\x64\Debug\net10.0-windows10.0.19041.0\win-x64\ApexShell.exe
 
 仓库内的 Debug/Release 构建把 `https://apex.local/` 映射到源码根，所以改完 Web 文件后在壳里按 F5 即可生效；`D:\Apps\ControlPod` 的正式发布版使用随包携带的 `wwwroot`，更新它需要重新发布。
 
+若 `dotnet` 提示找不到 SDK，而用户目录已安装 SDK，可用 `& "$env:USERPROFILE\.dotnet\dotnet.exe"` 替代上述 `dotnet`。源码中的开发路径默认是 `D:\Projects\ControlPod`；放到其他目录开发时，需同步调整 `shell/ConsoleConfig.cs` 的 `ProjectDir`。
+
 ## 使用方式
 
 ### 添加真实应用
@@ -51,11 +52,13 @@ shell\bin\x64\Debug\net10.0-windows10.0.19041.0\win-x64\ApexShell.exe
 
 ### 配置项目流程
 
-1. 在“项目”中进入目标项目。
+1. 在“项目”页面点击卡片的铅笔按钮，进入项目详情。
 2. 在“运行流程”中进入编辑状态并添加模块。
 3. 运行项目，实时查看步骤状态、日志和历史记录。
 
 真实执行失败会保留原始错误，并在失败步骤停止；不会以模拟成功替代真实结果。
+
+卡片主按钮直接运行项目；运行后提供关闭与重启。长按卡片空白处可拖拽排序。
 
 ## 项目结构
 
@@ -76,7 +79,7 @@ ControlPod/
 └─ AGENTS.md                  项目约束与维护说明（改代码前先读）
 ```
 
-`run-analytics/`、`dou-link/` 与 `apex-launcher/` 是 `D:\Projects` 下的独立 Git 仓库。项目代码、模块适配器、依赖和虚拟环境均归各自仓库维护；ControlPod 扫描直接子级 Git 仓库中的 `.apex/module.json`，负责发现、绑定、编排、权限提示和运行记录。运行时数据留在所属项目的本地 `data/`，不提交 Git。
+`run-analytics/`、`dou-link/` 与 `apex-launcher/` 是 `D:\Projects` 下的独立 Git 仓库。项目代码、模块适配器、依赖和虚拟环境均归各自仓库维护；ControlPod 扫描直接子级 Git 仓库中的 `.apex/module.json`，负责发现、绑定、编排、权限提示和运行记录。各项目的个人数据与生成物按自己的 `.gitignore` 排除。
 
 ## 模块仓库约定
 
