@@ -30,6 +30,8 @@ public sealed partial class LocalApi
     private readonly ProjectService _projects;
     private readonly ModuleService _modules;
     private readonly BootstrapService _bootstrap;
+    private readonly UpdateService? _updates;
+    internal bool HasActiveExecutions => _db.FetchAll("SELECT id FROM project_executions WHERE status IN ('queued','running') LIMIT 1").Count != 0;
 
     /// <summary>全部依赖可注入（自测）；生产默认按 ConsoleConfig 装配，
     /// web 打开走真 ShellExecute、应用启动复用 catalog。initOnStart=false 供自测
@@ -40,7 +42,7 @@ public sealed partial class LocalApi
         ExecutionService? execution = null, bool initOnStart = true,
         Func<string, bool>? webOpener = null, IConsoleWindowHost? windowHost = null,
         ActivityService? activity = null, ProjectService? projectService = null,
-        ModuleService? moduleService = null)
+        ModuleService? moduleService = null, UpdateService? updateService = null)
     {
         _db = db ?? new Db(ConsoleConfig.DbPath);
         _catalog = new ApplicationCatalog(_db, scanner);
@@ -53,6 +55,7 @@ public sealed partial class LocalApi
         _projects = projectService ?? new ProjectService(_db);
         _modules = moduleService ?? new ModuleService(_db, _catalog);
         _bootstrap = new BootstrapService(_db, _execution, _activity);
+        _updates = updateService;
         if (initOnStart && execution is null)
         {
             _db.Init();   // 生产语义与 main.py 一致：先 init 再同步/回收
@@ -201,6 +204,8 @@ public sealed partial class LocalApi
                 _ => null,
             };
             if (action is null) return null;   // 其它 POST /projects/... 未移植
+            if ((_updates ?? UpdateService.Shared).IsBusy)
+                throw new ExecutionBusyError("本地验证或更新正在进行，请完成后再操作项目");
             return new Reply(202, Json(_execution.Start(segments[1], action)));
         }
 
@@ -394,6 +399,36 @@ public sealed partial class LocalApi
 
             case ("PUT", "/settings/startup"):
                 return Task.FromResult(HandleStartupPut(body));
+
+            case ("GET", "/settings/updates"):
+                return Task.FromResult<Reply?>(new Reply(200, Json((_updates ?? UpdateService.Shared).Status())));
+
+            case ("PUT", "/settings/updates"):
+            {
+                using var doc = RequireJson(body);
+                var root = doc.RootElement;
+                if (root.ValueKind != JsonValueKind.Object
+                    || !root.TryGetProperty("dailyCheck", out var daily) || daily.ValueKind is not (JsonValueKind.True or JsonValueKind.False)
+                    || !root.TryGetProperty("autoUpdate", out var auto) || auto.ValueKind is not (JsonValueKind.True or JsonValueKind.False))
+                    throw new RequestInvalidError("dailyCheck 和 autoUpdate 必须是布尔值");
+                return Task.FromResult<Reply?>(new Reply(200, Json((_updates ?? UpdateService.Shared).Configure(daily.GetBoolean(), auto.GetBoolean()))));
+            }
+
+            case ("POST", "/settings/updates"):
+            {
+                using var doc = RequireJson(body);
+                if (doc.RootElement.ValueKind != JsonValueKind.Object || !doc.RootElement.TryGetProperty("mode", out var mode)
+                    || mode.ValueKind != JsonValueKind.String) throw new RequestInvalidError("mode 必须是字符串");
+                var target = "all";
+                if (doc.RootElement.TryGetProperty("target", out var selected))
+                {
+                    if (selected.ValueKind != JsonValueKind.String) throw new RequestInvalidError("target 必须是字符串");
+                    target = selected.GetString()!;
+                }
+                if (mode.GetString() is "test" or "update" && HasActiveExecutions)
+                    throw new ProjectConflictError("还有执行中的项目操作，请等待完成后再验证或更新");
+                return Task.FromResult<Reply?>(new Reply(202, Json((_updates ?? UpdateService.Shared).Start(mode.GetString()!, target))));
+            }
 
             case ("GET", "/window"):
                 return Task.FromResult<Reply?>(new Reply(200, Json(_windowHost.Status())));

@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using System.Text.Json;
 using System.Threading.Tasks;
 using Microsoft.UI;
 using Microsoft.UI.Dispatching;
@@ -1006,6 +1007,42 @@ public sealed partial class MainWindow : Window
                 }
                 else if (request.Command == "drag") _chrome.BeginDrag();
                 else if (request.Command == "toggle-maximize") _chrome.ToggleMaximize();
+                else if (request.Command == "restart")
+                {
+                    try
+                    {
+                        var restartApi = await _localApiTask;
+                        if (restartApi.HasActiveExecutions)
+                            throw new InvalidOperationException("还有执行中的项目操作，请等待完成后再重启");
+                        var status = await restartApi.HandleAsync("GET", "/settings/updates", null);
+                        if (status.Status != 200) throw new InvalidOperationException("无法确认更新状态，请稍后重试");
+                        using var doc = JsonDocument.Parse(status.Text);
+                        if (doc.RootElement.TryGetProperty("busy", out var busy) && busy.ValueKind == JsonValueKind.True)
+                            throw new InvalidOperationException("更新正在执行，请等待完成后再重启");
+                        if (doc.RootElement.TryGetProperty("state", out var state) && state.ValueKind == JsonValueKind.Object
+                            && state.TryGetProperty("phase", out var phase) && phase.GetString() == "pending")
+                            throw new InvalidOperationException("桌面更新已准备好，请点击退出并完成更新");
+                        RestartService.StartReplacement();
+                        OnDashCloseTapped(this, null!);
+                    }
+                    catch (Exception ex)
+                    {
+                        ShellLog.Log("restart rejected: " + ex.Message);
+                        _tray?.ShowToast("CPod 重启失败", ex.Message);
+                    }
+                }
+                else if (request.Command == "quit-for-update")
+                {
+                    var updateApi = await _localApiTask;
+                    var status = await updateApi.HandleAsync("GET", "/settings/updates", null);
+                    using var doc = JsonDocument.Parse(status.Text);
+                    if (doc.RootElement.TryGetProperty("state", out var state) && state.ValueKind == JsonValueKind.Object
+                        && state.TryGetProperty("phase", out var phase) && phase.GetString() == "pending")
+                    {
+                        if (updateApi.HasActiveExecutions) _tray?.ShowToast("ControlPod", "还有执行中的项目操作，请等待完成后再退出更新");
+                        else OnDashCloseTapped(this, null!);
+                    }
+                }
                 else if (request.Command == "theme")
                     SetShellTheme(request.Value == "dark" ? ShellTone.Dark : ShellTone.Light, persist: true);
                 else ShellLog.Log("chrome: 未知的 chrome-command " + request.Command);

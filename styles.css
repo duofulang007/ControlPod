@@ -103,6 +103,15 @@ textarea,
   --topbar-search-max:360px;  /* 搜索框宽度上限：腾出右侧空间给窗口组 / 偏好组，顶栏也留出可拖窗的空白 */
   --topbar-div:var(--line);   /* 顶栏组与组之间的细竖线 */
 
+  /* 更新小圈（侧栏 / 设置页按钮 / 卡片提醒三处共用）参数，保证三处进度环长得一模一样。
+     --upd-size   侧栏小圈直径
+     --upd-ring-w 环的描边粗细：用户要的是「粗线圈」而不是细发丝圈，
+                  所以 34px 的圈给 5px 描边（约占直径 1/7，视觉上是一枚实心环）
+     --upd-dur    进度追赶时长：宁可缓动也不要「进度条瞬移」的不真实感 */
+  --upd-size:34px;
+  --upd-ring-w:5;
+  --upd-dur:280ms;
+
   /* 窗口组（置顶 · 缩小到托盘 · 全屏）的交互动效：手感全部集中在这里，组件规则不硬写时长。
      --win-ease 是「快出慢收」的丝滑曲线，--win-ease-pop 给需要一点回弹的按下 / 脉冲。 */
   --win-ease:cubic-bezier(.22,1,.36,1);
@@ -135,7 +144,7 @@ textarea,
   --dash-heat-empty-h:64px;
   /* 方格圆角用百分比：跟着格子大小成正比，小格不会糊成圆点、大格不会显得太方 */
   --dash-heat-cell-r:22%;
-  /* 活跃度底色：单一蓝色系五档，只表达在线时长（0 = 未活跃浅灰，越深 = 在线越久）。
+  /* 活跃度底色：单一蓝色系，只表达在线时长（0 = 未活跃浅灰，越深 = 在线越久）。
      严禁在底色里掺红绿；代码增删只在悬停气泡里用色。 */
   --dash-heat-0:#EBEDF0;
   --dash-heat-1:#BFDBFE;
@@ -319,6 +328,36 @@ input,select{font:inherit;color:inherit}
 /* 应用页：整页锁死，滚动只发生在「全部应用」列表容器内部——索引条因此始终停在可视区 */
 .view.no-scroll{overflow:hidden}
 
+/* ---------- 设置页「ControlPod 更新」按钮：与侧栏小圈、卡片提醒同款进度环 ----------
+   同一个 --upd-* 参数家族、同一套描边语言，只是直径小一档。侧栏那枚管「全局在更」，
+   这枚管「这个平台的更新到哪一步」，卡片那枚管「这个项目的更新」。三处形状一致，
+   百分比统一只进悬停 title，界面上永远只有一枚环在说话。 */
+.btn-upd{display:inline-flex;align-items:center;gap:8px}
+.btn-upd .su-ring{position:static;width:18px;height:18px;flex:0 0 18px;transform:rotate(-90deg)}
+.btn-upd .su-track,.btn-upd .su-bar{stroke-width:3.4}
+.btn-upd .su-bar{stroke:var(--brand);transition:stroke-dashoffset var(--upd-dur) var(--win-ease)}
+.btn-upd.busy .su-track{stroke:var(--brand-line)}
+.btn-upd.busy{pointer-events:none}
+.btn-upd.ready{color:var(--brand);border-color:var(--brand-line)}
+@media (prefers-reduced-motion:reduce){.btn-upd .su-bar{transition:none}}
+
+/* 只给读屏用的文字：视觉上不出现，但保留在无障碍树里。 */
+.sr-only{position:absolute;width:1px;height:1px;margin:-1px;padding:0;overflow:hidden;
+  clip:rect(0 0 0 0);clip-path:inset(50%);white-space:nowrap;border:0}
+
+/* ---------- 卡片上的更新提醒：同一枚圆环，不是一块「有更新」文字标签 ---------- */
+.pjt-update{align-self:flex-start;margin-top:10px;position:relative;
+  width:22px;height:22px;flex:0 0 22px;border-radius:50%;
+  display:flex;align-items:center;justify-content:center;
+  background:var(--brand-soft);cursor:pointer;
+  transition:transform var(--win-dur-fast) var(--win-ease),background var(--win-dur-fast) ease}
+.pjt-update:hover{background:var(--brand-line);transform:scale(1.08)}
+.pjt-update:active{transform:scale(.94)}
+.pjt-update:focus-visible{outline:2px solid var(--brand);outline-offset:2px}
+.pjt-update .su-ring{position:absolute;inset:0}
+.pjt-update .su-track,.pjt-update .su-bar{stroke-width:3.4}
+.pjt-update .su-bar{stroke:var(--brand)}
+
 /* ---------- 侧边栏 ---------- */
 /* padding-top 比左右内边距各多 8px：让 brand 行顶在「主区内容起点」（侧栏 padding-top 8 + 这段 16
    = 24px；主区侧是 8px 保留区 + .main 的 --pad 20px 取较接近的值）。拖动带（.brand::before）
@@ -326,7 +365,7 @@ input,select{font:inherit;color:inherit}
 .brand{display:flex;align-items:center;gap:10px;min-width:0;position:relative;
   padding-top:calc(var(--side-pad) + 8px);
   /* isolation 把 .brand 变成独立层叠上下文：这样下面给子元素（.brand-header）的 z-index:1
-     只在本行内部比较，不会跑出去跟 .nav / .user（z-index:auto）按 DOM 顺序平起平坐。
+     只在本行内部比较，不会跑出去跟 .nav（z-index:auto）按 DOM 顺序平起平坐。
      缺了它就是 2026-09-26 那个事故：拖动带盖住整条导航，文字描述全部看不见。 */
   isolation:isolate}
 /* 侧栏顶棚的拖动带（顶栏那条 [data-drag] 的左边一截，同一个 data-drag 语义）：
@@ -346,22 +385,29 @@ input,select{font:inherit;color:inherit}
 .brand>div:not(.brand-header){position:relative;z-index:0}
 .brand .name{font-family:Inter,sans-serif;font-size:19px;font-weight:700;letter-spacing:-.2px;line-height:1.1}
 .brand .tag{font-size:10px;color:var(--ink-4);white-space:nowrap}
-/* ---------- 折叠态（.app.mini）：侧栏收成图标条 ----------
+/* 折叠态（.app.mini）：侧栏收成图标条
    规则集中在这里，避免分散隐藏导致遗漏与错位：
    1) brand 行只保留折叠按钮本身（.brand-header 里除它以外的子元素、以及品牌文字块）自动隐去；
    2) 导航项只留图标并水平居中；文字与数字徽标一并隐藏；
    3) 侧栏次级内容（分组小标题 / 用户名）整体隐藏。
-   注意 `.brand::before`（侧栏顶部拖动带）不在隐藏之列 —— 它是伪元素、不是子元素。 */
+   注意 `.brand::before`（侧栏顶部拖动带）不在隐藏之列 —— 它是伪元素、不是子元素。
+
+   **对齐（2026-10-03 修）**：折叠按钮曾比导航项左偏 4.5px —— 按钮宽 34px，
+   .brand 用 justify-content:center 让它居中于**整个侧栏**（中心 38），而导航项
+   （width:100%）居中于**去掉 --side-pad 的内容区**（16~59，中心 37.5）；两套基准不同。
+   现在折叠按钮改为与导航项同基准：撑满内容区宽（=100%）+ 自身居中，
+   于是 1~6 号控件（折叠按钮 / 导航项 / 分割线 / 更新小圈）中心 x 完全一致。 */
 .app.mini .brand{gap:0;justify-content:center;padding-top:0}
-.app.mini .brand-header{height:var(--brand-drag-h);flex:0 0 100%}
+/* 撑满内容区宽再由自身居中 —— 与 .nav-item（width:100%）用同一个基准，
+   不要用 justify-content:center 让它在整条侧栏里居中（那会让它偏左 4.5px）。 */
+.app.mini .side-mini{width:100%;flex:0 0 100%}
+.app.mini .brand-header{height:var(--brand-drag-h);flex:0 0 100%;justify-content:center}
 .app.mini .brand-header>*:not(.side-mini),
 .app.mini .brand>*:not(.brand-header){display:none}
 .app.mini .brand::before{bottom:0;height:var(--brand-drag-h)}
 .app.mini .side-label,
-.app.mini .nav-item span,
-.app.mini .user>div:last-child{display:none}
+.app.mini .nav-item span{display:none}
 .app.mini .nav-item{justify-content:center;padding:9px}
-.app.mini .user{justify-content:center}
 /* 折叠按钮本体：浅态位于侧栏左上角（brand 行最左），34px 方形与 30px logo 同高 */
 .side-mini{width:34px;height:34px;flex:0 0 34px;border-radius:10px}
 
@@ -388,11 +434,63 @@ input,select{font:inherit;color:inherit}
 
 .dot{width:7px;height:7px;border-radius:50%;flex:0 0 7px}
 
-.user{display:flex;align-items:center;gap:10px;padding-top:2px}
+/* 侧栏底部用户块（头像 + 昵称 + 在线状态）已删除，只留下 .avatar 供「设置 → 账号」复用 */
 .avatar{width:32px;height:32px;border-radius:50%;flex:0 0 32px;
   background:linear-gradient(135deg,#FA9A80,#D9737F)}
-.user .u-name{font-family:Inter,sans-serif;font-size:13px;font-weight:500;line-height:1.2}
-.user .u-sub{font-size:10px;color:var(--ink-4)}
+
+/* ---------- 更新小圈（有更新才出现） ----------
+   形态学 ChatGPT 侧栏的更新提示：一个小圆点，不占一行文字，点一下就能更新。
+   **小圈本身就是进度条**：外圈 SVG 画一条完整的轨道 + 一段随进度增长的弧，
+   弧长 = 周长 ×(1 - --upd-p/100)，所以「圈填满」= 「更新走完」，一个控件同时
+   承担「有更新 / 正在更新 / 更新好了」三种状态，不需要额外进度条控件。
+   空闲无更新时 HTML 上带 hidden，display:none 让开，不占侧栏纵向空间。 */
+.side-update{
+  position:relative;width:var(--upd-size);height:var(--upd-size);flex:0 0 var(--upd-size);
+  align-self:flex-start;margin:2px 0;border-radius:50%;
+  display:flex;align-items:center;justify-content:center;
+  background:var(--brand-soft);color:var(--brand-dark);
+  transition:transform var(--win-dur-fast) var(--win-ease),background var(--win-dur-fast) ease;
+}
+.side-update[hidden]{display:none}
+.side-update:hover{transform:scale(var(--win-pop))}
+.side-update:active{transform:scale(var(--win-press))}
+.side-update:focus-visible{outline:2px solid var(--brand);outline-offset:2px}
+/* 轨道：整圈底色。--upd-ring-r 只用于 JS 侧算周长，视觉上靠 stroke-width 定粗细 */
+.su-ring{position:absolute;inset:0;width:100%;height:100%;transform:rotate(-90deg);pointer-events:none}
+.su-track{fill:none;stroke:var(--brand-line);stroke-width:calc(var(--upd-ring-w) * 1px)}
+.su-bar{fill:none;stroke:var(--brand);stroke-width:calc(var(--upd-ring-w) * 1px);stroke-linecap:round;
+  stroke-dasharray:100.53;stroke-dashoffset:100.53;
+  transition:stroke-dashoffset var(--upd-dur) var(--win-ease),stroke var(--win-dur) ease}
+/* 中心图元：空闲=有更新时的下箭头；执行中留空（让环自己说话）。
+   圈内**不再放百分比** —— 34px 里塞数字又挤又假，百分比只给悬停 title。 */
+.su-glyph{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
+  pointer-events:none;color:var(--brand-dark)}
+.su-glyph svg{width:15px;height:15px}
+/* 有更新待确认：底色实一点，光标可点 */
+.side-update.ready{background:var(--brand-line)}
+/* 执行中：光标转等待、环随进度走；光标忙时不再缩放（缩放会和进度动画打架） */
+.side-update.busy{background:var(--tile);cursor:progress}
+.side-update.busy:hover,.side-update.busy:active{transform:none}
+.side-update.busy .su-glyph{display:none}
+/* 失败：环停在中途、整圈转红，一眼能看出「没走完」而不是「已完成」 */
+.side-update.failed .su-bar{stroke:var(--err)}
+.side-update.failed .su-track{stroke:var(--err-line)}
+.side-update.failed{background:var(--err-bg);color:var(--err)}
+.side-update.failed .su-glyph{color:var(--err)}
+/* 需要重启：整圈走满 + 品牌底色，和「还有更新」区分开 */
+.side-update.ready.su-done .su-bar{stroke-dashoffset:0}
+.side-update.ready.su-done{background:var(--brand);color:#fff}
+.side-update.ready.su-done .su-glyph{color:#fff}
+/* 折叠态：侧栏收成 76px 图标条，小圆点本身就是图形。
+   用 align-self:center 让它居中于**内容区**（与 .nav-item 同基准，中心 37.5），
+   而不是 justify-content:center（那会以整条侧栏 38 为基准，差 0.5px）。 */
+.app.mini .side-update{align-self:center;margin:2px auto}
+
+@media (prefers-reduced-motion:reduce){
+  .side-update,.su-bar{transition:none}
+  .side-update:hover,.side-update:active,.side-update.busy:hover{transform:none}
+}
+
 
 /* ---------- 顶栏 ---------- */
 /* min-width:0 让顶栏本身可缩（否则整条 .main 会被子项的最小内容宽顶住）；
@@ -660,6 +758,9 @@ input,select{font:inherit;color:inherit}
 .btn svg{width:16px;height:16px;flex:0 0 16px}
 .btn-primary{background:var(--brand);color:#fff;box-shadow:0 6px 16px rgba(232,64,42,.32)}
 .btn-primary:hover{background:var(--brand-dark)}
+.update-confirm-actions{display:flex;justify-content:flex-end;gap:8px}
+.update-error{overflow-wrap:anywhere}
+/* .pjt-update（卡片更新圆环）的规则统一放在更新小圈那一节，与侧栏 / 设置页同源 */
 .btn-primary:active{transform:scale(.97)}
 .btn-ghost{background:var(--card-strong);border:1px solid var(--line);color:var(--ink-2)}
 .btn-ghost:hover{border-color:var(--brand-line);color:var(--brand)}
@@ -733,6 +834,8 @@ button:focus-visible,input:focus-visible,.row:focus-visible,.tab:focus-visible{
 .heat-cell.h2{background:var(--dash-heat-2)}
 .heat-cell.h3{background:var(--dash-heat-3)}
 .heat-cell.h4{background:var(--dash-heat-4)}
+/* 连续色阶按当前视图最大时长混色；上面的分档色作为旧 WebView 降级。 */
+.heat-cell[style]{background:color-mix(in srgb,var(--dash-heat-1),var(--dash-heat-4) var(--heat-strength))}
 .heat-cell.today{box-shadow:0 0 0 1px var(--ink-2)}
 .heat-cell:hover{box-shadow:0 0 0 1px var(--ink-3)}
 /* 今天之后的格子：浅灰占位、不参与交互、JS 也不给它生成气泡 —— 未来日期不可能被悬停出来 */
@@ -1175,27 +1278,38 @@ svg{display:block}
   transition:left var(--motion-return) var(--ease-out),top var(--motion-return) var(--ease-out)}
 .pjt-card.is-parallax .pjt-main,.pjt-card.is-parallax .pjt-acts{transition-duration:var(--motion-press)}
 .pjt-copy-plane{display:flex;flex-direction:column;align-items:stretch;width:100%;min-width:0}
-.pjt-topline{display:flex;align-items:center;justify-content:space-between;gap:8px;min-width:0}
-.pjt-flow{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
-  font-size:10px;font-weight:700;letter-spacing:.09em;color:#35545b}
-.pjt-name{display:block;max-width:100%;margin-top:17px;font-size:30px;font-weight:780;letter-spacing:-.8px;line-height:1.08;color:#17343e;
+/* 项目名独占一行、独占全部宽度：它是卡面主角，不该和状态抢位。
+   （曾经把状态放在名字同一行，截图里长名字立刻被压成「APEX Automat…」。） */
+.pjt-name{display:block;max-width:100%;font-size:30px;font-weight:780;
+  letter-spacing:-.8px;line-height:1.12;color:#17343e;
   overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.pjt-live{display:inline-flex;align-items:center;gap:5px;flex:0 0 auto;font-size:10.5px;
-  color:#9b301f;background:rgba(255,255,255,.72);border-radius:var(--r-pill);padding:2px 8px}
-.pjt-live .dot{background:currentColor;animation:pjtPulse 1.5s ease-in-out infinite}
+/* 元信息行：状态 + 层级。两者语义同类（都在讲这个项目眼下怎么样），
+   合成一行而不是各占一处，卡面因此少一层结构、少一次视线跳跃。 */
+.pjt-meta{display:flex;align-items:center;gap:8px;flex-wrap:wrap;min-width:0;margin-top:11px}
+/* 状态：**胶囊底 + 圆点 + 文字**。胶囊而不是方块 —— 圆角矩形贴在山景上会显得像
+   一块补丁；border-radius 给到 --r-pill（999px）后无论多长都是标准胶囊形。
+   底色用状态自己的浅色（沿用 --st-* 的语义色系），圆点用深色，层次清楚。 */
+.pjt-state{display:inline-flex;align-items:center;gap:5px;flex:0 0 auto;white-space:nowrap;
+  height:22px;padding:0 10px 0 8px;border-radius:var(--r-pill);
+  font-size:11px;font-weight:600;letter-spacing:.01em;line-height:1;
+  color:#1c6b3f;background:rgba(22,163,74,.12)}
+.pjt-state-dot{width:7px;height:7px;flex:0 0 7px;border-radius:50%;background:currentColor}
+.pjt-state.pst-ok{color:#1c6b3f;background:rgba(22,163,74,.12)}
+.pjt-state.pst-dev{color:#1d4ed8;background:rgba(37,99,235,.12)}
+.pjt-state.pst-pause{color:#5b6472;background:rgba(107,114,128,.13)}
+/* 运行中：唯一的「活」态。圆点持续呼吸，文字沿用同一套排版，不另起一套样式语言。 */
+.pjt-state.pjt-live{color:#a8380f;background:rgba(232,64,42,.12)}
+.pjt-live .pjt-state-dot{animation:pjtPulse 1.5s ease-in-out infinite}
 @keyframes pjtPulse{0%,100%{opacity:1}50%{opacity:.32}}
-.pjt-desc{margin-top:9px;max-width:26ch;font-size:11.5px;line-height:1.4;color:#405b62;
+.pjt-desc{margin-top:9px;max-width:30ch;font-size:11.5px;line-height:1.4;color:#405b62;
   overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.pjt-bottom{display:flex;align-items:flex-end;justify-content:space-between;gap:12px;min-width:0;margin-top:auto;
+/* 层级信息（子项目 / 几个子项目）：与状态同行的次要信息，自身可省略让状态先站住。 */
+.pjt-relation{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+  font-size:10.5px;font-weight:500;line-height:1.25;color:#4a6a6a;letter-spacing:.01em}
+/* 底部只留运行控件：以前这里还塞着「启用模块 1/1」，一个与「运行项目」无关的数字
+   把主按钮挤到右边缘。现在操作区只做一件事 —— 启动，视觉重心回到唯一主动作。 */
+.pjt-bottom{display:flex;align-items:flex-end;justify-content:flex-end;gap:12px;min-width:0;margin-top:auto;
   padding-top:16px;color:#fff}
-.pjt-stat{display:flex;flex-direction:column;gap:4px;white-space:nowrap}
-.pjt-stat strong{font-size:29px;font-weight:760;letter-spacing:-1px;line-height:1}
-.pjt-stat strong small{font-size:13px;font-weight:600;letter-spacing:0}
-.pjt-stat span{font-size:10.5px;font-weight:600;color:rgba(255,255,255,.87)}
-.pjt-facts{display:flex;align-items:center;justify-content:space-between;gap:6px;min-height:18px;margin-top:9px;
-  font-size:10.5px;color:#33453d;line-height:1.25}
-.pjt-ready.ok{color:#255e50}.pjt-ready.warn{color:#805419}
-.pjt-relation{min-width:0;max-width:65%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:right}
 .pjt-run-controls{display:flex;flex:1;flex-wrap:wrap;justify-content:flex-end;gap:6px;min-width:0}
 .pjt-enter{min-width:112px;height:42px;border-radius:var(--r-pill);display:inline-flex;align-items:center;justify-content:center;gap:8px;
   padding:0 13px;background:#f4eacb;color:#17343e;font-size:12px;font-weight:700;
@@ -1205,27 +1319,28 @@ svg{display:block}
 .pjt-enter:hover:not(:disabled){background:#fff3d6;transform:translateY(-1px)}
 .pjt-enter:disabled{opacity:.55;cursor:not-allowed;box-shadow:none}
 .pjt-enter:focus-visible{outline:2px solid #17343e;outline-offset:2px}
-[data-theme="dark"] .pjt-flow{color:#adc7c8}
 [data-theme="dark"] .pjt-name{color:#eaf2f0}
 [data-theme="dark"] .pjt-desc{color:#b5cacc}
-[data-theme="dark"] .pjt-facts{color:#a7bdbc}
-[data-theme="dark"] .pjt-ready.ok{color:#9ad3be}
-[data-theme="dark"] .pjt-ready.warn{color:#e2bd80}
-[data-theme="dark"] .pjt-live{color:#a8e5bd;background:rgba(8,26,31,.52)}
-[data-theme="dark"] .pjt-topline .badge{background:rgba(8,26,31,.5)}
+[data-theme="dark"] .pjt-relation{color:#a2bdbe}
+[data-theme="dark"] .pjt-state.pst-ok{color:#7fd6a6;background:rgba(16,163,74,.18)}
+[data-theme="dark"] .pjt-state.pst-dev{color:#8fb4ff;background:rgba(37,99,235,.2)}
+[data-theme="dark"] .pjt-state.pst-pause{color:#9aa3b2;background:rgba(107,114,128,.2)}
+[data-theme="dark"] .pjt-state.pjt-live{color:#ff9c7a;background:rgba(232,64,42,.2)}
 [data-theme="dark"] .pjt-enter{background:#d6ded4;color:#17343e;box-shadow:0 4px 14px rgba(0,0,0,.24)}
 [data-theme="dark"] .pjt-enter:hover:not(:disabled){background:#edf2e8}
 @media (prefers-reduced-motion:reduce){
   .pjt-visual{transition:none!important;filter:none!important;left:0!important;top:0!important}
   .pjt-main,.pjt-acts{transition:none!important;left:0!important;top:0!important}
   .pjt-enter:hover{transform:none}
+  .pjt-live .pjt-state-dot{animation:none}
 }
 /* 操作控件覆盖在同一张山景卡片的下沿，与进入区域各自处理点击。
-   min-width:0 允许窄卡里 flex-wrap 正常生效。 */
+   原来这一行左侧还有一枚「项目管理」文字标签 —— 它只是给右边四个图标复述了一遍
+   （aria-label 已经说了「项目管理操作」），既占位置又制造视觉噪音，直接去掉。
+   图标组改为撑满整行右对齐，形成一条安静的底部工具条。 */
 .pjt-acts{position:relative;z-index:6;display:flex;align-items:center;gap:10px;flex-wrap:wrap;row-gap:6px;min-width:0;
-  left:0;top:0;padding:9px 20px 24px;background:transparent;
+  left:0;top:0;padding:6px 20px 18px;background:transparent;
   transition:left var(--motion-return) var(--ease-out),top var(--motion-return) var(--ease-out)}
-.pjt-acts-label{font-size:10.5px;font-weight:600;color:rgba(255,255,255,.75)}
 .pjt-start,.pjt-stop,.pjt-restart{min-width:76px;justify-content:center;gap:5px}
 .pjt-start{background:var(--brand);color:#fff;box-shadow:0 6px 16px rgba(232,64,42,.28)}
 .pjt-start:hover{background:var(--brand-dark)}
@@ -1791,15 +1906,18 @@ svg{display:block}
 @media (max-width:1199.98px){
   .app{grid-template-columns:76px minmax(0,1fr)}
   .app:not(.mini):not(.side-flyout) .brand{gap:0;justify-content:center;padding-top:0}
-  .app:not(.mini):not(.side-flyout) .brand-header{height:var(--brand-drag-h);flex:0 0 100%}
+  /* 与 .app.mini 同理：折叠按钮撑满内容区宽再由自身居中，避免比导航项偏左 4.5px */
+  .app:not(.mini):not(.side-flyout) .side-mini{width:100%;flex:0 0 100%}
+  .app:not(.mini):not(.side-flyout) .brand-header{height:var(--brand-drag-h);flex:0 0 100%;justify-content:center}
   .app:not(.mini):not(.side-flyout) .brand-header>*:not(.side-mini),
   .app:not(.mini):not(.side-flyout) .brand>*:not(.brand-header){display:none}
   .app:not(.mini):not(.side-flyout) .brand::before{bottom:0;height:var(--brand-drag-h)}
   .app:not(.mini):not(.side-flyout) .side-label,
-  .app:not(.mini):not(.side-flyout) .nav-item span,
-  .app:not(.mini):not(.side-flyout) .user>div:last-child{display:none}
+  .app:not(.mini):not(.side-flyout) .nav-item span{display:none}
   .app:not(.mini):not(.side-flyout) .nav-item{justify-content:center;padding:9px}
-  .app:not(.mini):not(.side-flyout) .user{justify-content:center}
+  /* 更新小圈在 W1 自动折叠下同样要居中于内容区（基础规则是 align-self:flex-start，
+     不覆盖的话它会贴左边，中心 33 而非 37.5 —— 与 .app.mini 下的表现不一致）。 */
+  .app:not(.mini):not(.side-flyout) .side-update{align-self:center;margin:2px auto}
   /* 手动展开（点折叠按钮）：侧栏以 240px 浮层临时覆盖主区，内容完整可读；主区占满全宽不受挤压 */
   .app.side-flyout{grid-template-columns:minmax(0,1fr)}
   .app.side-flyout .sidebar{position:fixed;left:0;top:0;bottom:0;z-index:60;width:240px;box-shadow:var(--sh-lg)}

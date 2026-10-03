@@ -279,6 +279,13 @@ const S = {
   startupLoading:false,
   startupUpdating:false,
   startupError:'',
+  updates:null,
+  updateError:'',
+  updateRequestBusy:false,
+  updateRequestTarget:null,
+  updatePanel:null,
+  updateOperation:null,
+  updateNotified:'',
   windowState:{available:false, topmost:false},
   windowUpdating:false,
   windowError:'',
@@ -748,7 +755,7 @@ function addActivity(text, proj, icoName, color, kind){
 }
 
 /* ---------------- 总控台（首页）· 开发者活跃度热力图 ----------------
-   底色只表达一件事：在线时长（单一蓝色系五档，不掺红绿）；代码新增/删减只出现在悬停气泡里。
+   底色只表达一件事：在线时长（单一蓝色系连续深浅，不掺红绿）；代码新增/删减只出现在悬停气泡里。
    数据全部来自后端真实聚合：控制台在线分钟数（页面每分钟心跳上报）
    + 全局代码目录 git 仓库的新增/删减行数，前端把 date→计数对齐到 13 周窗口。
    布局是纯 CSS Grid 自适应卡宽（1fr 列 + 格子用 ::before 撑正方形），不由 JS 算格子尺寸：
@@ -780,7 +787,7 @@ function buildHeatPayload(rows){
   return { counts: list, detail };
 }
 function heatLevel(count){
-  /* 在线分钟对数五档：0 / 1-9 / 10-99 / 100-999 / 1000+（分钟跨度大，线性分档会糊成一片） */
+  /* 对数档仅作不支持 color-mix 的旧 WebView 降级；正常底色使用连续强度。 */
   return count > 0 ? Math.min(4, Math.floor(Math.log10(count)) + 1) : 0;
 }
 /* ---- 三口径聚合：输入卡片窗内「每天」的原始序列，输出每一格该上的数 ----
@@ -844,12 +851,16 @@ function dashboardHeatmapHTML(counts){
     adds: heatSeries(records.map(r => r.adds), mode),
     dels: heatSeries(records.map(r => r.dels), mode)
   };
+  /* 每种口径独立按可见的已发生日期归一化：最长时长最深，0 分钟保持灰色。
+     连续混色避免 100–999 分钟全部挤在同一档，代码行数不参与颜色计算。 */
+  const maxOnline = Math.max(1, ...series.online.filter((_, i) => records[i].day <= today));
   const todayIndex = HEAT_CARD_CELLS - 7 + (today.getDay() + 6) % 7;   /* 今天落在末列 */
   const cells = records.map((rec, i) => {
     /* 未来格：浅灰、不可交互、不生成气泡 —— 从结构上杜绝出现未来日期 */
     if (rec.day > today) return `<span class="heat-cell future" aria-hidden="true"></span>`;
     const label = `${heatDayLabel(rec.day)} · 在线${series.online[i]}分钟 · +${series.adds[i]} / -${series.dels[i]}`;
-    return `<span class="heat-cell h${heatLevel(series.online[i])}${i === todayIndex ? ' today' : ''}" aria-label="${label}">${heatTipHTML(rec, i, mode, series)}</span>`;
+    const color = series.online[i] > 0 ? ` style="--heat-strength:${100 * series.online[i] / maxOnline}%"` : '';
+    return `<span class="heat-cell h${heatLevel(series.online[i])}${i === todayIndex ? ' today' : ''}"${color} aria-label="${label}">${heatTipHTML(rec, i, mode, series)}</span>`;
   }).join('');
   /* 月份刻度：只在月份切换处打标，与格子共用同一套列模板（天然逐列对齐）。两道约束——
      ①「残月」不打标：13 周窗的左端常是个只剩 1 列的月底，给它打标会把紧随的整月挤掉
@@ -3174,15 +3185,21 @@ function viewProjects(){
 
 /* 单张完整项目卡：主按钮直接运行，铅笔进入完整详情查看和编辑。 */
 function projTileHTML(w){
-  const prep = preflight(w);
   const parent = projParentOf(w);
   const kidCount = projKids(w.id).length;
   const live = projIsRunning(w.id) || projIsStarted(w.id);
-  const on = w.steps.filter(s => s.on).length;
   const accent = /^#[0-9a-fA-F]{6}$/.test(w.color) ? w.color : '#536780';
   const scene = [...String(w.id)].reduce((hash, char) => (hash * 31 + char.charCodeAt(0)) >>> 0, 0) % 3;
   const statusClass = ['pst-ok', 'pst-dev', 'pst-pause'].includes(w.stCls) ? w.stCls : 'pst-pause';
   const relation = parent ? `子项目 · ${esc(parent.name)}` : kidCount ? `${kidCount} 个子项目` : '';
+  /* 状态不再和项目名挤在同一行。
+     试过「名字 + 状态同行」，截图后发现长项目名会被状态挤成「APEX Automat...」——
+     名字是卡面主角，让配角来抢它的宽度是本末倒置。
+     现在状态下沉到描述下方，和层级信息并成一条「元信息行」：语义上它们是一类东西
+     （都在讲这个项目怎么了），视觉上也不干扰项目名。 */
+  const stateChip = live
+    ? '<span class="pjt-state pjt-live"><i class="pjt-state-dot"></i>运行中</span>'
+    : `<span class="pjt-state ${statusClass}"><i class="pjt-state-dot"></i>${esc(w.st)}</span>`;
   return `<article class="pjt-card" data-id="${esc(w.id)}" data-scene="${scene}" style="--pjt-accent:${accent}">
     <div class="pjt-visual" aria-hidden="true">
     <div class="pjt-scene" aria-hidden="true">
@@ -3195,25 +3212,19 @@ function projTileHTML(w){
     </div>
     <div class="pjt-main">
       <div class="pjt-copy-plane">
-      <div class="pjt-topline">
-        <span class="pjt-flow">${esc(flowNameOf(w))}</span>
-        ${live ? `<span class="pjt-live"><span class="dot"></span>运行中</span>`
-          : `<span class="badge ${statusClass}">${esc(w.st)}</span>`}
-      </div>
       <span class="pjt-name">${esc(w.name)}</span>
       <span class="pjt-desc">${esc(w.desc)}</span>
-      <div class="pjt-facts">
-        <span class="pjt-ready ${prep.ready ? 'ok' : 'warn'}">${prep.ready ? '预备就绪' : prep.issues.length + ' 项待处理'}</span>
+      <div class="pjt-meta">
+        ${stateChip}
         ${relation ? `<span class="pjt-relation">${relation}</span>` : ''}
       </div>
       </div>
+      ${projectUpdateChipHTML(w)}
       <div class="pjt-bottom">
-        <div class="pjt-stat"><span>启用模块</span><strong>${on}<small> / ${w.steps.length}</small></strong></div>
         <div class="pjt-run-controls">${projectRunControlsHTML(w, true, true)}</div>
       </div>
     </div>
     <div class="pjt-acts">
-      <span class="pjt-acts-label">项目管理</span>
       <div class="pjt-icons" role="group" aria-label="项目管理操作">
         <button class="pjt-i" data-act="dupProject" data-id="${esc(w.id)}" title="复制项目（含执行模块）" aria-label="复制项目">${IC.copy('currentColor')}</button>
         <button class="pjt-i" data-act="refreshProj" data-id="${esc(w.id)}" title="刷新：重新执行预备检查并清空临时状态" aria-label="刷新项目">${IC.reset('currentColor')}</button>
@@ -4021,6 +4032,230 @@ function confirmBasicInfo(id){
 }
 
 /* ---------------- 设置页 ---------------- */
+let updatePollTimer = null;
+let updatePollBusy = false;
+const updateSessionStarted = Date.now();
+async function loadUpdateState(){
+  if (!IN_SHELL || updatePollBusy || S.updateRequestBusy) return;
+  updatePollBusy = true;
+  const previous = JSON.stringify([S.updates, S.updateError]);
+  try {
+    S.updates = await apiRequest('/settings/updates');
+    S.updateError = '';
+    handleUpdateState();
+  } catch (err) { S.updateError = err.message || '无法读取更新状态'; }
+  finally { updatePollBusy = false; }
+  if (previous !== JSON.stringify([S.updates, S.updateError]) && ['settings','projects','home','workflows'].includes(S.page)) render(true);
+  /* 侧栏小圈在任何页面都要跟着走：轮询拿到新状态后无条件同步一次。
+     不能只靠 render() —— 后台自动检查可能在「模块」这类不在白名单的页面上推进进度，
+     那样小圈会停在原地不动，用户以为卡住了。 */
+  else syncSideUpdate();
+  if (!updatePollTimer) updatePollTimer = setInterval(() => { void loadUpdateState(); }, 5000);
+}
+async function updateAction(mode, target='controlpod'){
+  if (S.updateRequestBusy || !IN_SHELL || (S.updates && S.updates.busy)) return;
+  S.updateOperation={mode,target};
+  S.updateRequestBusy = true; S.updateRequestTarget = target; S.updateError = ''; render(true);
+  try {
+    S.updates = await apiRequest('/settings/updates', {method:'POST', body:JSON.stringify({mode, target})});
+  } catch (err) {
+    S.updateOperation=null;
+    S.updateError = err.message || '无法开始更新';
+    toast(S.updateError);
+  } finally {
+    S.updateRequestBusy = false; S.updateRequestTarget = null;
+    handleUpdateState(); render(true); void loadUpdateState();
+  }
+}
+async function completeUpdate(){
+  if (S.updateRequestBusy || !IN_SHELL || (S.updates && S.updates.busy)) return;
+  S.updateRequestBusy = true; S.updateError = ''; render(true);
+  try {
+    await apiRequest('/settings/updates', {method:'POST', body:JSON.stringify({mode:'apply'})});
+    quitForUpdate();
+  } catch (err) { S.updateError = err.message || '无法完成更新'; toast(S.updateError); }
+  finally { S.updateRequestBusy = false; render(true); }
+}
+const UPDATE_PROJECTS = {'apex-launcher':['apex-launcher','APEX 一键启动'],'dou-link':['dou-link','抖音链接气泡'], 'runner-lab':['run-analytics','跑步数据分析'], 'bili-peek':['Bili-Peek','Bili-Peek']};
+function projectUpdateTargets(w){
+  return [...new Set((w.steps || []).map(step => step.moduleId).filter(id=>UPDATE_PROJECTS[id]))].map(id=>UPDATE_PROJECTS[id]);
+}
+function updateResult(target){
+  const u=S.updates;
+  if(target==='controlpod') return u && (u.platform || (u.state && !['external','apex-launcher','dou-link','run-analytics','Bili-Peek'].includes(u.state.target) ? u.state : null));
+  return u && u.external && Array.isArray(u.external.projects) ? u.external.projects.find(p=>p.id===target) : null;
+}
+function updateAvailable(result){
+  return !!(result && ['checked','tested','failed'].includes(result.phase) && result.changes && result.changes.length);
+}
+/* 更新进度：把后端 phase 换算成 0~100。
+   **只在真正执行中才有进度** —— 这是修正过的一个错：早先把 checked/tested/pending 这些
+   终态一律映射成 100，于是「有更新但还没开始」的空圈被画成满圈，看着永远 100%。
+   现在非执行态一律 0（空圈 = 待命），执行态按后端真实阶段推进：
+   running → testing → building → installing → 收尾。后端只汇报阶段、不汇报字节数，
+   所以按阶段等分是诚实口径；不认识的 phase 给 0，不猜。 */
+const UPDATE_PHASE_STEPS = ['running', 'testing', 'building', 'installing'];
+function updateProgress(result, busy){
+  if(!busy || !result) return 0;
+  /* 优先读后端上报的真值（tools/update-local.ps1 的 State() 写入 progress 字段）：
+     耗时最长的两个复制循环按「已复制/总数」连续上报，三次外部子进程各算一整步
+     （外部程序不吐进度，不编造假爬升）。只有旧状态文件没有该字段时才退回阶段估算。 */
+  if(typeof result.progress === 'number' && isFinite(result.progress)) return Math.max(0, Math.min(100, Math.round(result.progress)));
+  if(result.phase === 'failed') return 100;              // 失败也是走到底了，环走满并转红
+  if(['pending','updated'].includes(result.phase)) return 100;
+  const i = UPDATE_PHASE_STEPS.indexOf(result.phase);
+  return i < 0 ? 0 : Math.round(((i + 1) / UPDATE_PHASE_STEPS.length) * 100);
+}
+function updateBusyNow(){
+  return !!(S.updateRequestBusy || (S.updates && S.updates.busy));
+}
+function updateStateNow(){
+  const busy = updateBusyNow();
+  const result = updateResult('controlpod');
+  const progress = updateProgress(result, busy);
+  if(busy) return { busy:true, failed:false, progress, restart:false,
+    label:(S.updateOperation && S.updateOperation.mode==='update') ? '正在更新' : '正在检查', result };
+  if(!result) return { busy:false, failed:false, progress:0, restart:false, label:'', result:null };
+  const restart = platformNeedsRestart(result);
+  const failed = result.phase === 'failed';
+  return { busy:false, failed, progress, restart,
+    label: failed ? '更新失败' : restart ? '需要重启' : updateAvailable(result) ? '有可用更新' : '已是最新', result };
+}
+/* 侧栏小圈进度环：r=16 → 周长 2π×16 ≈ 100.53，弧长 = 周长 ×(1 - 进度)。
+   dasharray 由 CSS 的 .su-bar 常驻提供，这里只推进 dashoffset。 */
+const UPD_CIRC = 100.53;
+function updateRingSVG(){
+  return '<svg aria-hidden="true" class="su-ring" viewBox="0 0 40 40">'
+    + '<circle class="su-track" cx="20" cy="20" r="16"></circle>'
+    + '<circle class="su-bar" cx="20" cy="20" r="16"></circle></svg>';
+}
+const UPD_GLYPH_DOWN = '<svg fill="none" viewBox="0 0 24 24"><path d="M12 4.5v11" stroke="currentColor" stroke-linecap="round" stroke-width="2.2"/><path d="M7 11.5l5 5 5-5" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2.2"/><path d="M5 19.5h14" stroke="currentColor" stroke-linecap="round" stroke-width="2.2"/></svg>';
+const UPD_GLYPH_RESTART = '<svg fill="none" viewBox="0 0 24 24"><path d="M4.5 12a7.5 7.5 0 1 0 2.2-5.3" stroke="currentColor" stroke-linecap="round" stroke-width="2.2"/><path d="M4.5 4.5V9H9" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2.2"/></svg>';
+function updateDashOffset(p){
+  return (UPD_CIRC * (1 - Math.max(0, Math.min(100, p)) / 100)).toFixed(2);
+}
+function applyRingProgress(node, p){
+  const bar = node && node.querySelector ? node.querySelector('.su-bar') : null;
+  if(!bar || !bar.style) return null;
+  bar.style.strokeDashoffset = updateDashOffset(p);
+  return bar.style.strokeDashoffset;
+}
+/* 侧栏小圈的显示条件：执行中、失败、有更新、待重启 —— 任一成立才出现；
+   其余（含「已是最新」和「还没读过状态」）一律 hidden，不在侧栏留空位。 */
+function sideUpdateVisible(st){
+  return !!(st.busy || st.failed || st.restart || (st.result && updateAvailable(st.result)));
+}
+function syncSideUpdate(){
+  const btn = $('#sideUpdate');
+  if(!btn) return null;
+  const st = updateStateNow();
+  const show = sideUpdateVisible(st);
+  btn.hidden = !show;
+  if(!show) return null;
+  btn.classList.toggle('busy', st.busy);
+  btn.classList.toggle('failed', !st.busy && st.failed);
+  btn.classList.toggle('ready', !st.busy && !st.failed && (st.restart || !!(st.result && updateAvailable(st.result))));
+  btn.classList.toggle('su-done', !st.busy && (st.restart || st.failed));
+  /* 百分比只活在悬停提示里：34px 的圈里塞数字又挤又假（用户明确要求只在悬停时看到）。
+     空闲时标题就是状态文案，不硬塞一个「0%」。 */
+  btn.title = st.busy ? st.label + ' ' + st.progress + '%' : st.label;
+  if(btn.setAttribute) btn.setAttribute('aria-label', 'ControlPod 更新：' + st.label);
+  const glyph = $('#sideUpdateGlyph');
+  applyRingProgress(btn, st.progress);
+  if(glyph) glyph.innerHTML = st.busy ? '' : (st.restart || st.failed ? UPD_GLYPH_RESTART : UPD_GLYPH_DOWN);
+  return st;
+}
+function platformNeedsRestart(result){
+  return !!(result && (result.phase==='pending' || result.phase==='restart-required' ||
+    (result.phase==='updated' && Date.parse(result.at) >= updateSessionStarted)));
+}
+function projectUpdateChipHTML(w){
+  const target=projectUpdateTargets(w).find(([key])=>updateAvailable(updateResult(key)));
+  if(!target) return '';
+  /* 卡片上的更新提醒也用同一枚圆环，而不是一块「有更新」文字标签：
+     环 = 图形化进度，与侧栏小圈、设置页按钮三处同款；空环表示「还没开始」，
+     标题里给百分比。圈本身可点，点了走同一个确认入口。 */
+  return '<button class="pjt-update" data-act="projectMaintenance" data-id="'+esc(w.id)+'" data-v="'+esc(target[0])+'"'
+    + ' title="'+esc(w.name)+'有可用更新" aria-label="'+esc(w.name)+'有可用更新">'
+    + '<svg aria-hidden="true" class="su-ring" viewBox="0 0 40 40">'
+    + '<circle class="su-track" cx="20" cy="20" r="16"></circle>'
+    + '<circle class="su-bar" cx="20" cy="20" r="16" style="stroke-dashoffset:'+updateDashOffset(0)+'"></circle></svg>'
+    + '<span class="sr-only">有更新</span></button>';
+}
+function askUpdate(target='controlpod'){
+  if(S.updateRequestBusy || !S.updates || S.updates.busy || !S.updates.available) return;
+  const result=updateResult(target), restart=target==='controlpod' && platformNeedsRestart(result);
+  if(!restart && !updateAvailable(result)){ void updateAction('check',target); return; }
+  /* 已经准备好新版、只差重启时**不再问**：用户点的本身就是「更新 / 重启」这一个意图，
+     更新也已经通过测试，再弹一次「现在重启吗」等于同一个决定问两遍。
+     直接重启；替换版走 completeUpdate（它内部才真正退出并拉起替换工具）。 */
+  if(restart){ restartAfterUpdate(result); return; }
+  const name=target==='controlpod'?'ControlPod':Object.values(UPDATE_PROJECTS).find(([key])=>key===target)?.[1] || target;
+  S.updatePanel={target,mode:'update'};
+  openModal(mHead('发现可用更新',name+' 有更新，现在更新吗？')+
+    '<div class="nm-acts update-confirm-actions"><button class="btn btn-ghost" data-act="closeModal">稍后</button><button class="btn btn-primary" data-act="confirmUpdate">更新</button></div>',{form:true});
+  $('#noteModal [data-act="closeModal"]').focus();
+}
+/* 重启落地：待安装（pending）走 apply → quit-for-update，让替换工具接管；
+   其余（界面已同步等）直接壳内重启。两条路径都要「真的重启」，不询问。 */
+function restartAfterUpdate(result){
+  if(!IN_SHELL || S.updateRequestBusy) return;
+  closeModal();
+  if(result && result.phase === 'pending'){ void completeUpdate(); return; }
+  shellChromeCommand('restart');
+}
+function confirmUpdate(){
+  const panel=S.updatePanel;
+  if(!panel || S.updateRequestBusy || !IN_SHELL || !S.updates || S.updates.busy) return;
+  closeModal();
+  if(panel.mode==='restart'){
+    const result=updateResult('controlpod');
+    if(!platformNeedsRestart(result)) return;
+    restartAfterUpdate(result);
+  } else if(updateAvailable(updateResult(panel.target))) void updateAction('update',panel.target);
+}
+function projectMaintenance(id, target){
+  const w=DATA.projects.find(p=>p.id===id);
+  if(w && projectUpdateTargets(w).some(([key])=>key===target)) askUpdate(target);
+}
+function handleUpdateState(){
+  const u=S.updates;
+  if(!u || u.busy || S.updateRequestBusy) return;
+  const op=S.updateOperation;
+  if(op){
+    S.updateOperation=null;
+    const result=updateResult(op.target), state=u.state;
+    if((state && state.phase==='failed') || (result && result.phase==='failed')){
+      S.updateError=(state && state.phase==='failed'?state.message:result.message) || '更新失败';
+      toast(S.updateError);
+    } else if(op.mode==='check'){
+      if(updateAvailable(result)) askUpdate(op.target);
+      else toast('没有可用更新');
+    } else if(op.target==='controlpod' && platformNeedsRestart(result)) restartAfterUpdate(result);
+    else toast(result && ['restart-required','action-required'].includes(result.phase) ? result.message : '更新完成');
+  }
+  const projects=u.external && Array.isArray(u.external.projects)?u.external.projects.filter(updateAvailable):[];
+  const key=JSON.stringify(projects.map(p=>[p.id,p.changes]));
+  if(projects.length && key!==S.updateNotified) toast(projects.length+' 个项目有更新');
+  S.updateNotified=key;
+}
+function updateSettingsHTML(){
+  const u=S.updates, result=updateResult('controlpod');
+  const busy=S.updateRequestBusy || (u && u.busy);
+  const restart=platformNeedsRestart(result);
+  const label=busy?(S.updateOperation && S.updateOperation.mode==='update'?'更新中…':'检查中…'):restart?'重启以完成更新':updateAvailable(result)?'更新':'检查更新';
+  const error=S.updateError || (result && result.phase==='failed'?result.message:'');
+  /* 按钮内嵌与侧栏小圈、卡片提醒同款的圆环。百分比不进界面，只进 title ——
+     三处进度环因此读法一致：看圈，悬停看数字。 */
+  const st=updateStateNow();
+  const ring=updateRingSVG().replace('class="su-bar"','class="su-bar" style="stroke-dashoffset:'+updateDashOffset(st.progress)+'"');
+  const tip=st.busy ? label+' '+st.progress+'%' : label;
+  return '<div class="set-row"><div class="s-txt"><div class="s-t">ControlPod 更新</div>'+
+    (error?'<div class="s-d update-error" role="status">'+esc(error)+'</div>':'')+
+    '</div><button class="btn btn-ghost btn-upd'+(busy?' busy':'')+(updateAvailable(result)?' ready':'')+
+    '" data-act="checkUpdate" title="'+esc(tip)+'" '+(!IN_SHELL || !u || !u.available || busy?'disabled':'')+' aria-live="polite">'+
+    ring+'<span>'+label+'</span></button></div>';
+}
 function viewSettings(){
   const sw = (label, desc, on, key) => `
     <div class="set-row">
@@ -4082,6 +4317,7 @@ function viewSettings(){
       ${sw('桌面通知','脚本运行完成或失败时推送系统通知', S.notify, 'notify')}
       ${sw('自动保存','编辑中的文件每 30 秒自动落盘', S.save, 'save')}
       ${sw('使用数据统计','匿名上报崩溃与性能数据', S.telemetry, 'telemetry')}
+      ${updateSettingsHTML()}
     </section>
     <section class="card">
       <div class="card-head">
@@ -4183,6 +4419,7 @@ function render(keepScroll){
   $('#cntApps').textContent = S.apps.length;
   $('#cntWf').textContent = DATA.projects.length;
   $('#bellBadge').style.display = S.notices.some(n=>!n.read) ? 'block' : 'none';
+  syncSideUpdate();
   if (S.page === 'apps'){ fitAppList(); const ctl = initInertialScroll(); if (ctl) ctl.refresh(); }
   // 应用页：渲染后锁「一屏整数行」，滚动由自管物理惯性驱动（见 initInertialScroll）
   if (S.page === 'projects'){
@@ -4465,6 +4702,7 @@ function openModal(html, opts){
    内容却已经没了，只剩 20px 上下内边距，屏幕上就留一条 760×42 的空白横条。
    内容与模式类都不用在这里清：openModal() 每次都会重写 innerHTML 并重新 toggle。 */
 function closeModal(){
+  S.updatePanel=null;
   const m = $('#noteModal'), k = $('#noteModalMask');
   if (m) m.classList.remove('on');
   if (k) k.classList.remove('on');
@@ -5327,6 +5565,10 @@ document.addEventListener('click', e => {
     case 'alphaJump': alphaJump(v); break;                          // 字母索引条：平滑滚动定位到该分组（列表内容不变）
     case 'askWorkflows': closePalette(); go('projects'); break;
     case 'theme':    setTheme(v === 'dark' ? 'dark' : 'light', e); break;
+    case 'checkUpdate': askUpdate(); break;
+    case 'confirmUpdate': confirmUpdate(); break;
+    case 'projectMaintenance': projectMaintenance(id, v); break;
+
     case 'accent': {
       S.accent = v;
       applyAccent(v);
@@ -5755,7 +5997,7 @@ function scrollPal(){
     startRuntimePoll();
   };
   if (typeof fetch === 'function') void loadBackendState().then(async () => {
-    await Promise.all([loadStartupSetting(), loadConsoleWindowState()]);
+    await Promise.all([loadStartupSetting(), loadConsoleWindowState(), loadUpdateState()]);
     finish();
   });
   else finish();

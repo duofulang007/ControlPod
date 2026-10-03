@@ -6,8 +6,10 @@ const path = require('path');
 
 function el(){
   return {
-    innerHTML:'', textContent:'', value:'', id:'', disabled:false,
-    style:{ setProperty(){}, width:'', display:'', opacity:'', transform:'', transition:'', left:'', top:'' },
+    innerHTML:'', textContent:'', value:'', id:'', disabled:false, hidden:false, title:'',
+    /* style 里显式列出 strokeDashoffset：更新进度环靠它断言「环走了多少」，
+       不预置的话属性虽然能动态挂上，但拼装时的疏漏会静默变 undefined。 */
+    style:{ setProperty(){}, width:'', display:'', opacity:'', transform:'', transition:'', left:'', top:'', strokeDashoffset:'' },
     dataset:{}, classList:{ add(){}, remove(){}, toggle(){}, contains(){ return false; } },
     addEventListener(){}, appendChild(){}, insertAdjacentHTML(){}, remove(){}, focus(){}, click(){},
     scrollIntoView(){}, scrollTop:0, scrollHeight:0,
@@ -59,7 +61,8 @@ vm.createContext(ctx);
 let src = fs.readFileSync(path.join(__dirname, 'web/shell-bridge.js'), 'utf8') + '\n'
   + fs.readFileSync(path.join(__dirname, 'app.js'), 'utf8');
 src += `\nglobalThis.__T = { viewHome, viewApps, viewProjects, viewModules, viewWorkflows, viewSettings, appIconHTML,
-  buildPalette, aiZone, aiReply, startRun, advanceRun, addStep, openNote, noteModalHTML, closeNoteModal,
+  buildPalette, aiZone, aiReply, startRun, advanceRun, addStep, openNote, noteModalHTML, closeNoteModal, updateSettingsHTML, projectUpdateChipHTML, askUpdate, confirmUpdate, handleUpdateState,
+  updateProgress, updateBusyNow, updateStateNow, sideUpdateVisible, syncSideUpdate, applyRingProgress, updateDashOffset, updateRingSVG, UPD_CIRC,
   openModal, closeModal,
   preflight, startVoice, stopVoice, useVoice, launch, render, S, DATA, WF_SEED, fuzzyMatch,
   buildHeatPayload, heatLevel, dashboardHeatmapHTML, heatSeries, heatWeeklySeries, heatCumulativeSeries, heatCardRecords, heatTipHTML,
@@ -227,16 +230,32 @@ try {
   check(!html.includes('role="button"') && !html.includes('data-act="pickWf"')
     && (html.match(/<button class="pjt-i" data-act="enterProj"/g) || []).length === T.DATA.projects.length,
     '铅笔进入完整详情，卡面空白不触发进入');
-  /* 卡面保留身份、模块与预备状态，去掉原先密集的标签排。 */
+  /* 卡面精简（2026-10-03）：去掉流程名 / 预备就绪 / 启用模块计数 / 「项目管理」标签
+     这些无意义文字后，卡面只剩「名字 + 状态 + 一句话 + 层级 + 运行」五件事。
+     负向断言要卡得准：`pjt-state` 里含子串「pjt-stat」，「项目管理」还合法存在于
+     aria-label（读屏用，不是可见文字）—— 所以按可见标签与精确 class 名来判。 */
   const w0 = T.DATA.projects[0];
-  check(html.includes('APEX 一键启动') && html.includes('深度开发') && html.includes('日常助理'),
-    '卡面展示当前运行流程（APEX 真实启动 / 深度开发 / 日常助理）');
-  check((html.match(/<span>启用模块<\/span><strong>\d+<small> \/ \d+<\/small><\/strong>/g) || []).length >= 3
-    && !html.includes('次运行') && html.includes(w0.st) && html.includes('预备就绪'),
-    '卡面突出启用模块数、项目状态和预备结果；运行历史留在详情');
+  check(html.includes('APEX Automation') || html.includes('pjt-name'),
+    '卡面以项目名为主体');
+  const card0 = T.projTileHTML(w0);
+  check(!card0.includes('预备就绪') && !card0.includes('启用模块')
+    && !card0.includes('class="pjt-flow"') && !card0.includes('pjt-ready')
+    && !card0.includes('class="pjt-stat"') && !card0.includes('pjt-acts-label')
+    && !html.includes('次运行') && html.includes(w0.st),
+    '卡面去掉流程名 / 预备就绪 / 启用模块计数 / 「项目管理」标签，只留身份、状态与运行入口');
+  check(!/<span class="pjt-acts-label"|>项目管理</.test(card0),
+    '「项目管理」只剩 aria-label（读屏文案），不再作为可见文字出现在卡面');
   check(html.includes('pjt-enter') && html.includes('运行项目'),
     '卡面主按钮明确标注运行项目');
   check(html.includes('pjt-desc') && html.includes('调用 APEX 启动核心'), '每张卡保留一句话描述');
+  /* 状态不再用带底色的药丸（旧 .badge），改为描述下方的「圆点 + 文字」元信息行——
+     旧版右上角一枚独立药丸与左侧流程名互不相干，是「看着别扭」的根源；
+     而放进标题行又会挤掉长项目名，所以最终落在独立元信息行里。 */
+  check(card0.includes('pjt-meta') && card0.includes('pjt-state') && card0.includes('pjt-state-dot')
+    && !card0.includes('class="badge pst-') && !card0.includes('pjt-head'),
+    '状态用圆点着色、落在描述下方的元信息行，既不是右上角药丸也不挤占项目名宽度');
+  check(card0.indexOf('pjt-name') < card0.indexOf('pjt-state'),
+    '项目名排在状态之前：名字是主角，状态是配角');
   const w1 = T.DATA.projects[0];
   /* 「完整开发上下文」移除后，右侧项目详情抽屉（wfDetailHTML）失去唯一入口，一并清掉；
      项目信息与操作统一由项目卡 / 项目详情页承载 —— 这里是负向守护 */
@@ -1864,8 +1883,11 @@ try {
   const v = T.viewWorkflows(false);
   check(vp.includes('<h1>项目选择</h1>') && vp.includes('data-act="enterProj"'), '独立项目选择页：标题 + 进入项目入口');
   check(v.includes('data-act="backProj"') && v.includes('项目列表'), '项目详情页提供「← 项目列表」返回入口');
-  check(vp.includes('APEX 一键启动') && vp.includes('深度开发') && vp.includes('日常助理'),
-    '选择页卡片标注当前运行流程（flowName 已上卡）');
+  /* 卡面不再标注流程名（2026-10-03）：「未命名流程 / APEX 一键启动 / 深度开发」这类
+     流程名对「选哪个项目跑」这件事没有帮助，挤在项目名上方还把名字挤成配角。 */
+  check(!vp.includes('未命名流程') && !vp.includes('APEX 一键启动') && !vp.includes('深度开发')
+    && !vp.includes('pjt-flow'),
+    '选择页卡片不再标注流程名（它对「选哪个项目跑」没有帮助，还抢了项目名的视觉主角位）');
   check(!v.includes('data-act="enterProj"') && !v.includes('class="pjt'), '详情页不再渲染选择列表（职责已拆分）');
   /* 删除项目：预演 + 二次确认 */
   T.S.projConfirm = 'apex';
@@ -1984,6 +2006,27 @@ try {
   check(heatPayload.counts.length === 371 && heatPayload.counts[heatTodayIdx] === 5 && heatPayload.counts[heatTodayIdx - 1] === 0
     && heatPayload.detail[heatKey].online === 5 && heatPayload.detail[heatKey].adds === 7 && heatPayload.detail[heatKey].dels === 2,
     '后端 date→计数对齐 53 周窗口：底色取 online（5 分钟），不再混进 count（14）里的代码行数');
+  const colorDays = new Array(371).fill(0);
+  [120, 177, 360, 720].forEach((minutes, i) => { colorDays[heatTodayIdx - 3 + i] = minutes; });
+  const savedHeatDetail = T.S.heatDetail;
+  T.S.heatDetail = {};
+  const colorMap = T.dashboardHeatmapHTML(colorDays);
+  const colorStrengths = [...colorMap.matchAll(/style="--heat-strength:([\d.]+)%"/g)].map(m => Number(m[1]));
+  check(colorStrengths.length === 4 && colorStrengths.every((v, i) => i === 0 || v > colorStrengths[i - 1])
+    && colorStrengths[3] === 100,
+    '每日 120 / 177 / 360 / 720 分钟使用递增的连续颜色强度，不再全部落入同一蓝色档');
+  check(/\.heat-cell\[style\]\{background:color-mix\(in srgb,var\(--dash-heat-1\),var\(--dash-heat-4\) var\(--heat-strength\)\)\}/
+    .test(fs.readFileSync(path.join(__dirname, 'styles.css'), 'utf8'))
+    && !/<span class="heat-cell (?:h0|future)[^"]*" style=/.test(colorMap),
+    '连续强度实际用于主题蓝色混合；未在线和未来格保持灰色');
+  ['weekly', 'total'].forEach(mode => {
+    T.S.heatMode = mode;
+    const strengths = [...T.dashboardHeatmapHTML(colorDays).matchAll(/style="--heat-strength:([\d.]+)%"/g)].map(m => Number(m[1]));
+    check(strengths.length > 0 && Math.max(...strengths) === 100 && strengths.every(v => v > 0 && v <= 100),
+      `${mode} 口径按聚合后的在线时长独立归一化，最大强度为 100%`);
+  });
+  T.S.heatMode = 'daily';
+  T.S.heatDetail = savedHeatDetail;
   check(T.heatLevel(0) === 0 && T.heatLevel(9) === 1 && T.heatLevel(10) === 2 && T.heatLevel(999) === 3 && T.heatLevel(1000) === 4,
     '色阶对数五档：0 / 1-9 / 10-99 / 100-999 / 1000+（分钟量级跨度大，线性分档会糊成一片）');
   check(T.heatSeries([1,2,3,4,5,6,7,8], 'daily').join() === '1,2,3,4,5,6,7,8'
@@ -2087,15 +2130,27 @@ try {
     '维护说明 AGENTS.md 覆盖当前架构、外部模块、数据库迁移与验证方式');
   /* 根目录瘦身护栏：只保留源码、Git 元数据和工具元数据。
      `.git` 与 `.workbuddy` 都是工具自己写的元数据目录，不是产物，一并排除；
-     不排除的话 WorkBuddy 一旦在根目录生成 .workbuddy/ 就会让这条断言无端测挂。 */
+     不排除的话 WorkBuddy 一旦在根目录生成 .workbuddy/ 就会让这条断言无端测挂。
+     交接状态文档不进仓库根：PROJECT_STATE.md 已于 2026-10-03 归档到
+     D:\Projects\.workbuddy\backups\ControlPod\ 并删除；本断言不再为它开豁免，
+     根目录一旦重新出现交接/状态文档会直接测挂。 */
   const dirFiles = require('fs').readdirSync(__dirname).filter(name=>name!=='.git' && name!=='.workbuddy' && name!=='.workbuddy-ai').sort();
-  const expectedFiles = ['.gitattributes', '.gitignore', 'AGENTS.md', 'README.md', 'app.js', 'docs', 'index.html', 'shell', 'smoke-test.js', 'styles.css', 'web'].sort();
+  const expectedFiles = ['.gitattributes', '.gitignore', 'AGENTS.md', 'README.md', 'app.js', 'docs', 'index.html', 'shell', 'smoke-test.js', 'styles.css', 'tools', 'web'].sort();
   check(JSON.stringify(dirFiles) === JSON.stringify(expectedFiles),
     '根目录只保留源码与 Git 配置（实际：' + dirFiles.join(', ') + '）');
   /* 启动入口只在桌面：仓库根旧快捷方式已删除，且代码里禁止重建
      （见 shell/ShortcutMaker.cs 的 CreateDesktopShortcut）。 */
   check(!dirFiles.some(name=>name.endsWith('.lnk')),
     '根目录不再放启动快捷方式（唯一入口是桌面「ControlPod」）');
+  /* 侧栏底部用户块已删除（2026-10-03）：本机单用户应用，头像 + 昵称 + 「在线 · 已同步」
+     不携带可操作信息、也不反映真实账号状态。账号信息只留在「设置 → 账号」。 */
+  const idxSrc=fs.readFileSync(path.join(__dirname,'index.html'),'utf8');
+  const sideEnd=idxSrc.indexOf('</aside>');
+  const sideCss=fs.readFileSync(path.join(__dirname,'styles.css'),'utf8');
+  check(!/<div class="user">/.test(idxSrc.slice(0, sideEnd))
+    && !idxSrc.includes('在线 · 已同步') && !idxSrc.slice(0, sideEnd).includes('u-name')
+    && !/\.user\{|\.u-name|\.u-sub/.test(sideCss),
+    '侧栏底部不再有头像 / 昵称 / 「在线 · 已同步」用户块（相关样式一并清掉，不留死规则）');
   const n0 = T.DATA.notes.length;
   T.S.notes.unshift({id:'nX', title:'t', tag:'日常', pinned:false, time:'刚刚', body:'b', proj:T.DATA.projects[0].name});
   check(T.S.notes.length === n0 + 1, '新建项目记录会追加到底层记录（' + (n0 + 1) + ' 条）');
@@ -2285,6 +2340,17 @@ try {
     && css2.includes('.app.side-flyout .sidebar{position:fixed')
     && /\.app:not\(\.mini\):not\(\.side-flyout\)/.test(css2),
     '折叠按钮双模：宽窗口 .mini 常驻折叠，紧凑窗口 side-flyout 浮层展开（点外部收起）——按钮在 W1 区间不再是死按钮');
+  /* 折叠态纵向对齐（2026-10-03 修）：折叠按钮曾比导航项左偏 4.5px —— 它宽 34px 且由
+     .brand 的 justify-content:center 居中于**整条侧栏**（中心 38），而导航项 width:100%
+     居中于**去掉 --side-pad 的内容区**（16~59，中心 37.5），两套基准不同。
+     修法：折叠按钮也撑满内容区宽（width/flex 100%）再由 .brand-header 居中。 */
+  check(/\.app\.mini \.side-mini\{width:100%;flex:0 0 100%\}/.test(css2)
+    && /\.app\.mini \.brand-header\{[^}]*justify-content:center/.test(css2)
+    && /\.app:not\(\.mini\):not\(\.side-flyout\) \.side-mini\{width:100%;flex:0 0 100%\}/.test(css2),
+    '折叠态 1~6 号控件（折叠按钮 / 导航项 / 分割线 / 更新小圈）共用内容区同一基准，居中不再偏 4.5px');
+  check(/\.app\.mini \.side-update\{align-self:center;margin:2px auto\}/.test(css2)
+    && /\.app:not\(\.mini\):not\(\.side-flyout\) \.side-update\{align-self:center;margin:2px auto\}/.test(css2),
+    '更新小圈在折叠态（手动 .mini 与 W1 自动折叠两条路径）都居中于内容区，不以整条侧栏为基准');
   check(/\.dashboard-kpis\{[^}]*repeat\(4,minmax\(72px,1fr\)\)/.test(css2)
     && /\.dashboard-kpis>div\{[^}]*min-height:0/.test(css2),
     '当前项目指标为固定 4 列紧凑条，格子有 72px 下限（窄窗口压不烂、标签不叠数字）');
@@ -3271,8 +3337,10 @@ try {
     files:0, commits:0, tags:[], updated:'刚刚', ico:'focus', color:'#2563EB', flowName:'', flowDesc:'', last:'—', runs:0, steps:[] };
   T.DATA.projects.push(noName);
   const vp2 = T.viewProjects();
-  check(vp2.includes('未命名流程'),
-    '项目选择页的卡片 chip 对没有流程名的项目显示「未命名流程」，不再显示空值');
+  /* 「未命名流程」这个占位符在卡面上已经没有位置了（卡面不显示流程名），
+     但 flowNameOf 本身仍是详情页「当前流程 / 运行流程」的唯一出口，行为不能变。 */
+  check(!vp2.includes('未命名流程') && !vp2.includes('class="pjt-flow"'),
+    '项目选择页卡片不再出现「未命名流程」占位符（卡面已不显示流程名）');
 
   const wfBefore = T.S.wf;
   T.S.wf = '__noname';
@@ -3327,6 +3395,209 @@ try {
   T.DATA.projects.length = 0;
   keep.forEach(p => T.DATA.projects.push(p));
 } catch (e) { console.log('FAIL 常用项目 → ' + e.message); fail++; }
+
+try {
+  const previous = T.S.updates;
+  T.S.updates = {available:true, busy:false, state:{phase:'checked', changes:[]}};
+  let html = T.updateSettingsHTML();
+  check((html.match(/<button/g)||[]).length===1 && html.includes('检查更新') && !html.includes('<details') && !html.includes('测试'),
+    '更新设置只有一个控件，没有报告与额外操作');
+  T.S.updates.state={phase:'failed',message:'<img src=x onerror=alert(1)>',changes:['<script>bad()</script>']};
+  html=T.updateSettingsHTML();
+  check(html.includes('&lt;img') && !html.includes('<img src=x') && !html.includes('bad()'),
+    '失败原因转义显示，文件列表不进入界面');
+  T.S.updates.state={phase:'updated',at:new Date(Date.now()+1000).toISOString()};
+  check(T.updateSettingsHTML().includes('重启以完成更新'), '更新后同一个控件切换到重启');
+  T.S.updates.state.at='2020-01-01T00:00:00Z';
+  check(T.updateSettingsHTML().includes('检查更新'), '已在启动前完成的界面更新不会重复要求重启');
+  T.S.updates.busy=true;
+  check(/data-act="checkUpdate"[^>]*\sdisabled/.test(T.updateSettingsHTML()), '执行中禁用唯一更新控件');
+  T.S.updates.busy=false;
+  T.S.updates.state.phase='pending';
+  check(T.updateSettingsHTML().includes('重启以完成更新'), '待安装仍使用同一个重启控件');
+  const project={id:'fixture-bili',name:'脚本项目',steps:[{moduleId:'bili-peek',on:true},{moduleId:'dou-link',on:true}]};
+  T.S.updates.external={projects:[{id:'Bili-Peek',phase:'checked',changes:[]},{id:'dou-link',phase:'checked',changes:['app.cs']}]};
+  check(T.projectUpdateChipHTML(project).includes('data-v="dou-link"') && T.projectUpdateChipHTML(project).includes('有更新'),
+    '检查所有关联模块，卡片仅对实际更新显示一个提醒');
+  T.S.updates.external.projects[1].phase='updated';
+  check(T.projectUpdateChipHTML(project)==='', '更新完成后提醒消失');
+  T.S.updates.external.projects[0].phase='failed';
+  check(T.projectUpdateChipHTML(project)==='', '没有检测到变化时不显示维护入口或失败徽标');
+  const select=ctx.document.querySelector;
+  const created=ctx.document.createElement;
+  const modal=el(), notices=[];
+  ctx.document.querySelector=q=>q==='#noteModal'?modal:select(q);
+  ctx.document.createElement=()=>{const e=el();notices.push(e);return e;};
+  T.S.updates.state={phase:'checked',changes:['app.js']};
+  T.askUpdate();
+  check(modal.innerHTML.includes('发现可用更新') && modal.innerHTML.includes('confirmUpdate') && modal.innerHTML.includes('稍后') && !modal.innerHTML.includes('app.js'),
+    '发现更新只弹出更新与稍后确认，不展示技术报告');
+  T.closeModal();
+  check(T.S.updatePanel===null, '稍后关闭弹窗并清除确认状态');
+  /* 待安装（pending）时**不再问「现在重启吗」**（2026-10-03 改）：
+     用户点的本来就是「更新 / 重启」这一个意图，更新也已通过测试，
+     同一个决定问两遍只是打扰。直接走重启落地。
+     拦截点选在 window.chrome.webview.postMessage —— 那是 shellChromeCommand 的真实出口，
+     比给 ctx.shellChromeCommand 赋值可靠（vm 里 shellChromeCommand 是词法声明，
+     从外部给 ctx 挂同名属性根本不会替换它，之前那版断言就是因此假通过/假失败的）。 */
+  const sentCmds=[];
+  ctx.chrome={webview:{postMessage:m=>sentCmds.push(m.command)}};
+  T.S.updates.state={phase:'pending'};
+  modal.innerHTML='';
+  T.askUpdate();
+  check(T.S.updatePanel===null && !modal.innerHTML.includes('现在重启吗')
+    && !modal.innerHTML.includes('重启以完成更新'),
+    '点更新后需要重启时不再弹二次确认（同一个决定不问两遍）');
+  T.S.updates.state={phase:'updated',at:new Date(Date.now()+1000).toISOString()};
+  sentCmds.length=0; modal.innerHTML='';
+  T.askUpdate();
+  check(!modal.innerHTML.includes('现在重启吗') && !modal.innerHTML.includes('重启以完成更新'),
+    '界面已同步待重启时也不弹重启确认（真实重启命令因桩里非壳环境被门控，故只断言「不询问」）');
+  delete ctx.chrome;
+  T.closeModal();
+  /* restartAfterUpdate 本身在浏览器里会空操作（IN_SHELL 门控），所以按本文件既有约定
+     查源码确认两条真实落地路径，而不是在桩里硬造 shell 环境。 */
+  const updSrc=fs.readFileSync(path.join(__dirname,'app.js'),'utf8');
+  const restartBody=(updSrc.match(/function restartAfterUpdate\(result\)\{([\s\S]*?)\n\}/) || [])[1] || '';
+  check(/result\s*&&\s*result\.phase\s*===\s*'pending'/.test(restartBody)
+    && /void completeUpdate\(\)/.test(restartBody)
+    && /shellChromeCommand\('restart'\)/.test(restartBody)
+    && /if\(restart\)\{ restartAfterUpdate\(result\); return; \}/.test(updSrc),
+    'restartAfterUpdate 直接落地：pending 走 apply+quit-for-update，其余走壳内 restart，全程不询问');
+  T.S.updates.external.projects[1]={id:'dou-link',phase:'checked',changes:['app.cs']};
+  T.S.updateNotified='';
+  T.handleUpdateState(); T.handleUpdateState();
+  check(notices.length===1 && notices[0].innerHTML.includes('1 个项目有更新'), '后台只提醒一次，相同检查结果不重复打扰');
+  ctx.document.querySelector=select;
+  ctx.document.createElement=created;
+  const restartSource=fs.readFileSync(path.join(__dirname,'shell/MainWindow.xaml.cs'),'utf8');
+  const appSource=fs.readFileSync(path.join(__dirname,'app.js'),'utf8');
+  check(restartSource.includes('RestartService.StartReplacement();') && restartSource.includes('restartApi.HasActiveExecutions')
+    && appSource.includes("shellChromeCommand('restart')")
+    && appSource.includes("result.phase === 'pending'){ void completeUpdate(); return; }"),
+    '重启保留原生重启与待安装替换两条真实路径（pending 走 apply+quit，其余走壳内 restart）');
+  const service=fs.readFileSync(path.join(__dirname,'shell/UpdateService.cs'),'utf8');
+  check(service.includes('Start("check");') && !service.includes('Start(ReadPreferences().autoUpdate'), '后台只检测，旧自动更新偏好不能绕过确认');
+
+  /* ---- 侧栏更新小圈：有更新才出现，小圈本身当进度条 ---- */
+  const markup=fs.readFileSync(path.join(__dirname,'index.html'),'utf8');
+  const orb=markup.match(/<button[^>]*id="sideUpdate"[\s\S]*?<\/button>/);
+  check(!!orb && orb[0].includes('hidden') && orb[0].includes('data-act="checkUpdate"')
+    && orb[0].includes('su-ring') && orb[0].includes('class="su-track"') && orb[0].includes('class="su-bar"'),
+    '侧栏小圈默认 hidden，挂在侧栏里并复用 checkUpdate 入口（不新开更新链路）');
+  check(!/id="sideUpdate"[\s\S]*?hidden(?![\s\S]*?su-bar)/.test(markup) === false || orb[0].includes('su-bar'),
+    '小圈自带轨道与进度弧两枚圆，环本身就是进度条');
+  const css=fs.readFileSync(path.join(__dirname,'styles.css'),'utf8');
+  check(css.includes('.side-update[hidden]{display:none}') && css.includes('.su-bar{') && css.includes('stroke-dasharray:100.53')
+    && css.includes('--upd-ring-w') && css.includes('.btn-upd') && css.includes('.pjt-update .su-ring')
+    && css.includes('prefers-reduced-motion'),
+    '侧栏 / 设置页 / 卡片三处共用 --upd-* 令牌与同一套粗描边，隐藏时不占位，遵守减少动效偏好');
+  check(css.includes('stroke-width:calc(var(--upd-ring-w) * 1px)') && css.includes('--upd-ring-w:5'),
+    '进度环是粗线圈（描边 5px），不是细发丝圈');
+  /* 圈内不再放百分比：三处都只在 title 里给数字。 */
+  check(!css.includes('.su-pct') && !markup.includes('sideUpdatePct')
+    && !appSource.includes("'<span class=\"su-pct\">'"),
+    '进度环内不显示百分比（34px 的圈塞数字又挤又假），百分比只给悬停提示');
+
+  // 进度映射：只在执行中推进；空闲一律 0（这是「永远 100%」那个 bug 的修复点）
+  const seq=['running','testing','building','installing'].map(p=>T.updateProgress({phase:p}, true));
+  check(seq.every((v,i)=>i===0||v>seq[i-1]) && seq[seq.length-1]===100, '执行中进度随阶段单调递增并收口到 100');
+  check(T.updateProgress({phase:'pending'}, true)===100 && T.updateProgress({phase:'failed'}, true)===100,
+    '执行中的终态（待安装 / 失败）进度到 100');
+  check(T.updateProgress({phase:'checked'}, true)===0 && T.updateProgress({phase:'tested'}, true)===0,
+    '检查/测试完成这类「跑完了但没在更新」的阶段不冒充更新进度');
+  check(T.updateProgress({phase:'checked'}, false)===0 && T.updateProgress({phase:'pending'}, false)===0
+    && T.updateProgress(null, false)===0 && T.updateProgress({phase:'checked'})===0,
+    '空闲时进度恒为 0：有更新待确认也只画空环，不会显示成 100%');
+  check(T.updateProgress(null, true)===0 && T.updateProgress({phase:'nonsense'}, true)===0, '未知阶段不臆造进度');
+  /* 真·百分比：后端 State() 写 progress，界面直读，不再自己按阶段编。
+     真实口径 = 两个复制循环按「已复制/总数」连续上报 + 三次外部子进程各算一整步。 */
+  check(T.updateProgress({phase:'testing', progress:37}, true)===37
+    && T.updateProgress({phase:'building', progress:52}, true)===52
+    && T.updateProgress({phase:'installing', progress:88.4}, true)===88,
+    '界面直读后端上报的 progress 真值（四舍五入到整数），不按阶段重新编造');
+  check(T.updateProgress({phase:'testing', progress:-5}, true)===0
+    && T.updateProgress({phase:'testing', progress:999}, true)===100,
+    '后端 progress 越界时夹取到 0~100，环不会画出负值或溢出');
+  const updPs1=fs.readFileSync(path.join(__dirname,'tools/update-local.ps1'),'utf8');
+  check(/progress=if \(\$null -eq \$script:UpdateProgress\)/.test(updPs1)
+    && /\$copied\+\+/.test(updPs1) && /\$webDone\+\+/.test(updPs1) && /\$payloadDone\+\+/.test(updPs1)
+    && /正在复制源码快照（\$copied\//.test(updPs1) && /正在准备新版文件（\$payloadDone\//.test(updPs1),
+    'update-local.ps1 真实上报进度：源码快照 / 界面文件 / 安装载荷三处按已复制文件数连续写 progress');
+  check(/State 'pending'[^\n]*100/.test(updPs1) && /State 'tested'[^\n]*100/.test(updPs1)
+    && /State 'updated'[^\n]*100/.test(updPs1),
+    '终态一律收口到 100（待安装 / 已测试 / 界面已同步）');
+  check(!/function CopyTree/.test(updPs1) && !/CopyTree \$published/.test(updPs1),
+    '按文件复制取代了原先的 CopyTree 递归拷贝，CopyTree 已随之删除（不留死码）');
+  /* 2026-10-03 真实事故：安装载荷复制循环里写了局部变量 `$target`，
+     而 PowerShell 变量名**不区分大小写** —— 它就是脚本参数 `$Target`（带 ValidateSet 约束），
+     赋一个路径立刻抛「无法验证此变量，因为值 … 不是变量 Target 的有效值」，
+     **整个更新链路瘫掉**（点「检查更新」也没反应）。
+     守护：脚本里不得再出现给参数名（大小写任意）赋值的语句。 */
+  /* 注意排除第 2 行的**参数声明** `[string]$Target='all'` —— 那是合法的一处，
+     正则只抓「赋值给已有的 $target 变量」，即行首非 param 块里的 `$target = …`。 */
+  check(!/^\s*\$target\s*=/im.test(updPs1),
+    'update-local.ps1 不给 $Target（大小写不敏感）赋值 —— 局部变量取名避开脚本参数');
+  check(/\$payloadDest\s*=/.test(updPs1),
+    '安装载荷目标路径用 $payloadDest，与 $Target 参数彻底区分');
+  // 周长与弧长：p=0 全空，p=100 走满
+  check(T.updateDashOffset(0)===T.UPD_CIRC.toFixed(2) && T.updateDashOffset(100)==='0.00',
+    '进度环弧长按 周长×(1-p) 计算：0% 空环、100% 满环');
+  // 进度真的落到 DOM 样式上（r=16 → 周长 100.53，50% 即半圈）
+  const ringHost=el();
+  check(T.applyRingProgress(ringHost, 50)==='50.27', '进度写进 .su-bar 的 stroke-dashoffset（50% → 约半圈）');
+
+  const saved=JSON.parse(JSON.stringify({u:T.S.updates, busy:T.S.updateRequestBusy, op:T.S.updateOperation}));
+  const orbBtn=el();
+  orbBtn.querySelector=()=>el();
+  const glyph=el();
+  const realQuery=ctx.document.querySelector;
+  ctx.document.querySelector=q=>q==='#sideUpdate'?orbBtn:q==='#sideUpdateGlyph'?glyph:realQuery(q);
+  // 没更新 → 不弹出
+  T.S.updates={available:true, busy:false, state:{phase:'checked', changes:[]}};
+  T.S.updateRequestBusy=false; T.S.updateOperation=null;
+  check(T.syncSideUpdate()===null && orbBtn.hidden===true, '没有更新时小圈不弹出、不占侧栏位置');
+  // 有更新 → 弹出（空闲：空环，不冒充 100%）
+  T.S.updates.state={phase:'checked', changes:['app.js']};
+  const stReady=T.syncSideUpdate();
+  check(orbBtn.hidden===false && stReady.label==='有可用更新' && orbBtn.title==='有可用更新',
+    '检测到更新时小圈弹出，悬停即说明状态');
+  check(stReady.progress===0, '待确认更新时是空环（0%），不是满环 100%');
+  // 执行中 → 环推进，百分比只进 title
+  T.S.updates.busy=true; T.S.updateOperation={mode:'update',target:'controlpod'};
+  T.S.updates.state={phase:'building', changes:['app.js']};
+  const stBusy=T.syncSideUpdate();
+  check(orbBtn.hidden===false && stBusy.busy && stBusy.progress===T.updateProgress({phase:'building'}, true)
+    && orbBtn.title==='正在更新 '+stBusy.progress+'%',
+    '更新执行中小圈常驻，环按阶段推进，百分比只出现在悬停提示里');
+  T.S.updates.busy=false; T.S.updateOperation=null;
+  // 需要重启 → 仍弹出，走重启语义
+  T.S.updates.state={phase:'pending', changes:['app.js']};
+  const stPending=T.syncSideUpdate();
+  check(orbBtn.hidden===false && stPending.restart && stPending.progress===0 && stPending.label==='需要重启',
+    '新版已就绪待重启时小圈继续常驻并指向重启（空闲态不显示进度数字）');
+  // 检查完发现没有更新 → 自动收起
+  T.S.updates.state={phase:'checked', changes:[]};
+  check(T.syncSideUpdate()===null && orbBtn.hidden===true, '检查结果为无更新时小圈自动收起');
+  // 失败 → 留在侧栏，不静默消失
+  T.S.updates.state={phase:'failed', changes:['app.js'], message:'构建失败'};
+  const stFail=T.syncSideUpdate();
+  check(orbBtn.hidden===false && stFail.failed && stFail.label==='更新失败', '更新失败时小圈保留并说明失败，不静默消失');
+  T.S.updates=saved.u; T.S.updateRequestBusy=saved.busy; T.S.updateOperation=saved.op;
+  ctx.document.querySelector=realQuery;
+
+  // 设置页按钮与侧栏同款：环一致，百分比同样只进 title
+  T.S.updates={available:true, busy:true, state:{phase:'testing', changes:['app.js']}};
+  const busyHtml=T.updateSettingsHTML();
+  check(busyHtml.includes('su-ring') && busyHtml.includes('su-bar') && busyHtml.includes('btn-upd')
+    && busyHtml.includes('title="检查中… '+T.updateProgress({phase:'testing'}, true)+'%"'),
+    '设置页更新按钮内嵌同款进度环，百分比只写进悬停提示');
+  T.S.updates.busy=false;
+  const idleHtml=T.updateSettingsHTML();
+  check(idleHtml.includes('su-ring') && !/\d+%/.test(idleHtml), '设置页按钮空闲时保留进度环但不显示无意义的百分比');
+  T.S.updates=previous;
+  T.S.updateNotified='';
+} catch(e){console.log('FAIL 极简更新交互 → '+e.message);fail++;}
 
 console.log(fail === 0 ? '\nALL_PASS' : '\nFAIL_COUNT=' + fail);
 process.exit(fail === 0 ? 0 : 1);

@@ -35,3 +35,10 @@ shell\bin\x64\Debug\net10.0-windows10.0.19041.0\win-x64\ApexShell.exe --selftest
 前端测试以末行 `ALL_PASS` 为准；壳自测以进程退出码和测试报告为准。改外部模块时，另跑该仓库自己的检查。视觉与桌面交互需在实际窗口复核，不能把无头自测当作窗口验收。
 
 构建环境、源码路径和发布版区别见 `README.md`。无需为文档或 Web 文件更新重新发布桌面程序；用户要求更新安装版时，再构建并发布。
+
+## 更新与维护工具
+
+- 本地更新链路：`tools/update-local.ps1`（检查 / 测试 / 发布，按文件数逐段上报 `progress`）→ `tools/apply-update.ps1`（退出后替换并重开）。外部项目由 `tools/update-external.ps1` 按各仓库维护配方处理，回归脚本 `tools/test-external-updates.ps1`。
+- 更新状态只写 `%LOCALAPPDATA%\ControlPod\updates\status.json`；前端读该文件的 `progress`，不再按阶段自行编进度。
+- `tools/trim-update-artifacts.ps1` 默认只预览，`-Mode clean` 才执行；只清可再生成的 bin/obj/publish 与多余回退副本，不碰源码快照、测试报告和数据库。
+- 仓库根只放源码与 Git 配置（`smoke-test.js` 有根目录白名单断言）。交接 / 状态文档归档到 `D:\Projects\.workbuddy\backups\<仓库>\`，不放回仓库根。

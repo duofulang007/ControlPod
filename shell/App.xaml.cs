@@ -21,6 +21,22 @@ public partial class App : Application
         // 无头自测：--selftest [日志路径]。不建窗口不碰 WebView2（工具会话出身会被安全软件
         // 掐 WebView2，但纯计算 + 注册表 + SQLite 不会），跑完直接退出，结果落日志文件。
         var cli = Environment.GetCommandLineArgs();
+        var restartIdx = Array.IndexOf(cli, "--restart-after");
+        if (restartIdx >= 0)
+        {
+            try
+            {
+                if (restartIdx + 1 >= cli.Length || !int.TryParse(cli[restartIdx + 1], out var previousPid))
+                    throw new ArgumentException("重启参数无效");
+                RestartService.WaitForPreviousProcess(previousPid);
+            }
+            catch (Exception ex)
+            {
+                ShellLog.Log("restart failed: " + ex.Message);
+                Environment.Exit(1);
+                return;
+            }
+        }
         var selftestIdx = Array.IndexOf(cli, "--selftest");
         if (selftestIdx >= 0)
         {

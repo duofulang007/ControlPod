@@ -4,6 +4,14 @@ ControlPod（简称 CPod）是面向 Windows 的本地个人总控台：把项�
 
 自用的真实工具，不是原型演示、也不是可上线产品。日常入口是桌面外壳（WinUI 3），界面是原生 HTML / CSS / JavaScript，数据全部落在本机磁盘。
 
+## 最近改动（2026-10-03）
+
+- 设置页「通用」新增本地验证与更新：检查变化 → 跑测试 → 发布 → 退出并替换，支持后台每日检查；外部项目改由项目卡片上的维护按钮触发，任一失败即停止。
+- 更新进度改用后端 `status.json` 的 `progress` 真值：侧栏更新小圈、卡片圆环、设置页进度环三处共用同一套描边语言，空闲恒为空环。
+- 项目卡片精简为「名称 + 一行描述 + 状态胶囊 + 运行按钮 + 图标工具条」；删除侧栏底部用户块；修掉折叠态横向错位。
+- 壳内新增 `RestartService` / `UpdateService`，仓库新增 `tools/` 维护脚本（本地更新、外部更新、退出后替换、产物裁剪、外部更新回归）。
+- 交接状态文档不再放进仓库根：`PROJECT_STATE.md` 已归档到 `D:\Projects\.workbuddy\backups\ControlPod\`，根目录护栏不再为它开豁免。
+
 ## 当前能力
 
 - 项目管理：创建、复制、编辑、删除项目，拖拽调整项目卡顺序，并查看项目运行状态与历史。
@@ -40,7 +48,24 @@ dotnet build shell\ApexShell.csproj -c Debug -p:Platform=x64 -p:RuntimeIdentifie
 shell\bin\x64\Debug\net10.0-windows10.0.19041.0\win-x64\ApexShell.exe
 ```
 
-仓库内的 Debug/Release 构建把 `https://apex.local/` 映射到源码根，所以改完 Web 文件后在壳里按 F5 即可生效；`D:\Apps\ControlPod` 的正式发布版使用随包携带的 `wwwroot`，更新它需要重新发布。
+仓库内的 Debug/Release 构建把 `https://apex.local/` 映射到源码根，所以改完 Web 文件后在壳里按 F5 即可生效；`D:\Apps\ControlPod` 的正式发布版使用随包携带的 `wwwroot`。设置页「通用」中的“检查更新”可以检查本地改动，确认后验证并同步安装版。
+
+### 本地验证与更新
+
+- 设置页「通用」只保留一个更新控件：检查更新 → 更新 → 重启以完成更新。发现更新后弹出“更新 / 稍后”，需要重启时弹出“重启 / 稍后”；检查与更新过程中禁用同一个控件。
+- 后台每 24 小时检查 CPod 和外部项目，启动时补上错过的检查。后台只检查，不自动安装；旧版自动更新偏好不会绕过用户确认。
+- 项目卡片仅在对应模块确有未应用变化时显示“有更新”，点击后确认更新；没有更新就不显示。后台检查对相同项目变化只提醒一次。
+- 检查比较本地源码与上次验证或安装记录，不下载远程代码，也不代表线上版本查询。支持 CPod、apex-launcher、dou-link、run-analytics、Bili-Peek；首次没有记录时需验证建立记录。
+- 用户确认后，更新仍运行所需检查。CPod 的界面改动通过前端检查后同步；外壳或更新工具变化时还会构建发布并跑完整壳自测。测试期间再次修改源码会停止更新。
+- 界面同步后完整退出并重开；外壳更新由独立工具在退出后替换并重开。执行中的项目操作不会被强行中断。失败时显示真实原因；文件清单、逐项测试输出和日志路径保留在本机报告中，不常驻界面。
+
+外部项目先全部验证，通过后才开始更新；任一失败即停止后续步骤。测试期间源码发生变化会拒绝更新。apex-launcher、run-analytics 和 Bili-Peek 助手直接使用各自仓库源码：更新记录代表源码已验证，运行中的实例单独提示待重启，不自动关闭游戏、导入或片段保存。dou-link 发布到本仓库 `publish`，运行时拒绝替换；先暂存发布、校验载荷再替换，失败恢复旧目录，上一版保留。Bili-Peek 的浏览器油猴脚本与 Obsidian 插件是独立安装副本，此操作不改它们或笔记库。
+
+“待安装生效”和“待重启生效”属于未完成生效的结果，不显示成已同步；无变化也明确说明未替换文件。更新会运行真实项目检查，结果、耗时与输出写入本机报告，构建通过不代表桌面交互验收。CPod 启动 Windows PowerShell 时清除宿主继承的 `PSModulePath`，防止从 PowerShell 7 或其他桌面环境启动后找不到 `Get-FileHash` 等内置命令。
+
+源码仍在 `D:\Projects\ControlPod`，成品只在 `D:\Apps\ControlPod`，个人数据在 `%LOCALAPPDATA%\ControlPod`。每次验证结束后去掉验证快照内可再生成的 bin/obj/publish，保留源码快照和报告；完成安装后仅保留最新一份回退副本。源码目录的开发构建 bin/obj 可在构建进程结束后清理。`tools/trim-update-artifacts.ps1` 默认只预览，传 `-Mode clean` 才执行，并拒绝链接目录、越界路径、运行占用和包含数据库的回退副本。
+
+需要本机 Git、Node.js、CPod 的 .NET 10 SDK、dou-link 的 .NET 8 构建支持，以及外部项目各自已有的 `.venv` / ffmpeg；不自动安装或升级依赖。Bili-Peek 读取当前 `package.json` 中直接 Node 检查与测试命令，脚本改成其他形式时明确拒绝并提示维护配方。恢复构建依赖时需要可用网络。更新偏好、进度、外部源码收据与日志位于 `%LOCALAPPDATA%\ControlPod\updates`，不存入数据库或界面外观偏好。旧安装目录和旧界面保留为带唯一后缀的备份；不会自动清除备份或改写用户数据库。自动测试不能代替真实窗口体验。
 
 若 `dotnet` 提示找不到 SDK，而用户目录已安装 SDK，可用 `& "$env:USERPROFILE\.dotnet\dotnet.exe"` 替代上述 `dotnet`。源码中的开发路径默认是 `D:\Projects\ControlPod`；放到其他目录开发时，需同步调整 `shell/ConsoleConfig.cs` 的 `ProjectDir`。
 

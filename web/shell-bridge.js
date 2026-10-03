@@ -52,6 +52,8 @@ function shellChromeCommand(command, value){
   } catch (_) {}
 }
 
+function quitForUpdate(){ shellChromeCommand('quit-for-update'); }
+
 document.addEventListener('mousedown', e => {
   if (e.button !== 0 || !e.target.closest('[data-drag]')) return;
   shellChromeCommand('drag');

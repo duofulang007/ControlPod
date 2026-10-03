@@ -14,7 +14,7 @@
   <aside class="sidebar">
     <!-- .brand 自己就是侧栏顶棚的拖动区：::before 拖动带靠它命中（伪元素命中返回宿主元素，
          宿主不带 data-drag 就永远拖不动）。isolation:isolate 保证它内部的 z-index 不外溢，
-         侧栏导航（.nav / .user）不会被拖动带盖住。
+         侧栏导航（.nav）不会被拖动带盖住。
          .brand-header 只装折叠按钮，撑出 --brand-drag-h 让它在图标条里居中也压得住拖动带。 -->
     <div class="brand" data-drag title="拖动窗口">
       <div class="brand-header">
@@ -63,13 +63,23 @@
 
     <div class="side-spacer"></div>
 
-    <div class="user">
-      <div class="avatar"></div>
-      <div>
-        <div class="u-name">Kiro</div>
-        <div class="u-sub">在线 · 已同步</div>
-      </div>
-    </div>
+    <!-- 更新小圈：只在「有更新 / 需要执行 / 正在执行 / 更新失败」时出现（默认 hidden），
+         空闲无更新时不占位、不打扰。**小圈就是进度条**：外圈圆环的弧长 = 周长 ×(1 - 进度)，
+         进度由后端 phase 换算（app.js updateProgress），真实反映走到哪一步。
+         圈里不写百分比 —— 数字压在 34px 的圈里既挤又假；悬停 title 才给「阶段 + 百分比」。
+         data-act 复用 checkUpdate：点了走和设置页同一个确认入口，不另开一条更新链路。 -->
+    <button aria-label="有可用更新" class="side-update" data-act="checkUpdate" hidden id="sideUpdate" title="有可用更新">
+      <svg aria-hidden="true" class="su-ring" viewBox="0 0 40 40">
+        <circle class="su-track" cx="20" cy="20" r="16"></circle>
+        <circle class="su-bar" cx="20" cy="20" r="16"></circle>
+      </svg>
+      <span aria-hidden="true" class="su-glyph" id="sideUpdateGlyph"></span>
+    </button>
+
+    <!-- 侧栏底部原有的「头像 + 昵称 + 在线状态」用户块已整块删除（2026-10-03）：
+         本机单用户应用，这几行字不携带任何可操作信息，也不反映真实账号状态。
+         账号信息在「设置 → 账号」，那里有真实内容（设备管理入口）。
+         删掉后侧栏底部由 .side-spacer 收尾留白。.avatar 样式保留给设置页复用。 -->
   </aside>
 
   <!-- ============ 主区域 ============ -->

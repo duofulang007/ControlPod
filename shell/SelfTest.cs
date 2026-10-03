@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Text;
@@ -44,6 +45,7 @@ public static class SelfTest
         if (Stage("bootstrap")) CheckBootstrapPayload();
         if (Stage("dashchrome")) CheckDashboardChrome();
         if (Stage("routes")) { CheckRouteCoverage(); CheckWebMessageProtocol(); }
+        if (Stage("restart")) CheckRestartWait();
 
         var verdict = Failed.Count == 0 ? "PASS" : "FAIL";
         Lines.Add($"=== SELFTEST {verdict}: {_passed} passed, {Failed.Count} failed ===");
@@ -52,6 +54,32 @@ public static class SelfTest
         FlushLog(logPath);
         Console.WriteLine($"SELFTEST {verdict}");
         return Failed.Count == 0;
+    }
+
+    private static void CheckRestartWait()
+    {
+        try
+        {
+            var rejected = false;
+            try { RestartService.WaitForPreviousProcess(Environment.ProcessId); }
+            catch (ArgumentException) { rejected = true; }
+            Check("重启等待拒绝当前进程，避免自己等待自己", rejected);
+            var start = new ProcessStartInfo("powershell.exe") { UseShellExecute = false, CreateNoWindow = true };
+            start.ArgumentList.Add("-NoProfile");
+            start.ArgumentList.Add("-NonInteractive");
+            start.ArgumentList.Add("-Command");
+            start.ArgumentList.Add("Start-Sleep -Milliseconds 500");
+            using var previous = Process.Start(start)!;
+            var timedOut = false;
+            try { RestartService.WaitForPreviousProcess(previous.Id, 1); }
+            catch (TimeoutException) { timedOut = true; }
+            Check("旧进程未退出时重启等待超时，不提前启动窗口", timedOut);
+            RestartService.WaitForPreviousProcess(previous.Id, 10000);
+            Check("重启等待确认旧进程退出后才返回", previous.HasExited);
+            RestartService.WaitForPreviousProcess(previous.Id, 1);
+            Check("旧进程已退出时允许继续启动", true);
+        }
+        catch (Exception ex) { Check("重启等待自测", false, ex.Message); }
     }
 
     private static void Check(string name, bool ok, string detail = "")
@@ -2093,7 +2121,7 @@ public static class SelfTest
         {
             var declared = LocalApi.CoveredRoutes.Select(item => (item.Method, item.Pattern)).ToList();
             var unique = declared.ToHashSet();
-            Check("C# 正式路由保持 51 条", declared.Count == 51, $"{declared.Count} 条");
+            Check("C# 正式路由保持 54 条", declared.Count == 54, $"{declared.Count} 条");
             Check("C# 正式路由无重复", unique.Count == declared.Count,
                 $"declared={declared.Count} unique={unique.Count}");
 
@@ -2102,6 +2130,56 @@ public static class SelfTest
             Check("未知路由明确返回 404（不再代理 8765）",
                 unknown.Status == 404 && unknown.Text.Contains("未知接口", StringComparison.Ordinal),
                 unknown.Text);
+
+            var updatesRoot = Path.Combine(Path.GetTempPath(), "cpod-update-test-" + Guid.NewGuid().ToString("N"));
+            var updater = new UpdateService(Path.Combine(updatesRoot, "missing"), Path.Combine(updatesRoot, "install"), updatesRoot);
+            var updateApi = new LocalApi(initOnStart: false, updateService: updater);
+            var updateState = updateApi.HandleAsync("GET", "/settings/updates", null).Result;
+            Check("更新状态明确报告源码工具不可用", updateState.Status == 200 && updateState.Text.Contains("\"available\":false"));
+            var pref = updateApi.HandleAsync("PUT", "/settings/updates", """{"dailyCheck":true,"autoUpdate":false}""").Result;
+            Check("每日检查偏好保存后读回", pref.Status == 200 && pref.Text.Contains("\"dailyCheck\":true"));
+            var invalid = updateApi.HandleAsync("PUT", "/settings/updates", """{"dailyCheck":false,"autoUpdate":true}""").Result;
+            Check("拒绝绕过每日检查开启自动更新", invalid.Status == 422);
+            var badJson = updateApi.HandleAsync("POST", "/settings/updates", "{").Result;
+            Check("更新请求无效 JSON 返回 422", badJson.Status == 422);
+            var badMode = updateApi.HandleAsync("POST", "/settings/updates", """{"mode":"delete"}""").Result;
+            Check("拒绝未知更新动作", badMode.Status == 422);
+            var badTarget = updateApi.HandleAsync("POST", "/settings/updates", """{"mode":"check","target":"../outside"}""").Result;
+            Check("拒绝未知或越界更新项目", badTarget.Status == 422);
+            var badTargetType = updateApi.HandleAsync("POST", "/settings/updates", """{"mode":"check","target":false}""").Result;
+            Check("更新项目必须是字符串", badTargetType.Status == 422);
+            File.WriteAllText(Path.Combine(updatesRoot, "external.json"), """{"phase":"failed","projects":[{"id":"dou-link","message":"真实测试失败"}]}""");
+            Check("外部失败结果通过已有状态接口读回", updateApi.HandleAsync("GET", "/settings/updates", null).Result.Text.Contains("真实测试失败"));
+            var noPending = updateApi.HandleAsync("POST", "/settings/updates", """{"mode":"apply"}""").Result;
+            Check("没有待安装新版时拒绝退出替换", noPending.Status == 409);
+            var restored = new UpdateService("missing", "missing", updatesRoot);
+            Check("更新偏好跨实例保持", JsonSerializer.Serialize(restored.Status()).Contains("\"dailyCheck\":true"));
+            var workerSource = Path.Combine(updatesRoot, "worker-source");
+            Directory.CreateDirectory(Path.Combine(workerSource, "tools"));
+            File.WriteAllText(Path.Combine(workerSource, "tools", "update-local.ps1"), """
+                param($Mode,$Target,$Source,$Install,$StateDir,$OwnerId)
+                $ErrorActionPreference='Stop'
+                Get-FileHash -LiteralPath $PSCommandPath | Out-Null
+                @{phase='checked';message=$Target} | ConvertTo-Json | Set-Content -LiteralPath "$StateDir\status.json" -Encoding UTF8
+                Write-Output "WORKER_TARGET=$Target"
+                """, new System.Text.UTF8Encoding(true));
+            var workerRoot = Path.Combine(updatesRoot, "worker-state");
+            var worker = new UpdateService(workerSource, "missing", workerRoot);
+            var workerApi = new LocalApi(initOnStart:false, updateService:worker);
+            var priorModules = Environment.GetEnvironmentVariable("PSModulePath");
+            LocalApi.Reply accepted;
+            try
+            {
+                Environment.SetEnvironmentVariable("PSModulePath", Path.Combine(updatesRoot,"nonexistent-modules"));
+                accepted = workerApi.HandleAsync("POST", "/settings/updates", """{"mode":"check","target":"Bili-Peek"}""").Result;
+                var clock = Stopwatch.StartNew();
+                while (worker.IsBusy && clock.Elapsed < TimeSpan.FromSeconds(10)) Thread.Sleep(20);
+            }
+            finally { Environment.SetEnvironmentVariable("PSModulePath", priorModules); }
+            Check("API 更新请求确实执行 PowerShell 并写回对应项目结果",
+                accepted.Status == 202 && !worker.IsBusy && File.Exists(Path.Combine(workerRoot,"worker.log"))
+                && File.ReadAllText(Path.Combine(workerRoot,"worker.log")).Contains("WORKER_TARGET=Bili-Peek")
+                && File.ReadAllText(Path.Combine(workerRoot,"status.json")).Contains("Bili-Peek"));
         }
         catch (Exception ex)
         {
