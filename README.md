@@ -93,12 +93,17 @@ ControlPod/
 ├─ app.js                     前端逻辑与页面渲染
 ├─ styles.css                 全站样式与设计令牌
 ├─ smoke-test.js              前端冒烟测试（同时是活规格）
+├─ web/
+│  └─ shell-bridge.js         页面与壳的 WebView2 消息桥
 ├─ shell/                     WinUI 3 桌面外壳（C# 源码）
 │  ├─ ApexShell.csproj
 │  ├─ MainWindow.xaml.cs      窗口 / 托盘 / WebView2 / WebMessage 桥
 │  ├─ LocalApi.cs             壳内路由分发器
+│  ├─ UpdateService.cs        本地与外部项目的检查 / 测试 / 更新
+│  ├─ RestartService.cs       退出后重启与替换交接
 │  ├─ Db.cs                   SQLite 门面与迁移
 │  └─ SelfTest.cs             无头自测（--selftest）
+├─ tools/                     本地更新、外部更新、退出后替换与产物裁剪脚本
 ├─ docs/
 │  └─ module-authoring.md     外部项目模块清单约定
 └─ AGENTS.md                  项目约束与维护说明（改代码前先读）
