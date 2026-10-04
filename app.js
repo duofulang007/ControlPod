@@ -5731,22 +5731,19 @@ $('#voiceBtn').addEventListener('click', e => {
   else startVoice();
 });
 $('#themeBtn').addEventListener('click', toggleTheme);
-/* 折叠按钮双模：宽窗口走 .mini 常驻折叠；紧凑窗口（≤1199，W1 强制图标条）改走 side-flyout
-   浮层展开——否则按钮在这个区间是死的（CSS 锁 76px，加不加 .mini 都没变化，侧栏永远出不来）。
-   浮层点侧栏以外任意处（或再次点按钮）收起；窗口拉宽后浮层态自动作废，不会带回宽窗口。 */
+/* 折叠按钮双模：宽窗口走 .mini 常驻折叠；紧凑窗口（≤1199，W1 把侧栏锁成 76px 图标条）
+   改走 .side-open —— 让侧栏占回 240px 那一列、把主区推开。不加这个类的话按钮在这个区间
+   是死的（CSS 锁 76px，加不加 .mini 都没变化，侧栏永远出不来）。
+   收起两条路：再点一次按钮；把窗口拉宽（拉宽后 W1 规则不再生效，展开态自动作废）。
+   ⚠️ **不要**再挂「点侧栏以外收起」：展开态是把主区推窄的常驻布局，不是模态浮层，
+   点内容区就收起会让整个主区连同光标下的卡片横移 164px（2026-10-04 撤掉）。 */
 $('#miniBtn').addEventListener('click', () => {
   const app = $('#app');
-  if (window.matchMedia('(max-width:1199.98px)').matches) app.classList.toggle('side-flyout');
+  if (window.matchMedia('(max-width:1199.98px)').matches) app.classList.toggle('side-open');
   else app.classList.toggle('mini');
 });
-document.addEventListener('click', (e) => {
-  const app = $('#app');
-  if (!app.classList.contains('side-flyout')) return;
-  const t = e.target;
-  if (!(t && t.closest && t.closest('.sidebar'))) app.classList.remove('side-flyout');
-});
 window.matchMedia('(max-width:1199.98px)').addEventListener('change', (e) => {
-  if (!e.matches) $('#app').classList.remove('side-flyout');
+  if (!e.matches) $('#app').classList.remove('side-open');
 });
 $('#drawerMask').addEventListener('click', closeDrawer);
 const topmostBtn = $('#topmostBtn');

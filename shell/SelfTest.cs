@@ -43,7 +43,7 @@ public static class SelfTest
         if (Stage("projects")) CheckProjectDomainRoutes();
         if (Stage("modules")) CheckModuleDomainRoutes();
         if (Stage("bootstrap")) CheckBootstrapPayload();
-        if (Stage("dashchrome")) CheckDashboardChrome();
+        if (Stage("dashchrome")) { CheckDashboardChrome(); CheckWebAssetCache(); CheckFullscreenTransition(); }
         if (Stage("routes")) { CheckRouteCoverage(); CheckWebMessageProtocol(); }
         if (Stage("restart")) CheckRestartWait();
 
@@ -2055,6 +2055,138 @@ public static class SelfTest
         catch (Exception ex)
         {
             Check("看板窗口条套件无异常", false, ex.GetType().Name + ": " + ex.Message);
+        }
+    }
+
+    /// <summary>Web 资源必须每次启动都是新的（2026-10-04 踩实）。
+    ///
+    /// 壳用的是持久化 WebView2 profile（%LOCALAPPDATA%\ApexShell\WebView2），apex.local 下的
+    /// index.html / app.js / styles.css 会被 Chromium 按 URL 缓存。踩的这次是：app.js 连改两版，
+    /// 磁盘缓存里一版新的都没有 —— 页面一直跑改动前的旧脚本，表现是「新功能一点没生效、也不报任何错」，
+    /// 查了很久才靠 grep 缓存里的版本标记定位到。
+    /// 修法：壳每次启动清一次 DiskCache（只清缓存，cookie / localStorage 不动）。这条守着它别被删。</summary>
+    private static void CheckWebAssetCache()
+    {
+        try
+        {
+            var chrome = File.ReadAllText(Path.Combine(ConsoleConfig.ProjectDir, "shell", "MainWindow.xaml.cs"));
+            Check("壳每次启动清 WebView2 磁盘缓存（改完 Web 文件重启即生效，不靠缓存里的旧脚本）",
+                chrome.Contains("ClearBrowsingDataAsync")
+                && chrome.Contains("CoreWebView2BrowsingDataKinds.DiskCache"));
+        }
+        catch (Exception ex)
+        {
+            Check("Web 资源缓存策略套件无异常", false, ex.GetType().Name + ": " + ex.Message);
+        }
+    }
+
+    /// <summary>全屏过渡动画的守卫（2026-10-04）。
+    ///
+    /// 这一套的每一根线都是「删一行就回到割裂感、而且不报错」的那种：
+    /// · 帧间隔 15ms ≈60Hz：调回 7ms 会让 WebView2 渲不过来，上一帧被拉伸顶上（看着像内容被拉大还晃）；
+    /// · 世代号取消：连点 / 中途反向不能留下两个线程抢窗口；
+    /// · 收尾同步对齐：异步帧可能差 1px，最后必须精确落位；
+    /// · _animating 静音：不然每帧回推一次 is-fullscreen，主内容会「先铺满再跳回限宽」；
+    /// · 时序不对称：进入时立刻回推、退出时收尾才摘，两边都为了消掉「瞬间跳宽」。
+    /// 再加两条页面侧负向断言，防止「钉住布局 / 整体 scale」那套回潮。</summary>
+    private static void CheckFullscreenTransition()
+    {
+        try
+        {
+            var path = Path.Combine(ConsoleConfig.ProjectDir, "shell", "WindowChrome.cs");
+            if (!File.Exists(path))
+            {
+                Check("能找到 shell/WindowChrome.cs", false, path);
+                return;
+            }
+            var cs = File.ReadAllText(path);
+
+            /* ---- 时长与帧率 ---- */
+            Check("过渡时长 340ms、帧间隔 15ms（≈60Hz）",
+                cs.Contains("AnimDurationMs = 340") && cs.Contains("AnimFrameMs = 15"));
+            Check("帧间隔没有被调回 7ms（140Hz 会让 WebView2 渲不过来、把上一帧拉伸顶上）",
+                !System.Text.RegularExpressions.Regex.IsMatch(cs, @"AnimFrameMs\s*=\s*7\s*;"));
+
+            /* ---- 缓动：直接调函数验数学性质，比 grep 常量更硬 ---- */
+            Check("缓动端点精确：ease(0)=0、ease(1)=1（起止不跳）",
+                WindowChrome.EaseInOutEmphasized(0) == 0 && WindowChrome.EaseInOutEmphasized(1) == 1);
+            var half = WindowChrome.EaseInOutEmphasized(0.5);
+            Check("缓动是「起步干脆 + 末端柔和减速」：前一半时间走完约 88% 的距离",
+                half > 0.85 && half < 0.91, $"ease(0.5)={half:0.###}");
+            var monotone = true;
+            var prev = 0.0;
+            for (var i = 0; i <= 100; i++)
+            {
+                var v = WindowChrome.EaseInOutEmphasized(i / 100.0);
+                if (v < prev - 1e-9) monotone = false;
+                prev = v;
+            }
+            Check("缓动在 0..1 上单调不减（无回弹 / 无 overshoot）", monotone);
+            Check("曲线是 cubic-bezier(0.2, 0, 0, 1)：两个轴分别取 (0.2,0) / (0,1)",
+                cs.Contains("BezierAxis(u, 0.2, 0.0)") && cs.Contains("BezierAxis(u, 0.0, 1.0)"));
+            Check("缓动用二分求参数（直接拿 t 当贝塞尔参数会得到错误进度）",
+                cs.Contains("for (var i = 0; i < 24; i++)"));
+
+            /* ---- 取消与收尾 ---- */
+            Check("世代号取消：连点 / 中途反向下旧线程自己退出，不会两个线程抢窗口",
+                cs.Contains("Interlocked.Increment(ref _animGeneration)")
+                && cs.Contains("Volatile.Read(ref _animGeneration) != gen"));
+            var finish = MethodBody(cs, "void Finish()");
+            Check("收尾用同步 SetWindowPos 精确落位（异步帧可能差 1px）",
+                finish.Contains("SwpNozorder | SwpNoactivate)")
+                && !System.Text.RegularExpressions.Regex.IsMatch(finish, @"SwpAsyncwindowpos"));
+            Check("收尾先精确对齐、再放开静音、最后回推状态",
+                finish.IndexOf("SetWindowPos", StringComparison.Ordinal) >= 0
+                && finish.IndexOf("Volatile.Write(ref _animating, 0)", StringComparison.Ordinal)
+                   > finish.IndexOf("SetWindowPos", StringComparison.Ordinal)
+                && finish.IndexOf("onDone?.Invoke()", StringComparison.Ordinal)
+                   > finish.IndexOf("Volatile.Write(ref _animating, 0)", StringComparison.Ordinal));
+
+            /* ---- 动画期间的静音守卫 ---- */
+            var ctor = MethodBody(cs, "public WindowChrome(Window window, AppWindow appWindow)");
+            Check("动画期间静音窗口事件：不回推最大化状态、也不把中间帧尺寸持久化成布局",
+                ctor.Contains("if (Volatile.Read(ref _animating) != 0) return;")
+                && ctor.IndexOf("Volatile.Read(ref _animating)", StringComparison.Ordinal)
+                   < ctor.IndexOf("PlacementChanged?.Invoke()", StringComparison.Ordinal));
+
+            /* ---- 外层窗口几何：四边一起插值 ---- */
+            Check("几何插值同时改位置与尺寸（窗口向四周扩张，不是单边推）",
+                cs.Contains("private static RectInt32 LerpRect")
+                && cs.Contains("SwpNozorder | SwpNoactivate | SwpAsyncwindowpos"));
+
+            /* ---- 圆角：DWM 只有两档，靠近全屏时切 ---- */
+            Check("圆角按阈值切 DWM 档位（8px 圆角在接近全屏的窗口上看不出，切换不可察觉）",
+                cs.Contains("DwmcpDoNotRound") && cs.Contains("private void SetCornersRounded")
+                && cs.Contains("SetCornersRounded(entering ? e <= 0.85 : e < 0.15)"));
+
+            /* ---- 尊重系统「减少动画」 ---- */
+            Check("系统关掉动画时直接吸附（与页面 prefers-reduced-motion 口径一致）",
+                cs.Contains("Windows.UI.ViewManagement.UISettings")
+                && cs.Contains("AnimationsEnabled"));
+
+            /* ---- 时序不对称：消掉「瞬间跳宽」的关键 ---- */
+            var toggle = MethodBody(cs, "public void ToggleMaximize()");
+            var enterEmit = toggle.IndexOf("EmitMaximized(true);", StringComparison.Ordinal);
+            var enterAnim = toggle.IndexOf("AnimateWindowTo(_restoreRect, outer, entering: true", StringComparison.Ordinal);
+            Check("进入全屏：先回推 is-fullscreen 再起动画（限宽从头参与布局，不会先铺满再跳回限宽）",
+                enterEmit >= 0 && enterAnim > enterEmit);
+            Check("退出全屏：is-fullscreen 压在动画收尾才摘（摘早了主内容会从 1440 瞬间弹到 1920）",
+                toggle.Contains("AnimateWindowTo(from, to, entering: false, () => EmitMaximized(false))"));
+
+            /* ---- 页面侧负向：禁止「钉住布局 / 整体 scale」那套回潮 ---- */
+            var appJs = File.ReadAllText(Path.Combine(ConsoleConfig.ProjectDir, "app.js"));
+            var css = File.ReadAllText(Path.Combine(ConsoleConfig.ProjectDir, "styles.css"));
+            Check("页面侧没有「钉住布局 / 收尾换布局」那套（fs-hold / fs-anim / fs-swap 不许回潮）",
+                !appJs.Contains("fs-hold") && !appJs.Contains("fs-anim") && !appJs.Contains("fs-swap")
+                && !css.Contains("fs-hold") && !css.Contains("fs-anim"));
+            var appRule = System.Text.RegularExpressions.Regex.Match(css, @"\.app\{([^}]*)\}");
+            Check("不对 App 根节点做整体 scale（窗口展开 ≠ 网页被放大），根容器也不用 transition:all",
+                appRule.Success && !appRule.Groups[1].Value.Contains("scale(")
+                && !System.Text.RegularExpressions.Regex.IsMatch(appRule.Groups[1].Value, @"transition\s*:\s*all"));
+        }
+        catch (Exception ex)
+        {
+            Check("全屏过渡动画套件无异常", false, ex.GetType().Name + ": " + ex.Message);
         }
     }
 

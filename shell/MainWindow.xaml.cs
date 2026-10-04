@@ -695,6 +695,28 @@ public sealed partial class MainWindow : Window
 
             Log("=== shell start ===");
             Web.CoreWebView2.WebMessageReceived += OnWebMessageReceived;
+
+            /* 每次启动先清掉 WebView2 的磁盘缓存（2026-10-04 踩实）。
+             *
+             * 壳用的是持久化 profile（%LOCALAPPDATA%\ApexShell\WebView2），apex.local 下的
+             * index.html / app.js / styles.css 会被 Chromium 缓存。踩的这次是：app.js 连改两版，
+             * 磁盘缓存里一版新的都没有 —— 页面一直跑改动前的旧脚本，表现是「新功能一点没生效、
+             * 也不报任何错」，靠 grep 缓存里的版本标记才定位到。
+             *
+             * 本地静态资源重新读一遍的代价可以忽略（几百 KB），换来的是「改完 Web 文件重启即生效」，
+             * 不必再依赖 index.html 里的 ?v= 串记得往上滚。只清 DiskCache —— cookie / localStorage
+             * 一律不碰，界面偏好照旧。 */
+            try
+            {
+                await Web.CoreWebView2.Profile.ClearBrowsingDataAsync(
+                    Microsoft.Web.WebView2.Core.CoreWebView2BrowsingDataKinds.DiskCache);
+                Log("webview: 已清磁盘缓存（本地静态资源每次重启重新读取）");
+            }
+            catch (Exception ex)
+            {
+                Log("webview: 清磁盘缓存失败（不影响使用）— " + ex.Message);
+            }
+
             Web.CoreWebView2.Navigate($"https://{VirtualHost}/index.html");
         }
         catch (Exception ex)

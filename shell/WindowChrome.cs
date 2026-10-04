@@ -90,10 +90,16 @@ internal sealed class WindowChrome
         _appWindow.Changed += (_, args) =>
         {
             if (!args.DidSizeChange && !args.DidPositionChange) return;
+            // 过渡动画期间每帧都在改几何，这里必须静音，否则会踩两个坑：
+            // ① 每帧回推一次最大化状态 → 页面的 is-fullscreen 在错误的时刻落定，
+            //    主内容会「先铺满再跳回限宽」；
+            // ② 把动画中间帧的尺寸当成用户的窗口化布局持久化下来。
+            // 收尾由 AnimateWindowTo 统一处理（精确对齐后再放开静音 + 回推）。
+            if (Volatile.Read(ref _animating) != 0) return;
             EmitMaximized(_fullscreen || (_appWindow.Presenter is OverlappedPresenter p
                 && p.State == OverlappedPresenterState.Maximized));
             // 几何变化顺带上报，供宿主持久化布局（宿主自己防抖，这里不筛频率）
-            if (args.DidSizeChange || args.DidPositionChange) PlacementChanged?.Invoke();
+            PlacementChanged?.Invoke();
         };
     }
 
@@ -105,6 +111,38 @@ internal sealed class WindowChrome
 
     /// <summary>当前处于「铺满整块屏幕」的全屏态（WinAppSDK 1.6 没有 presenter 级全屏，用标志位自管）。</summary>
     private bool _fullscreen;
+
+    /* ---------- 全屏过渡动画（2026-10-04） ----------
+       目标：1:1 复刻 ChatGPT 网页端的「窗口/内容表面 → 全屏 → 退出全屏」过渡。
+       核心不是把整个 App 放大，而是让**当前窗口表面**平滑扩张到屏幕四周。
+
+       硬约束（多弗朗明确给出，照做，别自作主张加东西）：
+       · 动画只发生在**外层窗口**（位置 / 尺寸 / 圆角 / 阴影 / 裁剪）。内部文字、按钮、
+         图标、输入框、侧边栏始终保持 1:1 —— 绝不对 App 根节点做整体 scale，
+         那是「网页被放大」，不是「窗口展开」。
+       · 内容只按新的可用空间自然重排 → 所以**页面侧一行都不加**，就是让 WebView2
+         跟着窗口逐帧重排。任何「钉住布局 / 收尾再换布局 / 交叉淡化」都会让内容在某一刻
+         突然换一次宽，正是要避免的割裂感（上一版被否掉就是这个原因）。
+       · 不做弹簧 / 回弹 / overshoot，不做整体淡入淡出，不给内部控件加 transform 动画。
+       · 起步干脆、中段连续、末端柔和减速、精确停住。 */
+
+    /// <summary>过渡时长（毫秒）。300–400 是舒适区；340 配 cubic-bezier(0.2,0,0,1)
+    /// 正好是「起步干脆、末端柔和减速」。</summary>
+    internal const int AnimDurationMs = 340;
+
+    /// <summary>帧间隔（毫秒），≈60Hz。**别调到 7ms**：2026-10-04 实测 140Hz 时 WebView2
+    /// 渲不过来，会把上一帧拉伸到新尺寸顶上去（用户看到的「内容被拉大一下、还在晃」），
+    /// 帧越密越糟。60Hz 才留足 16.7ms 预算让 Chromium 完成 layout + paint。</summary>
+    internal const int AnimFrameMs = 15;
+
+    /// <summary>动画世代号：连点 / 中途反向时，旧线程发现世代变了就自己退出，不会两个线程抢窗口。</summary>
+    private int _animGeneration;
+
+    /// <summary>1 = 正在跑几何过渡。用来静音 _appWindow.Changed 的自动回推与布局持久化。</summary>
+    private int _animating;
+
+    /// <summary>当前 DWM 圆角档位缓存，避免每帧重复调 DWM。</summary>
+    private bool _cornersRounded = true;
 
     /// <summary>进全屏前的窗口化矩形，退出时还原。</summary>
     private RectInt32 _restoreRect;
@@ -303,21 +341,30 @@ internal sealed class WindowChrome
     /// 含每边 8px 的<b>不可见调整边框</b>，最大化时读出来是 <c>(-8,-8)-(1928,1040)</c>，看着像溢出，
     /// 其实可见边框 <c>DwmGetWindowAttribute(DWMWA_EXTENDED_FRAME_BOUNDS)</c> 正好等于工作区。
     /// 2026-09-26 实测：可见 (0,0)-(1920,1032) == rcWork，左上各 8px 差异全是不可见边框。</summary>
-    /// <summary>全屏切换（页面 #fsBtn 或双击拖动区）。
+    /// <summary>全屏切换（页面 #fsBtn、看板窗口条 DashFull、双击拖动区 —— 三路合一）。
     /// 多弗朗 2026-09-26：全屏要铺满**整块屏幕**（1K = 1920×1080），不是避开任务栏的工作区最大化。
-    /// WinAppSDK 1.6 的 OverlappedPresenter 没有 SetFullscreen，所以：MoveAndResize 到监视器矩形 +
-    /// 临时置顶（不然任务栏压在窗口上）；退出时还原窗口化矩形与置顶状态。</summary>
+    /// 2026-10-04：改成**从当前窗口真实边界平滑扩张**到屏幕四周（退出反向收缩），几何全部由
+    /// 外层窗口逐帧插值，页面内容只跟着新的可用空间自然重排 —— 见 AnimateWindowTo。
+    ///
+    /// 时序上有一处**刻意的不对称**，它是消掉「瞬间跳宽」的关键（别顺手改成对称的）：
+    /// · 进入：动画**开始**就把 is-fullscreen 回推给页面。卡片宽（1260 上下）时
+    ///   max-width:1440 根本不起作用，之后窗口每宽一点、限宽才逐渐参与布局，全程连续。
+    ///   若压到收尾才回推，内容会先铺满 1920 再跳回 1440 居中 —— 那正是「瞬间又变大」的割裂感。
+    /// · 退出：动画**收尾**才摘。摘早了窗口还 1920 宽，主内容会从 1440 瞬间弹到 1920。</summary>
     public void ToggleMaximize()
     {
         if (_appWindow.Presenter is not OverlappedPresenter presenter) return;
+
         if (_fullscreen)
         {
             _fullscreen = false;
             _fullscreenIntent = false;
             presenter.IsAlwaysOnTop = _topmostBefore;
-            _appWindow.MoveAndResize(_restoreRect);
-            ShellLog.Log("chrome: 退出全屏 -> 还原窗口化");
-            EmitMaximized(false);
+            var from = CurrentOuterRect();      // 实时读：中途连点也不会从过期的起点出发
+            var to = _restoreRect;
+            ShellLog.Log($"chrome: 退出全屏 {from.Width}x{from.Height} -> {to.Width}x{to.Height}@{to.X},{to.Y}"
+                         + (AnimationsDisabled() ? "（瞬时：系统已关动画）" : $"（{AnimDurationMs}ms）"));
+            AnimateWindowTo(from, to, entering: false, () => EmitMaximized(false));
             return;
         }
 
@@ -330,9 +377,149 @@ internal sealed class WindowChrome
         _fullscreenIntent = true;
         presenter.IsAlwaysOnTop = true;          // 不置顶的话任务栏会压在窗口底部
         var outer = FullscreenOuterRect(monitor);
-        _appWindow.MoveAndResize(outer);
-        ShellLog.Log($"chrome: 进入全屏 目标 {monitor.Width}x{monitor.Height} 外层 {outer.Width}x{outer.Height} @{outer.X},{outer.Y}");
-        EmitMaximized(true);
+        EmitMaximized(true);                     // 立刻回推：限宽规则从现在起就参与布局，全程连续
+        ShellLog.Log($"chrome: 进入全屏 {_restoreRect.Width}x{_restoreRect.Height}@{_restoreRect.X},{_restoreRect.Y}"
+                     + $" -> {outer.Width}x{outer.Height}@{outer.X},{outer.Y}"
+                     + (AnimationsDisabled() ? "（瞬时：系统已关动画）" : $"（{AnimDurationMs}ms）"));
+        AnimateWindowTo(_restoreRect, outer, entering: true, null);
+    }
+
+    /* ---------- 过渡动画实现 ---------- */
+
+    /// <summary>DWM 的「不要圆角」档（DWMWCP_DONOTROUND）。</summary>
+    private const int DwmcpDoNotRound = 1;
+
+    /// <summary>把窗口几何从 <paramref name="from"/> 逐帧插值到 <paramref name="to"/>。
+    ///
+    /// 为什么放后台线程 + timeBeginPeriod(1)：UI 线程会被 WebView2 的渲染挤占，
+    /// DispatcherQueueTimer 分辨率粗、会被拖成掉帧（与 BeginDrag 同因）。
+    ///
+    /// 为什么用 SWP_ASYNCWINDOWPOS：逐帧同步落位会阻塞调用线程、让窗口线程排队；
+    /// 异步落位足够跟手，收尾再用一次同步 SetWindowPos 精确对齐（异步帧可能差 1px）。
+    ///
+    /// 圆角：DWM 只给「圆 / 不圆」两档（没有任意半径），没法逐帧插值。折中是靠近全屏时才切档
+    /// —— 8px 圆角在接近屏幕尺寸的窗口上已经看不出来，切换不可察觉；反过来退出时等窗口收缩得
+    /// 差不多了再切回圆角，免得窗口还在全屏位置就露出四个圆角缺口。阴影不用特意管：窗口铺满后
+    /// DWM 阴影本身落在屏幕外，随扩张自然「消失」。</summary>
+    private void AnimateWindowTo(RectInt32 from, RectInt32 to, bool entering, Action? onDone)
+    {
+        var gen = Interlocked.Increment(ref _animGeneration);
+        Volatile.Write(ref _animating, 1);
+
+        if (AnimationsDisabled())
+        {
+            Finish();                            // 系统关了动画：一步吸附，与页面 prefers-reduced-motion 一致
+            return;
+        }
+
+        var thread = new Thread(() =>
+        {
+            timeBeginPeriod(1);
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            try
+            {
+                while (true)
+                {
+                    if (Volatile.Read(ref _animGeneration) != gen) return;    // 已被新一代接管
+                    var p = Math.Min(1.0, sw.Elapsed.TotalMilliseconds / AnimDurationMs);
+                    var e = EaseInOutEmphasized(p);
+                    var r = LerpRect(from, to, e);
+                    _ = SetWindowPos(_hwnd, IntPtr.Zero, r.X, r.Y, r.Width, r.Height,
+                        SwpNozorder | SwpNoactivate | SwpAsyncwindowpos);
+                    SetCornersRounded(entering ? e <= 0.85 : e < 0.15);
+                    if (p >= 1.0) break;
+                    Thread.Sleep(AnimFrameMs);
+                }
+            }
+            finally
+            {
+                timeEndPeriod(1);
+            }
+            _window.DispatcherQueue.TryEnqueue(() =>
+            {
+                if (Volatile.Read(ref _animGeneration) != gen) return;        // 中途被接管，别动别人的窗口
+                Finish();
+            });
+        })
+        { IsBackground = true };
+        thread.Start();
+
+        void Finish()
+        {
+            // 收尾精确对齐（抹掉异步落位那不到 1px 的误差），再放开静音、回推状态
+            _ = SetWindowPos(_hwnd, IntPtr.Zero, to.X, to.Y, to.Width, to.Height,
+                SwpNozorder | SwpNoactivate);
+            SetCornersRounded(!entering);
+            Volatile.Write(ref _animating, 0);
+            onDone?.Invoke();
+        }
+    }
+
+    /// <summary>cubic-bezier(0.2, 0, 0, 1)：起步干脆、中段连续、末端柔和减速
+    /// （前一半时间走完约 88% 的距离，剩下的是长尾巴减速）。
+    /// 实现必须二分求参数 u 使 x(u)=t 再取 y(u) —— 直接拿 t 当参数取 y 会得到错误的进度，
+    /// 因为贝塞尔的两个轴不是同一个参数。</summary>
+    internal static double EaseInOutEmphasized(double t)
+    {
+        if (t <= 0) return 0;
+        if (t >= 1) return 1;
+        double lo = 0, hi = 1, u = t;
+        for (var i = 0; i < 24; i++)
+        {
+            u = (lo + hi) / 2;
+            if (BezierAxis(u, 0.2, 0.0) < t) lo = u; else hi = u;
+        }
+        return BezierAxis(u, 0.0, 1.0);
+    }
+
+    /// <summary>三次贝塞尔某一轴的取值（端点固定 P0=0 / P3=1，只传中间两个控制点分量）。</summary>
+    private static double BezierAxis(double u, double a, double b)
+    {
+        var v = 1 - u;
+        return 3 * v * v * u * a + 3 * v * u * u * b + u * u * u;
+    }
+
+    /// <summary>两个矩形按比例插值（四边一起走，所以窗口是「向四周扩张」而不是「向一边推」）。</summary>
+    private static RectInt32 LerpRect(RectInt32 a, RectInt32 b, double t) =>
+        new((int)Math.Round(a.X + (b.X - a.X) * t),
+            (int)Math.Round(a.Y + (b.Y - a.Y) * t),
+            (int)Math.Round(a.Width + (b.Width - a.Width) * t),
+            (int)Math.Round(a.Height + (b.Height - a.Height) * t));
+
+    /// <summary>当前窗口的外层矩形。<b>GetWindowRect 口径与 AppWindow.Position/Size、
+    /// MoveAndResize 三者一致</b>（都含 WS_THICKFRAME 那圈不可见调整边框），所以插值可以直接
+    /// 拿 _restoreRect 当起点终点，不需要做边框补偿。</summary>
+    private RectInt32 CurrentOuterRect()
+    {
+        var gwr = new NativeRect();
+        if (!GetWindowRect(_hwnd, ref gwr))
+        {
+            var p = _appWindow.Position;
+            var s = _appWindow.Size;
+            return new RectInt32(p.X, p.Y, s.Width, s.Height);
+        }
+        return new RectInt32(gwr.left, gwr.top, gwr.right - gwr.left, gwr.bottom - gwr.top);
+    }
+
+    /// <summary>切换 DWM 圆角档位。只有两档可选，所以只在真正跨档时调一次 DWM，别每帧 hammer。</summary>
+    private void SetCornersRounded(bool rounded)
+    {
+        if (_cornersRounded == rounded) return;
+        _cornersRounded = rounded;
+        try
+        {
+            var corner = rounded ? DwmcpRound : DwmcpDoNotRound;
+            _ = DwmSetWindowAttribute(_hwnd, DwmwaWindowCornerPreference, ref corner, sizeof(int));
+        }
+        catch { /* 圆角只是视觉细节，拿不到也不能因此中断窗口动画 */ }
+    }
+
+    /// <summary>系统是否关掉了动画（Windows 的「显示动画」设置，≈ 页面的 prefers-reduced-motion）。
+    /// 命中就直接吸附到目标、不跑帧循环 —— 页面侧那条 @media 也会同步退化成瞬时，两边口径一致。</summary>
+    private static bool AnimationsDisabled()
+    {
+        try { return !new Windows.UI.ViewManagement.UISettings().AnimationsEnabled; }
+        catch { return false; }
     }
 
     /// <summary>算出全屏要用的「外层矩形」。MoveAndResize 设的是含<b>不可见调整边框</b>的外层矩形，

@@ -88,7 +88,7 @@ textarea,
 
   --pg:20px;
   --pg-sm:12px;
-  --side-pad:16px;       /* 侧栏内边距：折叠态与移动浮层用的是同一个值（.app.mini / .side-flyout） */
+  --side-pad:16px;       /* 侧栏内边距：折叠态与紧凑窗口下展开的侧栏用的是同一个值（.app.mini / .side-open） */
   --gap:16px;
   --pad:18px;
   /* 侧栏顶棚的拖动带（.brand::before）几何：h = 整条带子高度，head = 里面留给折叠按钮那一段，
@@ -303,7 +303,7 @@ input,select{font:inherit;color:inherit}
 /* 布局骨架：侧栏固定 240px（1260 标准窗口下主区约 1020px） */
 /* overflow:clip 不是为了自己滚动 —— 侧栏 / 主区两块各自 overflow:hidden 就够了；
    它是给「声明的拖动层」清场的：拖动层要铺到窗口最顶那条系统保留区、也要压进侧栏内边距，
-   这些越界矩形只有在这里不被裁掉才轮得到 .main / .brand 自己裁（.side-flyout 的 240px 浮层
+   这些越界矩形只有在这里不被裁掉才轮得到 .main / .brand 自己裁（.side-open 的 240px 侧栏
    和 76px 图标条都靠它们）。clip 与 hidden 一样裁，但不建滚动容器，不会多出一条滚动条。 */
 .app{display:grid;grid-template-columns:var(--side-w) minmax(0,1fr);height:100vh;height:100dvh;
   overflow:clip;transition:grid-template-columns var(--motion-panel) var(--ease-out)}
@@ -1905,22 +1905,26 @@ svg{display:block}
    规则与 .app.mini 一一对应，但用 .app:not(.mini) 书写 —— 手动折叠时由 .mini 自己的规则接管，两套来源不打架 */
 @media (max-width:1199.98px){
   .app{grid-template-columns:76px minmax(0,1fr)}
-  .app:not(.mini):not(.side-flyout) .brand{gap:0;justify-content:center;padding-top:0}
+  .app:not(.mini):not(.side-open) .brand{gap:0;justify-content:center;padding-top:0}
   /* 与 .app.mini 同理：折叠按钮撑满内容区宽再由自身居中，避免比导航项偏左 4.5px */
-  .app:not(.mini):not(.side-flyout) .side-mini{width:100%;flex:0 0 100%}
-  .app:not(.mini):not(.side-flyout) .brand-header{height:var(--brand-drag-h);flex:0 0 100%;justify-content:center}
-  .app:not(.mini):not(.side-flyout) .brand-header>*:not(.side-mini),
-  .app:not(.mini):not(.side-flyout) .brand>*:not(.brand-header){display:none}
-  .app:not(.mini):not(.side-flyout) .brand::before{bottom:0;height:var(--brand-drag-h)}
-  .app:not(.mini):not(.side-flyout) .side-label,
-  .app:not(.mini):not(.side-flyout) .nav-item span{display:none}
-  .app:not(.mini):not(.side-flyout) .nav-item{justify-content:center;padding:9px}
+  .app:not(.mini):not(.side-open) .side-mini{width:100%;flex:0 0 100%}
+  .app:not(.mini):not(.side-open) .brand-header{height:var(--brand-drag-h);flex:0 0 100%;justify-content:center}
+  .app:not(.mini):not(.side-open) .brand-header>*:not(.side-mini),
+  .app:not(.mini):not(.side-open) .brand>*:not(.brand-header){display:none}
+  .app:not(.mini):not(.side-open) .brand::before{bottom:0;height:var(--brand-drag-h)}
+  .app:not(.mini):not(.side-open) .side-label,
+  .app:not(.mini):not(.side-open) .nav-item span{display:none}
+  .app:not(.mini):not(.side-open) .nav-item{justify-content:center;padding:9px}
   /* 更新小圈在 W1 自动折叠下同样要居中于内容区（基础规则是 align-self:flex-start，
      不覆盖的话它会贴左边，中心 33 而非 37.5 —— 与 .app.mini 下的表现不一致）。 */
-  .app:not(.mini):not(.side-flyout) .side-update{align-self:center;margin:2px auto}
-  /* 手动展开（点折叠按钮）：侧栏以 240px 浮层临时覆盖主区，内容完整可读；主区占满全宽不受挤压 */
-  .app.side-flyout{grid-template-columns:minmax(0,1fr)}
-  .app.side-flyout .sidebar{position:fixed;left:0;top:0;bottom:0;z-index:60;width:240px;box-shadow:var(--sh-lg)}
+  .app:not(.mini):not(.side-open) .side-update{align-self:center;margin:2px auto}
+  /* 手动展开（点折叠按钮）：侧栏占回 240px 那一列，主区被**推开**并按窄一档重排。
+     与宽窗口是同一套骨架（侧栏占列 → 主区 minmax(0,1fr)），不是第二套布局。
+     ⚠️ 这里以前是 position:fixed 的 240px 浮层盖在主区上（「主区占满全宽不受挤压」）。
+     2026-10-04 实测这条路是错的：主区仍按全宽排版，浮层把顶栏搜索框左侧 226px、
+     卡片左侧连同正文一起压在毛玻璃下面 —— 用户看到的就是「页面没压缩 + 内容消失」，
+     外加被 blur 采样出来的一团彩影。**别再改回浮层**，覆盖必然与「内容完整可读」互斥。 */
+  .app.side-open{grid-template-columns:var(--side-w) minmax(0,1fr)}
 }
 
 /* W2 堆叠档（宽 ≤960）：总控台 bento 退化为单列，按 主→次→次→次 纵排；

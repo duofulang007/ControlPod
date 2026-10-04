@@ -4,7 +4,10 @@
 <meta charset="UTF-8">
 <meta content="width=device-width, initial-scale=1" name="viewport">
 <title>ControlPod</title>
-<link href="styles.css?v=20260930F" rel="stylesheet">
+<!-- 资源版本串：改完 app.js / styles.css 要把这里的串往上滚一格 —— 串没变的话 WebView2 会继续
+     用磁盘缓存里的旧文件（2026-10-04 踩过：页面一直跑改动前的旧脚本，新功能一点不生效还不报错）。
+     壳每次启动还会清一次 WebView2 磁盘缓存兜底，见 MainWindow.InitWebViewAsync。 -->
+<link href="styles.css?v=20261004D" rel="stylesheet">
 </head>
 <body>
 
@@ -215,6 +218,6 @@
 <div class="toasts" id="toasts"></div>
 
 <script src="web/shell-bridge.js?v=20260929A"></script>
-<script src="app.js?v=20260930F"></script>
+<script src="app.js?v=20261004D"></script>
 </body>
 </html>

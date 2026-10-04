@@ -2335,21 +2335,32 @@ try {
     && /body\{[^}]*overflow:auto/.test(css2),
     '全站最小压缩宽度 720px 地板：窗口再窄布局不跟缩，body 出横向滚动条（逐字竖排从此绝迹）');
   const app27 = require('fs').readFileSync(path.join(__dirname, 'app.js'), 'utf8');
-  check(app27.includes("classList.toggle('side-flyout')")
+  check(app27.includes("classList.toggle('side-open')")
     && /matchMedia\('\(max-width:1199\.98px\)'\)\.matches/.test(app27)
-    && css2.includes('.app.side-flyout .sidebar{position:fixed')
-    && /\.app:not\(\.mini\):not\(\.side-flyout\)/.test(css2),
-    '折叠按钮双模：宽窗口 .mini 常驻折叠，紧凑窗口 side-flyout 浮层展开（点外部收起）——按钮在 W1 区间不再是死按钮');
+    && /\.app\.side-open\{grid-template-columns:var\(--side-w\) minmax\(0,1fr\)\}/.test(css2)
+    && /\.app:not\(\.mini\):not\(\.side-open\)/.test(css2),
+    '折叠按钮双模：宽窗口 .mini 常驻折叠，紧凑窗口 .side-open 让侧栏占回 240px 列、主区被推开——按钮在 W1 区间不再是死按钮');
+  /* 侧栏展开**不许**再用固定浮层盖在主区上（2026-10-04 用户实测的 bug）：
+     主区仍按全宽排版，浮层把顶栏搜索框左侧 226px、卡片左侧连同正文一起压在毛玻璃下面，
+     表现就是「页面没压缩 + 内容消失」。要的是把主区推开（grid 占列），不是盖住。 */
+  check(!/\.app\.side-open[^{]*\{[^}]*position:fixed/.test(css2)
+    && !css2.includes('side-flyout')
+    && !/side-open[^{]*\{[^}]*(width:240px)/.test(css2),
+    '侧栏展开是把主区推开（占 240px 网格列），不再是 position:fixed 的 240px 浮层覆盖主区（覆盖会把内容压在毛玻璃下）');
+  check(app27.includes("classList.remove('side-open')"),
+    '展开态的收起路径存在：窗口拉宽出 W1 时自动摘掉 .side-open（不会把展开态带回宽窗口）');
+  check(!/document\.addEventListener\('click'[\s\S]{0,400}classList\.remove\('side-open'\)/.test(app27),
+    '展开态不挂「点主区收起」：主区是被推窄的常驻布局（不是模态浮层），点内容不会让整页横移');
   /* 折叠态纵向对齐（2026-10-03 修）：折叠按钮曾比导航项左偏 4.5px —— 它宽 34px 且由
      .brand 的 justify-content:center 居中于**整条侧栏**（中心 38），而导航项 width:100%
      居中于**去掉 --side-pad 的内容区**（16~59，中心 37.5），两套基准不同。
      修法：折叠按钮也撑满内容区宽（width/flex 100%）再由 .brand-header 居中。 */
   check(/\.app\.mini \.side-mini\{width:100%;flex:0 0 100%\}/.test(css2)
     && /\.app\.mini \.brand-header\{[^}]*justify-content:center/.test(css2)
-    && /\.app:not\(\.mini\):not\(\.side-flyout\) \.side-mini\{width:100%;flex:0 0 100%\}/.test(css2),
+    && /\.app:not\(\.mini\):not\(\.side-open\) \.side-mini\{width:100%;flex:0 0 100%\}/.test(css2),
     '折叠态 1~6 号控件（折叠按钮 / 导航项 / 分割线 / 更新小圈）共用内容区同一基准，居中不再偏 4.5px');
   check(/\.app\.mini \.side-update\{align-self:center;margin:2px auto\}/.test(css2)
-    && /\.app:not\(\.mini\):not\(\.side-flyout\) \.side-update\{align-self:center;margin:2px auto\}/.test(css2),
+    && /\.app:not\(\.mini\):not\(\.side-open\) \.side-update\{align-self:center;margin:2px auto\}/.test(css2),
     '更新小圈在折叠态（手动 .mini 与 W1 自动折叠两条路径）都居中于内容区，不以整条侧栏为基准');
   check(/\.dashboard-kpis\{[^}]*repeat\(4,minmax\(72px,1fr\)\)/.test(css2)
     && /\.dashboard-kpis>div\{[^}]*min-height:0/.test(css2),
