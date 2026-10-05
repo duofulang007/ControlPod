@@ -2102,8 +2102,9 @@ public static class SelfTest
             var cs = File.ReadAllText(path);
 
             /* ---- 时长与帧率 ---- */
-            Check("过渡时长 340ms、帧间隔 15ms（≈60Hz）",
-                cs.Contains("AnimDurationMs = 340") && cs.Contains("AnimFrameMs = 15"));
+            Check("进入 280ms、退出 240ms，保留 15ms 帧间隔",
+                WindowChrome.AnimEnterDurationMs == 280 && WindowChrome.AnimExitDurationMs == 240
+                && WindowChrome.AnimFrameMs == 15);
             Check("帧间隔没有被调回 7ms（140Hz 会让 WebView2 渲不过来、把上一帧拉伸顶上）",
                 !System.Text.RegularExpressions.Regex.IsMatch(cs, @"AnimFrameMs\s*=\s*7\s*;"));
 
@@ -2155,9 +2156,22 @@ public static class SelfTest
                 && cs.Contains("SwpNozorder | SwpNoactivate | SwpAsyncwindowpos"));
 
             /* ---- 圆角：DWM 只有两档，靠近全屏时切 ---- */
-            Check("圆角按阈值切 DWM 档位（8px 圆角在接近全屏的窗口上看不出，切换不可察觉）",
+            Check("圆角按阈值切 DWM 档位",
                 cs.Contains("DwmcpDoNotRound") && cs.Contains("private void SetCornersRounded")
-                && cs.Contains("SetCornersRounded(entering ? e <= 0.85 : e < 0.15)"));
+                && cs.Contains("SetCornersRounded(ShouldRoundCorners(entering, e))"));
+            var cornerTransitions = 0;
+            var wasRounded = WindowChrome.ShouldRoundCorners(false, 0);
+            for (var i = 1; i <= 100; i++)
+            {
+                var rounded = WindowChrome.ShouldRoundCorners(false, i / 100.0);
+                if (rounded != wasRounded) cornerTransitions++;
+                wasRounded = rounded;
+            }
+            Check("退出圆角：从直角到圆角仅切一次，收尾保持圆角",
+                !WindowChrome.ShouldRoundCorners(false, 0) && wasRounded && cornerTransitions == 1);
+            Check("进入圆角：开始有圆角，接近屏幕时变直角",
+                WindowChrome.ShouldRoundCorners(true, 0) && WindowChrome.ShouldRoundCorners(true, 0.85)
+                && !WindowChrome.ShouldRoundCorners(true, 0.86) && !WindowChrome.ShouldRoundCorners(true, 1));
 
             /* ---- 尊重系统「减少动画」 ---- */
             Check("系统关掉动画时直接吸附（与页面 prefers-reduced-motion 口径一致）",
@@ -2167,11 +2181,22 @@ public static class SelfTest
             /* ---- 时序不对称：消掉「瞬间跳宽」的关键 ---- */
             var toggle = MethodBody(cs, "public void ToggleMaximize()");
             var enterEmit = toggle.IndexOf("EmitMaximized(true);", StringComparison.Ordinal);
-            var enterAnim = toggle.IndexOf("AnimateWindowTo(_restoreRect, outer, entering: true", StringComparison.Ordinal);
+            var enterAnim = toggle.IndexOf("AnimateWindowTo(start, outer, entering: true", StringComparison.Ordinal);
             Check("进入全屏：先回推 is-fullscreen 再起动画（限宽从头参与布局，不会先铺满再跳回限宽）",
                 enterEmit >= 0 && enterAnim > enterEmit);
             Check("退出全屏：is-fullscreen 压在动画收尾才摘（摘早了主内容会从 1440 瞬间弹到 1920）",
-                toggle.Contains("AnimateWindowTo(from, to, entering: false, () => EmitMaximized(false))"));
+                toggle.Contains("AnimateWindowTo(from, to, entering: false, () =>")
+                && toggle.IndexOf("EmitMaximized(false);", StringComparison.Ordinal)
+                   > toggle.IndexOf("AnimateWindowTo(from, to, entering: false", StringComparison.Ordinal));
+            var snapshot = MethodBody(toggle, "if (Volatile.Read(ref _animating) == 0)");
+            Check("反向切换从当前窗口开始，只有静止时保存还原尺寸与置顶偏好",
+                toggle.Contains("var start = CurrentOuterRect();")
+                && snapshot.Contains("_restoreRect = start;")
+                && snapshot.Contains("_topmostBefore = presenter.IsAlwaysOnTop;")
+                && toggle.Split("_restoreRect =").Length == 2);
+            Check("退出收尾才恢复置顶，避免任务栏提前出现",
+                toggle.IndexOf("presenter.IsAlwaysOnTop = _topmostBefore;", StringComparison.Ordinal)
+                   > toggle.IndexOf("AnimateWindowTo(from, to, entering: false", StringComparison.Ordinal));
 
             /* ---- 页面侧负向：禁止「钉住布局 / 整体 scale」那套回潮 ---- */
             var appJs = File.ReadAllText(Path.Combine(ConsoleConfig.ProjectDir, "app.js"));

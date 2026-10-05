@@ -126,9 +126,9 @@ internal sealed class WindowChrome
        · 不做弹簧 / 回弹 / overshoot，不做整体淡入淡出，不给内部控件加 transform 动画。
        · 起步干脆、中段连续、末端柔和减速、精确停住。 */
 
-    /// <summary>过渡时长（毫秒）。300–400 是舒适区；340 配 cubic-bezier(0.2,0,0,1)
-    /// 正好是「起步干脆、末端柔和减速」。</summary>
-    internal const int AnimDurationMs = 340;
+    /// <summary>进入保留展开感，退出更快收手；两态沿用同一条无回弹曲线。</summary>
+    internal const int AnimEnterDurationMs = 280;
+    internal const int AnimExitDurationMs = 240;
 
     /// <summary>帧间隔（毫秒），≈60Hz。**别调到 7ms**：2026-10-04 实测 140Hz 时 WebView2
     /// 渲不过来，会把上一帧拉伸到新尺寸顶上去（用户看到的「内容被拉大一下、还在晃」），
@@ -359,29 +359,34 @@ internal sealed class WindowChrome
         {
             _fullscreen = false;
             _fullscreenIntent = false;
-            presenter.IsAlwaysOnTop = _topmostBefore;
             var from = CurrentOuterRect();      // 实时读：中途连点也不会从过期的起点出发
             var to = _restoreRect;
             ShellLog.Log($"chrome: 退出全屏 {from.Width}x{from.Height} -> {to.Width}x{to.Height}@{to.X},{to.Y}"
-                         + (AnimationsDisabled() ? "（瞬时：系统已关动画）" : $"（{AnimDurationMs}ms）"));
-            AnimateWindowTo(from, to, entering: false, () => EmitMaximized(false));
+                         + (AnimationsDisabled() ? "（瞬时：系统已关动画）" : $"（{AnimExitDurationMs}ms）"));
+            AnimateWindowTo(from, to, entering: false, () =>
+            {
+                presenter.IsAlwaysOnTop = _topmostBefore; // 收缩结束再恢复，避免任务栏中途盖住窗口
+                EmitMaximized(false);
+            });
             return;
         }
 
-        var pos = _appWindow.Position;
-        var size = _appWindow.Size;
-        _restoreRect = new RectInt32(pos.X, pos.Y, size.Width, size.Height);
-        _topmostBefore = presenter.IsAlwaysOnTop;
+        var start = CurrentOuterRect();
+        if (Volatile.Read(ref _animating) == 0)
+        {
+            _restoreRect = start;
+            _topmostBefore = presenter.IsAlwaysOnTop;
+        } // 退出途中反向：保留最初的窗口化尺寸和置顶偏好，不保存中间帧
         var monitor = MonitorRect();
         _fullscreen = true;
         _fullscreenIntent = true;
         presenter.IsAlwaysOnTop = true;          // 不置顶的话任务栏会压在窗口底部
         var outer = FullscreenOuterRect(monitor);
         EmitMaximized(true);                     // 立刻回推：限宽规则从现在起就参与布局，全程连续
-        ShellLog.Log($"chrome: 进入全屏 {_restoreRect.Width}x{_restoreRect.Height}@{_restoreRect.X},{_restoreRect.Y}"
+        ShellLog.Log($"chrome: 进入全屏 {start.Width}x{start.Height}@{start.X},{start.Y}"
                      + $" -> {outer.Width}x{outer.Height}@{outer.X},{outer.Y}"
-                     + (AnimationsDisabled() ? "（瞬时：系统已关动画）" : $"（{AnimDurationMs}ms）"));
-        AnimateWindowTo(_restoreRect, outer, entering: true, null);
+                     + (AnimationsDisabled() ? "（瞬时：系统已关动画）" : $"（{AnimEnterDurationMs}ms）"));
+        AnimateWindowTo(start, outer, entering: true, null);
     }
 
     /* ---------- 过渡动画实现 ---------- */
@@ -405,6 +410,7 @@ internal sealed class WindowChrome
     {
         var gen = Interlocked.Increment(ref _animGeneration);
         Volatile.Write(ref _animating, 1);
+        var duration = entering ? AnimEnterDurationMs : AnimExitDurationMs;
 
         if (AnimationsDisabled())
         {
@@ -421,12 +427,12 @@ internal sealed class WindowChrome
                 while (true)
                 {
                     if (Volatile.Read(ref _animGeneration) != gen) return;    // 已被新一代接管
-                    var p = Math.Min(1.0, sw.Elapsed.TotalMilliseconds / AnimDurationMs);
+                    var p = Math.Min(1.0, sw.Elapsed.TotalMilliseconds / duration);
                     var e = EaseInOutEmphasized(p);
                     var r = LerpRect(from, to, e);
                     _ = SetWindowPos(_hwnd, IntPtr.Zero, r.X, r.Y, r.Width, r.Height,
                         SwpNozorder | SwpNoactivate | SwpAsyncwindowpos);
-                    SetCornersRounded(entering ? e <= 0.85 : e < 0.15);
+                    SetCornersRounded(ShouldRoundCorners(entering, e));
                     if (p >= 1.0) break;
                     Thread.Sleep(AnimFrameMs);
                 }
@@ -454,6 +460,10 @@ internal sealed class WindowChrome
             onDone?.Invoke();
         }
     }
+
+    // 退出先离开屏幕边缘，再恢复圆角；此后一直保持，不能在收尾再跳一次。
+    internal static bool ShouldRoundCorners(bool entering, double progress) =>
+        entering ? progress <= 0.85 : progress >= 0.15;
 
     /// <summary>cubic-bezier(0.2, 0, 0, 1)：起步干脆、中段连续、末端柔和减速
     /// （前一半时间走完约 88% 的距离，剩下的是长尾巴减速）。
