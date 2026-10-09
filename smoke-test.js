@@ -1954,10 +1954,28 @@ try {
     && /class="heat-tab on" data-act="heatMode" data-v="daily"/.test(home),
     '活跃度卡右上角提供 每日 / 每周 / 累计 三口径切换，默认选中「每日」');
   const heatTodayLabel = `${new Date().getMonth() + 1}月${new Date().getDate()}日`;
-  check(home.includes(`<span class="heat-tip-l1">${heatTodayLabel} · 在线16分钟</span>`)
+  check(home.includes(`<span class="heat-tip-l1">${heatTodayLabel} · 在线0.27小时</span>`)
     && home.includes('<span class="heat-add">+2100</span>')
     && home.includes('<span class="heat-del">-240</span>'),
-    '悬停气泡两行：第一行「日期 · 在线16分钟」，第二行「+2100 / -240」（+ 绿 / - 红）');
+    '悬停气泡两行：第一行「日期 · 在线0.27小时」，第二行「+2100 / -240」（+ 绿 / - 红）');
+  const savedHeatDays = T.S.heatDays.slice(), compactHeatDetail = T.S.heatDetail;
+  T.S.heatDays[heatTodayIdx] = 515;
+  T.S.heatDetail = { [heatKey]: { online: 515, adds: 10000, dels: 30902 } };
+  const compactHeat = T.viewHome();
+  check(compactHeat.includes(`aria-label="${heatTodayLabel} · 在线8.58小时 · +1万 / -3.09万"`)
+    && compactHeat.includes('<span class="heat-add">+1万</span>')
+    && compactHeat.includes('<span class="heat-del">-3.09万</span>'),
+    '活跃度气泡和无障碍文本统一用小时，代码量从一万起缩写为万，最多两位小数');
+  for (const [online, adds, dels, hours, addText, delText] of [
+    [0, 0, 9999, '0小时', '+0', '-9999'],
+    [1, 10001, 1000000, '0.02小时', '+1万', '-100万'],
+    [60, 12345, 2100, '1小时', '+1.23万', '-2100']
+  ]) {
+    const tip = T.heatTipHTML({ day: new Date() }, 0, 'daily', { online: [online], adds: [adds], dels: [dels] });
+    check(tip.includes(`在线${hours}</span>`) && tip.includes(`>${addText}</span>`) && tip.includes(`>${delText}</span>`),
+      `活跃度格式边界：${online}分钟 / +${adds} / -${dels}`);
+  }
+  T.S.heatDays = savedHeatDays; T.S.heatDetail = compactHeatDetail;
   const heatFuture = 6 - heatDow;   /* 末列里今天之后的格子数（今天一定落在最后一列）；
                                        今天=周日 ⇒ heatDow=6 ⇒ 0：今天就是末列最后一格，末列里没有未来格 */
   const futureCells = home.match(/class="heat-cell future"/g) || [];
@@ -1987,12 +2005,12 @@ try {
   const homeWeekly = T.viewHome();
   const heatWeekH4 = heatDow === 0 ? 7 : heatDow + 1;   /* 含 1000 分钟那一列里「已过去」的格子数（周一那天算在上一个整列） */
   check((homeWeekly.match(/heat-cell h4/g) || []).length === heatWeekH4
-    && /heat-tip-l1">\d+月\d+日–\d+月\d+日 · 在线\d+分钟</.test(homeWeekly),
+    && /heat-tip-l1">\d+月\d+日–\d+月\d+日 · 在线\d+(?:\.\d{1,2})?小时</.test(homeWeekly),
     '每周口径：整列 7 格统一显示所在周合计（1 格 = 1 周），气泡显示该周日期区间与周在线合计');
   T.S.heatMode = 'total';
   const homeTotal = T.viewHome();
   check((homeTotal.match(/heat-cell h4/g) || []).length === 2
-    && homeTotal.includes(`<span class="heat-tip-l1">截至${heatTodayLabel} · 累计在线1016分钟</span>`),
+    && homeTotal.includes(`<span class="heat-tip-l1">截至${heatTodayLabel} · 累计在线16.93小时</span>`),
     '累计口径：1 格 = 截至该日的累计（1000 → 1016 分钟滚动递增），气泡显示截至该日的累计在线与增删');
   T.S.heatMode = 'daily';
   check(!home.includes('heat-sum') && !home.includes('heat-delta') && !home.includes('heat-days') && !home.includes('近 12 周'),
@@ -3434,6 +3452,13 @@ try {
   check(T.projectUpdateChipHTML(project)==='', '更新完成后提醒消失');
   T.S.updates.external.projects[0].phase='failed';
   check(T.projectUpdateChipHTML(project)==='', '没有检测到变化时不显示维护入口或失败徽标');
+  T.S.updates.external.projects[0]={id:'Bili-Peek',phase:'checked',changes:['README.md','Bili-Peek.user.js'],updateAvailable:false};
+  check(T.projectUpdateChipHTML(project)==='', '已发布版本一致时，旧验证记录差异不冒充可用更新');
+  T.S.updates.external.projects[0]={id:'Bili-Peek',phase:'checked',changes:[],updateAvailable:true};
+  check(T.projectUpdateChipHTML(project).includes('有更新'), '已发布副本缺失时，即使验证记录一致也提示更新');
+  T.S.updates.external.projects[0]={id:'Bili-Peek',phase:'checked',changes:['tools/serve.py'],delivery:'source'};
+  check(T.projectUpdateChipHTML(project)==='', '直接运行源码的项目不会因验证记录过期显示更新');
+  T.S.updates.external.projects[0]={id:'Bili-Peek',phase:'failed',changes:[]};
   const select=ctx.document.querySelector;
   const created=ctx.document.createElement;
   const modal=el(), notices=[];

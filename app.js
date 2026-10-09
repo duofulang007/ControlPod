@@ -772,6 +772,8 @@ const HEAT_CARD_COLS = 13;       /* 卡片可视窗：末尾 13 周（一个季�
 const HEAT_CARD_CELLS = HEAT_CARD_COLS * 7;
 const heatDayKey = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 const heatDayLabel = d => `${d.getMonth() + 1}月${d.getDate()}日`;
+const heatHours = minutes => `${Number((minutes / 60).toFixed(2))}小时`;
+const heatLines = lines => lines >= 10000 ? `${Number((lines / 10000).toFixed(2))}万` : String(lines);
 function buildHeatPayload(rows){
   const counts = new Map();
   const detail = {};
@@ -858,7 +860,7 @@ function dashboardHeatmapHTML(counts){
   const cells = records.map((rec, i) => {
     /* 未来格：浅灰、不可交互、不生成气泡 —— 从结构上杜绝出现未来日期 */
     if (rec.day > today) return `<span class="heat-cell future" aria-hidden="true"></span>`;
-    const label = `${heatDayLabel(rec.day)} · 在线${series.online[i]}分钟 · +${series.adds[i]} / -${series.dels[i]}`;
+    const label = `${heatDayLabel(rec.day)} · 在线${heatHours(series.online[i])} · +${heatLines(series.adds[i])} / -${heatLines(series.dels[i])}`;
     const color = series.online[i] > 0 ? ` style="--heat-strength:${100 * series.online[i] / maxOnline}%"` : '';
     return `<span class="heat-cell h${heatLevel(series.online[i])}${i === todayIndex ? ' today' : ''}"${color} aria-label="${label}">${heatTipHTML(rec, i, mode, series)}</span>`;
   }).join('');
@@ -903,15 +905,15 @@ function heatTipHTML(rec, i, mode, series){
     const dayMs = 24 * 60 * 60 * 1000;
     const from = new Date(rec.day.getTime() - (i % 7) * dayMs);
     const to = new Date(from.getTime() + 6 * dayMs);
-    head = `${heatDayLabel(from)}–${heatDayLabel(to)} · 在线${series.online[i]}分钟`;
+    head = `${heatDayLabel(from)}–${heatDayLabel(to)} · 在线${heatHours(series.online[i])}`;
   } else if (mode === 'total'){
-    head = `截至${heatDayLabel(rec.day)} · 累计在线${series.online[i]}分钟`;
+    head = `截至${heatDayLabel(rec.day)} · 累计在线${heatHours(series.online[i])}`;
   } else {
-    head = `${heatDayLabel(rec.day)} · 在线${series.online[i]}分钟`;
+    head = `${heatDayLabel(rec.day)} · 在线${heatHours(series.online[i])}`;
   }
   return `<span class="heat-tip" role="tooltip"><span class="heat-tip-l1">${head}</span>`
-    + `<span class="heat-tip-l2"><span class="heat-add">+${series.adds[i]}</span>`
-    + `<span class="heat-tip-sep">/</span><span class="heat-del">-${series.dels[i]}</span></span></span>`;
+    + `<span class="heat-tip-l2"><span class="heat-add">+${heatLines(series.adds[i])}</span>`
+    + `<span class="heat-tip-sep">/</span><span class="heat-del">-${heatLines(series.dels[i])}</span></span></span>`;
 }
 function heatTabHTML(key){
   const on = (S.heatMode || 'daily') === key;
@@ -4086,7 +4088,9 @@ function updateResult(target){
   return u && u.external && Array.isArray(u.external.projects) ? u.external.projects.find(p=>p.id===target) : null;
 }
 function updateAvailable(result){
-  return !!(result && ['checked','tested','failed'].includes(result.phase) && result.changes && result.changes.length);
+  if(!result || !['checked','tested','failed'].includes(result.phase)) return false;
+  if(typeof result.updateAvailable === 'boolean') return result.updateAvailable;
+  return !!(result.delivery !== 'source' && result.changes && result.changes.length);
 }
 /* 更新进度：把后端 phase 换算成 0~100。
    **只在真正执行中才有进度** —— 这是修正过的一个错：早先把 checked/tested/pending 这些

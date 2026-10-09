@@ -55,6 +55,17 @@ function SourceHashes($root) {
     })
     return FileHashes $root $files
 }
+function UpdateAvailable($name,$root,$changes,$hashes) {
+    # 源码验证收据不是安装版本；直接运行源码的项目无需再次安装。
+    if($name -in @('apex-launcher','run-analytics')){return $false}
+    if($name -eq 'Bili-Peek'){
+        $runtimePath=Join-Path $root '.local/runtime.json'
+        if(!(Test-Path -LiteralPath $runtimePath)){return $true}
+        $runtime=Get-Content -LiteralPath $runtimePath -Raw -Encoding UTF8 | ConvertFrom-Json
+        return !$hashes['Bili-Peek.user.js'] -or $runtime.sha256 -ne $hashes['Bili-Peek.user.js']
+    }
+    return @($changes | Where-Object {$_ -notmatch '\.md$|^tests/'}).Count -gt 0
+}
 function Run($program,$arguments,$label='') {
     if(!$program -or !(Test-Path -LiteralPath $program -PathType Leaf)){throw "测试程序不存在：$program"}
     if(!$label){$label=$arguments -join ' '}
@@ -113,6 +124,13 @@ try {
     if($Mode -eq 'selftest'){
         $fixture=Join-Path $StateDir ('fixture-'+[guid]::NewGuid().ToString('N'))
         New-Item -ItemType Directory -Path $fixture | Out-Null
+        if(UpdateAvailable 'apex-launcher' $fixture @('app.py') @{}){throw '直接使用源码却提示更新'}
+        if(UpdateAvailable 'dou-link' $fixture @('README.md','tests/check.py') @{}){throw '文档测试变化却提示安装更新'}
+        if(!(UpdateAvailable 'dou-link' $fixture @('安装副本：publish') @{})){throw '安装副本变化未提示'}
+        New-Item -ItemType Directory "$fixture\.local" | Out-Null
+        [IO.File]::WriteAllText("$fixture\.local\runtime.json",'{"sha256":"abc"}')
+        if(UpdateAvailable 'Bili-Peek' $fixture @('README.md') @{'Bili-Peek.user.js'='ABC'}){throw '已发布源码仍提示更新'}
+        if(!(UpdateAvailable 'Bili-Peek' $fixture @() @{'Bili-Peek.user.js'='DEF'})){throw '发布版本落后未提示更新'}
         Set-Content "$fixture\a.txt" 'old'
         $before=FileHashes $fixture @('a.txt')
         if(!(Same $before (FileHashes $fixture @('a.txt')))){throw '未变化比较失败'}
@@ -172,6 +190,7 @@ try {
             $package=Get-Content -LiteralPath "$root\package.json" -Raw -Encoding UTF8 | ConvertFrom-Json
             $item.sourceVersion=[string]$package.version; $item.delivery='browser-install-required'
         }
+        $item.updateAvailable=UpdateAvailable $name $root $changes $hashes
         if($active){$item.message+='；存在运行实例，本次检查未确认实例版本'}
         if($name -eq 'Bili-Peek'){$item.message+='；浏览器脚本和 Obsidian 插件副本需分别安装'}
         $results+=$item
@@ -181,7 +200,7 @@ try {
     if($Mode -eq 'check'){exit 0}
     foreach($job in $jobs){
         $name=$job.name; $root=$job.root; $item=$job.item
-        if($Mode -eq 'update' -and !$item.changes.Count){
+        if($Mode -eq 'update' -and !$item.changes.Count -and !$item.updateAvailable){
             $item.phase='unchanged'; $item.message='未发现新的源码变化，本次没有替换文件；可单独运行检查与测试'
             if($name -eq 'Bili-Peek'){$item.phase='action-required'; $item.message='源码与已验证记录一致；浏览器脚本仍需在油猴中安装，CPod 无法据此确认浏览器已更新'}
             elseif($item.restartRequired){$item.phase='restart-required'; $item.message+='；运行实例版本未确认，需重启后生效'}
